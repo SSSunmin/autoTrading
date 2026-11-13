@@ -14,6 +14,7 @@ export function DecisionCard({ d }: { d: Decision }) {
       <div className="hd">
         <TickerCell ticker={d.ticker} name={d.name} />
         <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {d.source === 'rule' && <AgentChip variant="hot">{d.source_ko}</AgentChip>}
           <RatingBadge rating={d.rating} label={d.rating_ko} />
           {d.action && <AgentChip variant="neutral">{d.action === 'Buy' ? '매수' : d.action === 'Sell' ? '매도' : '관망'}</AgentChip>}
           <span className="muted">확신도 <b className="num">{d.confidence?.toFixed(2) ?? '–'}</b></span>

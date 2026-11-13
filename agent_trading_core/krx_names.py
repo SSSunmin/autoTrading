@@ -101,3 +101,8 @@ OPERATION_KO: dict[str, str] = {
 
 def korean_name(ticker: str) -> str | None:
     return NAMES_KO.get(ticker.upper())
+
+
+DECISION_SOURCE_KO: dict[str, str] = {"agent": "에이전트 결정", "rule": "규칙 청산"}
+
+HALTED_BY_KO: dict[str, str] = {"system": "시스템 자동 정지"}

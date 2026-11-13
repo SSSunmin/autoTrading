@@ -2,39 +2,54 @@
 
 The paper book is never stored. Cash, holdings and the equity curve are replayed from the orders log
 over the cached prices (``replay``), the way the trading state is replayed from the operations log.
-One run executes one decision date (docs/02 화면 3 실행 흐름):
+One run executes one trading day (docs/02 화면 3 실행 흐름):
 
-1. refuse unless the loop is running in paper mode; halted, auto or manual writes nothing
-2. fill the open orders whose next trading day now has a price
-3. each decision of the date becomes one order keyed ``paper-<date>-<ticker>``, so a second run writes
+1. refuse outside paper mode, and while halted unless the halt kept exits (``keep_exits``): then only exits run
+2. fill the open orders whose next trading day now has a price (only sells while halted)
+3. the day's loss past ``AUTO_EXECUTION.auto_daily_loss_limit`` halts the loop: a halt record by ``system``
+   (keep_exits true, once per day), open buys cancelled, then the day runs exits only
+4. rule exits at the day's close (``exit_signals``: stop-loss → trailing → expiry, then the −20% drawdown stop
+   for the rest): a ``source="rule"`` decision record is appended first, then its sell ``paper-<date>-<ticker>-exit``.
+   Every order has a decision behind it (``unexplained_orders``, ``PAPER_TRADING.max_unexplained_orders``).
+5. each agent decision of the date becomes one order keyed ``paper-<date>-<ticker>``, so a second run writes
    nothing: Buy/Overweight buy names not held, sized by ``risk.size_targets`` under the guards (drawdown,
    daily loss, regime, Protections); Sell/Underweight sell the whole holding; Hold places nothing; REVIEW
    is an exception. A buy over an ``AUTO_EXECUTION`` cap is an exception, not shrunk; sells reduce risk and are not capped.
-4. the order fills at the next trading day's open (slippage, commission, sell tax), or stays open when that
-   day has not happened yet. A halt cancels the open ones (``cancel_open_orders``).
+6. the order fills at the next trading day's open (slippage, commission, sell tax), or stays open when that
+   day has not happened yet. A halt cancels the open ones (``open_orders`` → ``cancel_orders``).
 
-Rules that close a position on their own (stop-loss, trailing, expiry, the −20% liquidation) are shown on the
-positions screen but place no order here: an order without a decision record is what the paper gate counts
-as unexplained (``PAPER_TRADING.max_unexplained_orders``).
-ponytail: no sector cap (sector lookup is a network call) and no −20% stop-out lock replay; both come with
-the rule-exit orders, once those have a decision record of their own.
+ponytail: no sector cap (sector lookup is a network call), and after a −20% stop-out the reference peak is not
+reset as simulate.run_simulation does after its lock. The stop sells everything, an all-cash book does not move,
+so new buys stay blocked (``dd_stop``) for good while the trading state still reads running. Upgrade: write a
+system halt (target="drawdown_stop") on that day and measure the peak from the last resume.
 """
 
 from __future__ import annotations
 
 import bisect
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from agent_trading_core.audit import AuditLog, DecisionRecord, OrderRecord, latest_orders, trading_state
+from agent_trading_core.audit import (
+    AuditLog,
+    DecisionRecord,
+    EvidenceItem,
+    OperationRecord,
+    OrderRecord,
+    latest_orders,
+    trading_state,
+)
 from agent_trading_core.config import AUTO_EXECUTION, KRX_MARKET
 from agent_trading_core.files import locked
+from agent_trading_core.krx_names import EXIT_REASON_KO
 from agent_trading_core.rating import RATING_REVIEW
 from agent_trading_core.risk import (
     EPS,
+    ExitSignal,
     Position,
     Protections,
     RiskConfig,
@@ -49,6 +64,7 @@ from agent_trading_core.symbols import safe_ticker_component
 
 BUY_RATINGS = ("Buy", "Overweight")
 SELL_RATINGS = ("Sell", "Underweight")
+EXIT_SUFFIX = "-exit"                        # order id of a rule exit: paper-<date>-<ticker>-exit
 
 
 @dataclass(frozen=True)
@@ -155,6 +171,7 @@ class ClosedTrade:
     quantity: int
     entry_price: float
     exit_price: float
+    reason: str = "exit_signal"              # risk.ExitReason: a rule exit's rule, else the agent's sell (등급 하향)
 
     @property
     def pnl(self) -> float:
@@ -196,7 +213,8 @@ def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: s
         if q == 0:
             return
         book.cash += q * px * (1 - cfg.commission - cfg.sell_tax)
-        book.closed.append(ClosedTrade(o.ticker, held.entry_date, o.fill_date, q, held.avg_price, px))
+        reason = o.rules_applied[0] if o.order_id.endswith(EXIT_SUFFIX) and o.rules_applied else "exit_signal"
+        book.closed.append(ClosedTrade(o.ticker, held.entry_date, o.fill_date, q, held.avg_price, px, reason))
         held.quantity -= q
         if held.quantity == 0:
             del book.holdings[o.ticker]
@@ -217,9 +235,46 @@ def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: s
 def _protections(closed: list[ClosedTrade], calendar: list[str], risk: RiskConfig) -> Protections:
     p = Protections(risk)
     for t in sorted(closed, key=lambda t: t.exit_date):
-        # every exit here follows a decision; rule exits (stop_loss …) would feed StoplossGuard with their reason
-        p.record(TradeOutcome(t.ticker, _day_index(calendar, t.exit_date), "exit_signal", t.pnl_pct))
+        p.record(TradeOutcome(t.ticker, _day_index(calendar, t.exit_date), t.reason, t.pnl_pct))
     return p
+
+
+def _marks(book: Book, cfg: PaperConfig, date: str) -> tuple[float, float, float | None, float | None]:
+    """Equity at ``date``'s close, its peak, the previous close's equity and the day's return (None off a trading day)."""
+    equity = book.equity[-1][1] if book.equity else book.cash
+    peak = max([cfg.initial_cash] + [e for _, e in book.equity])
+    if not book.equity or book.equity[-1][0] != date:
+        return equity, peak, None, None
+    prev = book.equity[-2][1] if len(book.equity) > 1 else cfg.initial_cash
+    return equity, peak, prev, equity / prev - 1
+
+
+def position_state(h: Holding, prices: Prices, calendar: list[str], as_of: str, risk: RiskConfig) -> dict:
+    """A holding as the hard rules see it at ``as_of``'s close, with ``check_exit``'s verdict. The trailing high is the
+    highest close before today's bar (from the fill day on, entry price included), as simulate.run_simulation keeps it.
+    With no bar on ``as_of`` (a suspended ticker) only expiry can fire: simulate compares a NaN close, so does this."""
+    closes = prices.frame(h.ticker)["Close"]
+    since = closes[(closes.index >= h.entry_date) & (closes.index <= as_of)].dropna()
+    last = float(since.iloc[-1]) if len(since) else None
+    entry_i, day = _day_index(calendar, h.entry_date), _day_index(calendar, as_of)
+    high = max([h.avg_price] + [float(c) for c in since[since.index < as_of]])
+    today = last if len(since) and since.index[-1] == as_of else float("nan")
+    signal = check_exit(Position(h.ticker, entry_i, h.avg_price, h.quantity, high_water=high), today, day, risk) \
+        if last is not None else None
+    return {"last": last, "last_date": since.index[-1] if len(since) else None, "high": high, "entry_i": entry_i,
+            "day": day, "active": high / h.avg_price - 1 >= risk.trailing_activate_pct - EPS, "signal": signal}
+
+
+def exit_signals(book: Book, prices: Prices, calendar: list[str], as_of: str, risk: RiskConfig,
+                 equity: float, peak: float) -> dict[str, ExitSignal]:
+    """Which holdings the rules close at ``as_of``'s close: each position's own exit first (so a stop is recorded as a
+    stop), then the −20% drawdown stop for the rest — the order simulate.run_simulation applies them."""
+    out = {t: s for t, h in book.holdings.items() if (s := position_state(h, prices, calendar, as_of, risk)["signal"])}
+    scale, why = drawdown_scale(equity, peak, risk)
+    if scale == 0.0:
+        for t in book.holdings:
+            out.setdefault(t, ExitSignal(t, "force", why))
+    return out
 
 
 # --- placing and filling ----------------------------------------------------------------------------
@@ -237,17 +292,62 @@ def _rule_ids(texts: list[str]) -> list[str]:
     return ids
 
 
+def _unsettled(o: OrderRecord, date: str) -> bool:
+    """An order the book as of ``date`` does not show yet: open, or filled at a session after ``date`` (a decision
+    dated on a holiday shares its next session with the trading day before it)."""
+    return o.status == "open" or (o.status in ("filled", "partial") and (o.fill_date or "") > date)
+
+
+def _rule_exits(audit: AuditLog, date: str, book: Book, current: dict[str, OrderRecord], signals: dict[str, ExitSignal],
+                existing: dict[str, DecisionRecord]) -> list[OrderRecord]:
+    """A sell for each exit signal not already being sold. Its ``source="rule"`` decision is appended here, before the
+    caller appends the order, so a crash in between leaves a decision without an order (redone next run), never the
+    reverse. ``existing``: the day's rule decisions already recorded, by ticker."""
+    pending_sells = {o.ticker for o in current.values() if o.side == "Sell" and _unsettled(o, date)}
+    out = []
+    for t, sig in signals.items():
+        order_id = f"paper-{date}-{t}{EXIT_SUFFIX}"
+        if order_id in current or t in pending_sells:
+            continue
+        label = EXIT_REASON_KO.get(sig.reason, sig.reason)
+        held = book.holdings[t]
+        if t not in existing:
+            book_note = f"{sig.note} · 보유 {held.quantity:,}주 · 평균 체결가 {held.avg_price:,.0f}원 · 진입 {held.entry_date}"
+            audit.record_decision(DecisionRecord(
+                ticker=t, trade_date=date, rating="Sell", action="Sell", source="rule", thesis=sig.note,
+                evidence=[EvidenceItem(source="portfolio", summary=book_note, as_of=date, ref=sig.reason)],
+                settings={"decider": "rule_exit", "exit_reason": sig.reason}))
+        out.append(OrderRecord(order_id=order_id, ticker=t, trade_date=date, side="Sell", quantity=held.quantity,
+                               status="open", rules_applied=[sig.reason],
+                               reason=f"규칙 청산({label}): {sig.note} · 보유 {held.quantity}주 전량 · 다음 거래일 시가"))
+    return out
+
+
+def _auto_halt(audit: AuditLog, date: str, equity: float, prev: float | None, day_ret: float | None) -> bool:
+    """The day's loss past ``auto_daily_loss_limit`` halts the loop (docs/02 화면 7): a halt by ``system`` that keeps
+    exits running, then the open buys cancelled. Once per day: a day already halted for, then resumed, is not halted again."""
+    limit = AUTO_EXECUTION["auto_daily_loss_limit"]
+    if day_ret is None or day_ret > limit + EPS:
+        return False
+    ops = audit.operations()
+    if any(op.kind == "halt" and op.target == "daily_loss" and op.after.get("date") == date for op in ops):
+        return False
+    buys = open_orders(audit, keep_sells=True)
+    audit.record_operation(OperationRecord(
+        kind="halt", operator="system", role="auto", reason=f"일일 손실 한도 초과: {day_ret:+.2%} (한도 {limit:+.0%})",
+        target="daily_loss", before={"running": True, "equity_prev": prev},
+        after={"running": False, "keep_exits": True, "date": date, "day_return": day_ret, "equity": equity,
+               "open_orders_cancelled": [o.order_id for o in buys]}))
+    cancel_orders(audit, buys, f"일일 손실 자동 정지 ({date} {day_ret:+.2%})")
+    return True
+
+
 def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderRecord], prices: Prices,
            risk: RiskConfig, cfg: PaperConfig, calendar: list[str]) -> list[OrderRecord]:
     """One order per decision not ordered yet, open or already refused, sized from the book as of ``date``'s close.
     ``decisions`` is the whole day, so a rerun after a crash sizes the rest against the same denominator."""
     book = replay(list(current.values()), prices, cfg, until=date)
-    equity = book.equity[-1][1] if book.equity else book.cash
-    peak = max([cfg.initial_cash] + [e for _, e in book.equity])
-    day_ret = None
-    if book.equity and book.equity[-1][0] == date:
-        prev = book.equity[-2][1] if len(book.equity) > 1 else cfg.initial_cash
-        day_ret = equity / prev - 1
+    equity, peak, _, day_ret = _marks(book, cfg, date)
 
     # guards on new buys, all decided from data up to ``date``
     locks: dict[str, str] = {}                                              # rule id → text
@@ -269,12 +369,8 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
     # at scale 0 every buy is already locked above; size at full scale so the text names only the caps
     weights, overrides = size_targets(buys, risk, scale=scale if scale > 0 else 1.0)
     shared = [o for o in overrides if not o.startswith("max_position_pct")]
-    # orders the book as of ``date`` does not show yet: open, or filled at a session after ``date`` (a decision dated
-    # on a holiday shares its next session with the trading day before it)
-    def unsettled(o: OrderRecord) -> bool:
-        return o.status == "open" or (o.status in ("filled", "partial") and (o.fill_date or "") > date)
-    pending_buys = {o.ticker for o in current.values() if o.side == "Buy" and unsettled(o)}
-    pending_sells = {o.ticker for o in current.values() if o.side == "Sell" and unsettled(o)}
+    pending_buys = {o.ticker for o in current.values() if o.side == "Buy" and _unsettled(o, date)}
+    pending_sells = {o.ticker for o in current.values() if o.side == "Sell" and _unsettled(o, date)}
     # the daily cap counts every buy filling at the same session, whatever its decision date
     session = next_session(calendar, date)
     day_amount = 0.0
@@ -401,24 +497,29 @@ def _filled(o: OrderRecord, q: int, px: float, day: str, px_open: float, cfg: Pa
                                 "filled_price": round(px, 4), "fill_date": day, "reason": f"{o.reason} → {note}"})
 
 
-def _require_paper_running(audit: AuditLog) -> None:
+def _exits_only(audit: AuditLog) -> bool:
+    """False when the loop runs; True when halted with exits kept (only exits run). Refuses otherwise."""
     state = trading_state(audit.operations(), default_mode=AUTO_EXECUTION["default_mode"])
-    if not state["running"]:
-        raise ExecutionRefused(f"정지 중이라 주문하지 않습니다 ({state['halted_at']}, {state['halted_by']}: {state['halt_reason']})")
     if state["mode"] != "paper":
         raise ExecutionRefused(f"운용 모드가 {state['mode']}입니다. 이 실행기는 모의투자(paper) 모드에서만 주문합니다"
                                " (실거래 주문 경로 없음, 수동 승인은 승인 API로)")
+    if not state["running"] and not state["keep_exits"]:
+        raise ExecutionRefused(f"정지 중(청산도 중단)이라 주문하지 않습니다 "
+                               f"({state['halted_at']}, {state['halted_by']}: {state['halt_reason']})")
+    return not state["running"]
 
 
 def execute_date(audit: AuditLog, date: str, prices: Prices, *, risk: RiskConfig | None = None,
                  cfg: PaperConfig | None = None) -> list[OrderRecord]:
-    """Run the paper loop for one decision date. Returns the lines appended; a second run of the same date
-    appends only fills of orders that were still open."""
+    """Run the paper loop for one trading day. Returns the order lines appended; a second run of the same day
+    appends only fills of orders that were still open. Rule-exit decisions and an automatic halt are appended
+    to their own logs before any order line."""
     check_date(date)
     risk, cfg = risk or RiskConfig(), cfg or PaperConfig()
     with execution_lock(audit.directory):
-        _require_paper_running(audit)
+        exits_only = _exits_only(audit)
         current = latest_orders(audit.orders())          # a broken line raises here, before anything is appended
+        decisions = [d for d in audit.decisions() if d.trade_date == date]
         later = sorted({o.trade_date for o in current.values() if o.trade_date > date})
         if later:
             raise ExecutionRefused(f"{date}보다 늦은 결정일({later[-1]})의 주문이 이미 있습니다. 결정일 순서대로 실행합니다")
@@ -428,19 +529,45 @@ def execute_date(audit: AuditLog, date: str, prices: Prices, *, risk: RiskConfig
         if calendar[-1] < date:
             # sizing, guards and the daily cap would read a book that stops short of the decision day
             raise ExecutionRefused(f"가격 데이터가 {calendar[-1]}까지라 {date} 결정을 실행하지 않습니다 (캐시 갱신 필요)")
-        written = _fill([o for o in current.values() if o.status == "open"], current, prices, cfg, calendar)
-        latest_decision: dict[str, DecisionRecord] = {}
-        for d in audit.decisions():
-            if d.trade_date == date:
-                latest_decision[d.ticker] = d                # a re-recorded decision replaces the earlier one
-        placed = _place(list(latest_decision.values()), date, current, prices, risk, cfg, calendar)
-        for o in placed:
-            current[o.order_id] = o
-        filled = {o.order_id: o for o in _fill([o for o in placed if o.status == "open"], current, prices, cfg, calendar)}
-        written += [filled.get(o.order_id, o) for o in placed]
+        written = _fill([o for o in current.values() if o.status == "open" and (o.side == "Sell" or not exits_only)],
+                        current, prices, cfg, calendar)
         for o in written:
             audit.record_order(o)
-        return written
+
+        book = replay(list(current.values()), prices, cfg, until=date)
+        equity, peak, prev, day_ret = _marks(book, cfg, date)
+        if not exits_only and _auto_halt(audit, date, equity, prev, day_ret):
+            exits_only = True
+            current = latest_orders(audit.orders())      # the open buys it cancelled
+
+        rule_done = {d.ticker: d for d in decisions if d.source == "rule"}
+        # exits are judged at a trading day's close; a holiday-dated run only places that day's agent decisions
+        signals = exit_signals(book, prices, calendar, date, risk, equity, peak) if date in calendar else {}
+        placed = _rule_exits(audit, date, book, current, signals, rule_done)
+        for o in placed:
+            current[o.order_id] = o
+        if not exits_only:
+            latest_decision: dict[str, DecisionRecord] = {}
+            for d in decisions:
+                if d.source == "agent":
+                    latest_decision[d.ticker] = d            # a re-recorded decision replaces the earlier one
+            agent = _place(list(latest_decision.values()), date, current, prices, risk, cfg, calendar)
+            for o in agent:
+                current[o.order_id] = o
+            placed += agent
+        filled = {o.order_id: o for o in _fill([o for o in placed if o.status == "open"], current, prices, cfg, calendar)}
+        placed = [filled.get(o.order_id, o) for o in placed]
+        for o in placed:
+            audit.record_order(o)
+        return written + placed
+
+
+def unexplained_orders(orders: list[OrderRecord], decisions: list[DecisionRecord]) -> list[OrderRecord]:
+    """Orders with no decision record behind them (``PAPER_TRADING.max_unexplained_orders``): a rule exit needs a
+    ``source="rule"`` decision of its ticker and day, any other order an agent decision."""
+    keys = {(d.source, d.ticker, d.trade_date) for d in decisions}
+    return [o for o in latest_orders(orders).values()
+            if ("rule" if o.order_id.endswith(EXIT_SUFFIX) else "agent", o.ticker, o.trade_date) not in keys]
 
 
 def open_orders(audit: AuditLog, *, keep_sells: bool = False) -> list[OrderRecord]:
@@ -462,7 +589,8 @@ def cancel_orders(audit: AuditLog, orders: list[OrderRecord], reason: str) -> li
 def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | None = None,
                    risk: RiskConfig | None = None, cfg: PaperConfig | None = None) -> dict:
     """Holdings with their stop line, trailing high and expiry, the book's equity and drawdown, the guards'
-    state, as of ``as_of`` (default: the last trading day in the data). Rule verdicts are shown, not acted on."""
+    state, as of ``as_of`` (default: the last trading day in the data). ``exit_signal`` is the same verdict the
+    executor turns into a rule-exit order at that day's close (``exit_signals``)."""
     risk, cfg = risk or RiskConfig(), cfg or PaperConfig()
     calendar = prices.calendar(cfg.index)
     as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else datetime.now().strftime("%Y-%m-%d"))
@@ -470,34 +598,28 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
     day = _day_index(calendar, as_of)
     rows = []
     for h in sorted(book.holdings.values(), key=lambda h: h.entry_date):
-        closes = prices.frame(h.ticker)["Close"]
-        since = closes[(closes.index >= h.entry_date) & (closes.index <= as_of)].dropna()
-        last = float(since.iloc[-1]) if len(since) else None
-        entry_i = _day_index(calendar, h.entry_date)
-        # the trailing high is the highest close before today's bar, as check_exit measures it
-        high = max([h.avg_price] + [float(c) for c in since.iloc[:-1]])
-        pos = Position(h.ticker, entry_i, h.avg_price, h.quantity, high_water=high)
-        active = high / h.avg_price - 1 >= risk.trailing_activate_pct - EPS
-        signal = check_exit(pos, last, day, risk) if last is not None else None
-        expiry_i = entry_i + risk.max_holding_days
+        st = position_state(h, prices, calendar, as_of, risk)
+        last, high, expiry_i = st["last"], st["high"], st["entry_i"] + risk.max_holding_days
         rows.append({
             "ticker": h.ticker, "quantity": h.quantity, "avg_price": h.avg_price, "entry_date": h.entry_date,
-            "last_price": last, "last_date": since.index[-1] if len(since) else None,
+            "last_price": last, "last_date": st["last_date"],
             "market_value": h.quantity * last if last is not None else None,
             "unrealized": (last - h.avg_price) * h.quantity if last is not None else None,
             "unrealized_pct": last / h.avg_price - 1 if last is not None else None,
             "stop_price": h.avg_price * (1 + risk.stop_loss_pct),
-            "trailing_active": active, "trailing_high": high,
-            "trailing_stop_price": high * (1 - risk.trailing_pct) if active else None,
-            "holding_days": day - entry_i,
+            "trailing_active": st["active"], "trailing_high": high,
+            "trailing_stop_price": high * (1 - risk.trailing_pct) if st["active"] else None,
+            "holding_days": day - st["entry_i"],
             "expiry_date": calendar[expiry_i] if 0 <= expiry_i < len(calendar) else None,
-            "exit_signal": {"reason": signal.reason, "note": signal.note} if signal else None,
         })
     value = sum(r["market_value"] or 0.0 for r in rows)
     equity = book.cash + value
     peak = max([cfg.initial_cash, equity] + [e for _, e in book.equity])
+    signals = exit_signals(book, prices, calendar, as_of, risk, equity, peak)
     for r in rows:
         r["weight"] = (r["market_value"] or 0.0) / equity if equity > 0 else None
+        sig = signals.get(r["ticker"])
+        r["exit_signal"] = {"reason": sig.reason, "note": sig.note} if sig else None
     scale, why = drawdown_scale(equity, peak, risk)
     protections = _protections(book.closed, calendar, risk)
 
@@ -525,13 +647,15 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         "unrealized_pnl": sum(r["unrealized"] or 0.0 for r in rows),
         "regime_on": regime_on(index_closes[index_closes.index <= as_of], risk) if cfg.regime_filter else None,
         "positions": rows, "protections": guards,
-        "exits_by_reason": {"exit_signal": len(book.closed)} if book.closed else {},
+        "exits_by_reason": dict(Counter(t.reason for t in book.closed)),
         "closed": [{"ticker": t.ticker, "entry_date": t.entry_date, "exit_date": t.exit_date, "quantity": t.quantity,
-                    "entry_price": t.entry_price, "exit_price": t.exit_price, "pnl": t.pnl, "pnl_pct": t.pnl_pct}
+                    "entry_price": t.entry_price, "exit_price": t.exit_price, "pnl": t.pnl, "pnl_pct": t.pnl_pct,
+                    "reason": t.reason}
                    for t in reversed(book.closed)],
         "limits": {"stop_loss_pct": risk.stop_loss_pct, "dd_halve": risk.dd_halve, "dd_stop": risk.dd_stop,
                    "max_position_pct": risk.max_position_pct, "max_gross_pct": risk.max_gross_pct,
                    "daily_loss_limit": risk.daily_loss_limit, "auto_daily_order_cap": AUTO_EXECUTION["auto_daily_order_cap"]},
         "note": "모의투자 장부: orders.jsonl 체결 기록을 캐시 종가로 재생한 값. 실현 손익은 체결가 기준(수수료·세금 제외), "
-                "평가 금액·드로다운은 수수료·세금 포함. 손절·트레일링·만료는 판정만 표시하고 주문하지 않습니다.",
+                "평가 금액·드로다운은 수수료·세금 포함. 룰 판정(손절·트레일링·만료·DD 정지)은 실행기가 그날 종가로 "
+                "규칙 청산 결정을 기록하고 다음 거래일 시가에 매도합니다.",
     }

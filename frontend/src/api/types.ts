@@ -97,6 +97,9 @@ export interface Decision {
   hard_rule_overrides: string[]
   settings: Record<string, unknown>
   tradeable: boolean
+  /** agent: the manager's call; rule: a hard-rule exit (stop-loss, trailing, expiry, drawdown stop) the executor recorded */
+  source: 'agent' | 'rule'
+  source_ko: string
   outcome: Outcome | null
   orders: Order[]
 }
@@ -119,6 +122,8 @@ export interface TradingState {
   running: boolean
   halted_at: string | null
   halted_by: string | null
+  /** "시스템 자동 정지" for the executor's daily-loss halt, else the operator's name */
+  halted_by_ko: string | null
   halt_reason: string | null
   keep_exits: boolean
   mode_changed_at: string | null
@@ -368,7 +373,7 @@ export interface Positions {
   protections: ProtectionState[]
   exits_by_reason: Record<string, number>
   exits_by_reason_ko: Record<string, number>
-  closed: ClosedTrade[]
+  closed: (ClosedTrade & { reason: string })[]
   limits: { stop_loss_pct: number; dd_halve: number; dd_stop: number; max_position_pct: number; max_gross_pct: number;
             daily_loss_limit: number; auto_daily_order_cap: number }
   note: string

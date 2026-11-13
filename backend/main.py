@@ -41,6 +41,7 @@ from agent_trading_core.audit import (
 )
 from agent_trading_core.config import AUTO_EXECUTION, KRX_MARKET, PAPER_TRADING
 from agent_trading_core.execution import (
+    EXIT_SUFFIX,
     Prices,
     cancel_orders,
     check_date,
@@ -50,8 +51,10 @@ from agent_trading_core.execution import (
 )
 from agent_trading_core.krx_names import (
     AUTO_RULE_KO,
+    DECISION_SOURCE_KO,
     EXCEPTION_KIND_KO,
     EXIT_REASON_KO,
+    HALTED_BY_KO,
     MODE_KO,
     OPERATION_KO,
     ORDER_STATUS_KO,
@@ -185,8 +188,13 @@ def _decision_out(d: DecisionRecord, memory_by_key: dict, orders_by_key: dict) -
     out["name"] = _name(d.ticker, STORE.screens)
     out["rating_ko"] = RATING_KO.get(d.rating, d.rating)
     out["tradeable"] = d.tradeable
-    out["outcome"] = _outcome(memory_by_key.get((d.ticker, d.trade_date)))
-    out["orders"] = [_order_out(o) for o in orders_by_key.get((d.ticker, d.trade_date), [])]
+    out["source_ko"] = DECISION_SOURCE_KO.get(d.source, d.source)
+    # the memory log scores the agent's call; a rule exit on the same ticker and day is not that call
+    out["outcome"] = _outcome(memory_by_key.get((d.ticker, d.trade_date))) if d.source == "agent" else None
+    # an agent decision and a rule exit can share (ticker, day): each card shows its own order
+    rule = d.source == "rule"
+    out["orders"] = [_order_out(o) for o in orders_by_key.get((d.ticker, d.trade_date), [])
+                     if o.order_id.endswith(EXIT_SUFFIX) == rule]
     return out
 
 
@@ -207,9 +215,11 @@ def _orders_by_key() -> dict:
 def _state_out(st: dict | None = None) -> dict:
     st = st or STORE.state()
     mode_ko = MODE_KO.get(st["mode"], st["mode"])
-    label = f"정지됨 · {st['halted_at'][:16].replace('T', ' ')} UTC" if not st["running"] else (
+    by_ko = HALTED_BY_KO.get(st["halted_by"], st["halted_by"]) if st["halted_by"] else None
+    label = f"정지됨 · {st['halted_at'][:16].replace('T', ' ')} UTC · {by_ko}" if not st["running"] else (
         "자동 매매 실행 중" if st["mode"] == "auto" else f"{mode_ko} 모드")
-    return st | {"mode_ko": mode_ko, "label_ko": label, "admin_token_required": ADMIN_TOKEN is not None}
+    return st | {"mode_ko": mode_ko, "label_ko": label, "halted_by_ko": by_ko,
+                 "admin_token_required": ADMIN_TOKEN is not None}
 
 
 def _exception_kind(o: OrderRecord) -> str:
@@ -270,7 +280,9 @@ def _require_admin(token: str | None) -> str:
 def health() -> dict:
     STORE.refresh()
     return {"ok": True, "core_version": core_version, "data_dir": str(DATA_DIR), "screens": len(STORE.screens),
-            "decisions": len(STORE.decisions), "orders": len(STORE.orders), "memory_entries": len(STORE.memory),
+            "decisions": len(STORE.decisions),
+            "decisions_by_source": {s: sum(d.source == s for d in STORE.decisions) for s in ("agent", "rule")},
+            "orders": len(STORE.orders), "memory_entries": len(STORE.memory),
             "memory_log": str(STORE.memory_log_path() or ""), "server_time": datetime.now(UTC).isoformat()}
 
 
@@ -280,7 +292,7 @@ def labels() -> dict:
     return {"ratings": list(RATINGS_5_TIER) + [RATING_REVIEW], "rating_ko": RATING_KO, "rule_ko": RULE_KO,
             "rule_desc_ko": RULE_DESC_KO, "sell_reason_ko": SELL_REASON_KO, "mode_ko": MODE_KO,
             "order_status_ko": ORDER_STATUS_KO, "exception_kind_ko": EXCEPTION_KIND_KO, "exit_reason_ko": EXIT_REASON_KO,
-            "risk_rule_ko": RISK_RULE_KO,
+            "risk_rule_ko": RISK_RULE_KO, "decision_source_ko": DECISION_SOURCE_KO,
             "color_convention": {"up": "red", "down": "blue", "note": "KRX 관례: 빨강=상승·매수, 파랑=하락·매도"}}
 
 
@@ -321,9 +333,12 @@ def decision_dates() -> list[str]:
 
 @app.get("/api/decisions", tags=["decisions"])
 def list_decisions(date: str | None = None, rating: str | None = None, review_only: bool = False,
-                   ticker: str | None = None, overrides_only: bool = False) -> list[dict]:
+                   ticker: str | None = None, overrides_only: bool = False,
+                   source: Literal["agent", "rule"] | None = None) -> list[dict]:
     STORE.refresh()
     rows = STORE.decisions
+    if source:
+        rows = [d for d in rows if d.source == source]
     if date:
         rows = [d for d in rows if d.trade_date == date]
     if rating:

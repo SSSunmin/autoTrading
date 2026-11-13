@@ -46,7 +46,7 @@ export default function Decisions() {
       <div className="section">
         {tab === 'all' && (
           <Loaded state={all} empty="이 날짜의 결정이 없습니다">
-            {() => <div className="cards">{rows.map((d) => <DecisionCard key={d.ticker + d.trade_date} d={d} />)}</div>}
+            {() => <div className="cards">{rows.map((d) => <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} />)}</div>}
           </Loaded>
         )}
 
@@ -90,7 +90,7 @@ export default function Decisions() {
             {() => overrides.length === 0 ? (
               <AgentEmptyState title="하드룰 개입이 없습니다" description="하드 룰 레이어가 아직 연결되지 않았습니다. 연결되면 원안(에이전트)과 최종(룰 적용 후)이 나란히 표시됩니다." />
             ) : (
-              <div className="cards">{overrides.map((d) => <DecisionCard key={d.ticker + d.trade_date} d={d} />)}</div>
+              <div className="cards">{overrides.map((d) => <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} />)}</div>
             )}
           </Loaded>
         )}
