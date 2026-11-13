@@ -5,9 +5,7 @@ Inputs live in data/external/ (sources and dates in data/external/SOURCES.md); o
 - sp500_history.csv     start = the Wikipedia constituents table as of revision 1192789360 (2023-12-31, the
                         last edit before 2024-01-02), changes = the "Historical components of the S&P 500"
                         changes table, effective dates after that revision up to --end.
-- kospi200_history.csv  start = the KRX [11006] constituent download dated on or before --start, changes = the
-                        difference between consecutive downloads, dated on the later download's date (so a
-                        change between two snapshots is applied late, never early). Skipped when no file.
+- kospi200_history.csv  written by scripts/ingest_krx_constituents.py from the KRX [11006] downloads.
 
 Rows: date, ticker (Yahoo form), action (start | add | remove), name. Standard library HTML parsing only.
 
@@ -32,8 +30,6 @@ SP500_START_HTML = EXT / "sp500_wikipedia_oldid1192789360_2023-12-31.html"
 SP500_START_REV_DATE = date(2023, 12, 31)
 SP500_CHANGES_HTML = EXT / "sp500_historical_components_2026-11-13.html"
 SP500_NOW_HTML = EXT / "sp500_wikipedia_2026-11-13.html"
-# KRX [11006] 지수구성종목 CSV saved by hand, one per snapshot date: krx_11006_kospi200_YYYYMMDD.csv
-KRX_SNAPSHOT_GLOB = "krx_11006_kospi200_*.csv"
 
 # Ticker renames inside the window that the changes table does not record (same company, new symbol): found by
 # replaying start + changes and matching security names against the 2026-11-08 constituents table. Yahoo keeps a
@@ -161,41 +157,6 @@ def build_sp500(start: date, end: date) -> tuple[list[dict], dict]:
     return rows, stats
 
 
-def _read_krx_csv(path: Path) -> list[dict]:
-    raw = path.read_bytes()
-    for enc in ("utf-8-sig", "cp949"):
-        try:
-            text = raw.decode(enc)
-            break
-        except UnicodeDecodeError:
-            continue
-    return list(csv.DictReader(text.splitlines()))
-
-
-def build_kospi200(start: date, end: date) -> tuple[list[dict], dict] | None:
-    files = sorted(EXT.glob(KRX_SNAPSHOT_GLOB))
-    if not files:
-        return None
-    snaps = []
-    for f in files:
-        d = datetime.strptime(f.stem.rsplit("_", 1)[1], "%Y%m%d").date()
-        recs = _read_krx_csv(f)
-        snaps.append((d, {f"{r['종목코드'].strip().zfill(6)}.KS": r["종목명"].strip() for r in recs}))
-    first = [s for s in snaps if s[0] <= start]
-    if not first:
-        raise SystemExit(f"KRX 스냅샷 중 {start} 이전 것이 없다: {[s[0] for s in snaps]}")
-    base_date, base = first[-1]
-    rows = [{"date": start.isoformat(), "ticker": t, "action": "start", "name": n} for t, n in sorted(base.items())]
-    prev = base
-    for d, cur in (s for s in snaps if base_date < s[0] <= end):
-        rows += [{"date": d.isoformat(), "ticker": t, "action": "remove", "name": prev[t]} for t in sorted(set(prev) - set(cur))]
-        rows += [{"date": d.isoformat(), "ticker": t, "action": "add", "name": cur[t]} for t in sorted(set(cur) - set(prev))]
-        prev = cur
-    stats = {"snapshots": [s[0].isoformat() for s in snaps], "start_snapshot": base_date.isoformat(),
-             "start_members": len(base), "unique_tickers": len({r["ticker"] for r in rows})}
-    return rows, stats
-
-
 def write(rows: list[dict], path: Path) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -218,14 +179,6 @@ def main() -> int:
     for a in stats["anomalies"]:
         print(f"  anomaly: {a}")
 
-    krx = build_kospi200(start, end)
-    if krx is None:
-        print(f"kospi200: 파일 없음 (data/external/{KRX_SNAPSHOT_GLOB}) — 건너뜀")
-    else:
-        rows, stats = krx
-        write(rows, OUT / "kospi200_history.csv")
-        print(f"kospi200: snapshots {len(stats['snapshots'])} (start {stats['start_snapshot']}), "
-              f"start {stats['start_members']}, unique {stats['unique_tickers']}")
     return 0
 
 

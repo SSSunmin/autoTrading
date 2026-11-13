@@ -118,6 +118,7 @@ HALT_TARGET_KO: dict[str, str] = {"manual": "운영자 긴급 정지", "daily_lo
 # a delisted company is not in the current list and falls back to its ticker at the call site.
 _KIND_SUFFIX = {"유가": ".KS", "코스닥": ".KQ", "코넥스": ".KN"}
 _listed: dict[str, str] | None = None
+_history_names: dict[str, str] | None = None
 
 EXIT_REASON_KO["delisted"] = "상장폐지 청산"
 
@@ -142,12 +143,30 @@ def load_listed_names(path=None) -> dict[str, str]:
     return out
 
 
+def load_history_names(path=None) -> dict[str, str]:
+    """``{"003410.KS": "쌍용C&E", ...}``: the KRX [11006] 종목명 in data/universe/kospi200_history.csv
+    (scripts/ingest_krx_constituents.py; the latest row per ticker wins). It covers the delisted members the KIND
+    list lacks. ``{}`` when there is none."""
+    import csv
+    from pathlib import Path
+
+    path = Path(path) if path else Path(__file__).resolve().parents[1] / "data" / "universe" / "kospi200_history.csv"
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as f:
+        return {r["ticker"].upper(): r["name"] for r in csv.DictReader(f) if r["name"]}
+
+
 def display_name(ticker: str) -> str | None:
-    """``NAMES_KO`` first, then the KIND list (loaded once)."""
-    global _listed
+    """``NAMES_KO`` first, then the KIND list, then the KOSPI200 snapshot names (each loaded once)."""
+    global _listed, _history_names
     name = korean_name(ticker)
     if name:
         return name
     if _listed is None:
         _listed = load_listed_names()
-    return _listed.get(ticker.upper())
+    if ticker.upper() in _listed:
+        return _listed[ticker.upper()]
+    if _history_names is None:
+        _history_names = load_history_names()
+    return _history_names.get(ticker.upper())
