@@ -135,6 +135,11 @@ export interface TradingState {
   admin_token_required: boolean
   market: Market
   market_ko: string
+  /** what the standing halt is: a person's, the daily loss (lifted by the executor next session), the −20% stop */
+  halt_target: 'manual' | 'daily_loss' | 'dd_stop' | null
+  halt_target_ko: string | null
+  /** a −20% stop stands (perhaps under a person's halt): the admin resume offers the peak reset */
+  dd_stop: boolean
 }
 
 export interface HaltEffects { new_orders: string; open_orders_cancelled: number | null; positions: string; exits_active: boolean; note: string }
@@ -154,6 +159,8 @@ export interface ResumeResult {
   resumed: Market[]
   skipped: { market: Market; reason: string }[]
   states: Partial<Record<Market, TradingState>>
+  /** markets whose drawdown peak the resume reset: to the equity at the close ``at``, from the peak ``before`` */
+  peak_resets: Partial<Record<Market, { to: number; at: string; before: number }>>
 }
 
 export interface TickerRow {
@@ -424,6 +431,8 @@ export interface ClosedTrade {
 }
 
 export interface Positions {
+  /** the last peak reset in effect (an admin resume after a −20% stop), null before any */
+  peak_reset: { at: string; to: number } | null
   market: Market
   currency: 'KRW' | 'USD'
   as_of: string

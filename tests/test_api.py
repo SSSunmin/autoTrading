@@ -155,7 +155,7 @@ def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client
     assert client.get("/api/trading/mode").json() == {
         "mode": "paper", "mode_ko": "모의투자", "running": True, "halted_at": None, "halted_by": None, "halted_by_ko": None, "halt_reason": None,
         "keep_exits": True, "mode_changed_at": None, "label_ko": "국내 모의투자 모드", "admin_token_required": False,
-        "market": "KRX", "market_ko": "국내"}
+        "market": "KRX", "market_ko": "국내", "halt_target": None, "halt_target_ko": None, "dd_stop": False}
 
     r = client.post("/api/trading/halt", json={"operator": "운영자A", "reason": "벤더 지연", "keep_exits": False, "scope": "KRX"})
     assert r.status_code == 200
@@ -353,7 +353,8 @@ def test_a_rule_exit_is_served_as_its_own_decision_with_its_own_order(tmp_path, 
 
     st = c.get("/api/trading/mode").json()
     assert st["running"] is False and st["halted_by"] == "system" and st["halted_by_ko"] == "시스템 자동 정지"
-    assert st["label_ko"].endswith("· 시스템 자동 정지") and "일일 손실 한도 초과" in st["halt_reason"]
+    assert st["label_ko"].endswith("· 시스템 · 일일 손실 정지") and "일일 손실 한도 초과" in st["halt_reason"]
+    assert st["halt_target"] == "daily_loss" and st["dd_stop"] is False
     assert c.get("/api/labels").json()["decision_source_ko"]["rule"] == "규칙 청산"
     # the agent's own calls can be read without the rule exits, and the health count says which is which
     assert [d["source"] for d in c.get("/api/decisions", params={"source": "agent", "rating": "Sell"}).json()] == ["agent"]

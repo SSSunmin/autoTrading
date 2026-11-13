@@ -358,7 +358,7 @@ def test_cooldown_blocks_buying_back_a_name_just_sold(audit):
 
 
 @pytest.mark.unit
-def test_a_drawdown_past_the_stop_blocks_new_buys(audit):
+def test_a_drawdown_past_the_stop_sells_everything_and_halts_the_loop_by_system(audit):
     # the whole book in one name that halves: equity -50% <= -20%
     risk, cfg = RiskConfig(regime_ma_days=3, max_position_pct=1.0), PaperConfig(initial_cash=2.5e7)
     a = _frame({"2026-06-01": (10_000, 10_000), "2026-06-02": (10_000, 10_000), "2026-06-04": (10_000, 5_000),
@@ -368,8 +368,11 @@ def test_a_drawdown_past_the_stop_blocks_new_buys(audit):
     execute_date(audit, "2026-06-01", prices, risk=risk, cfg=cfg)
     _decide(audit, "B.KS", "2026-06-05")
     by = {o.ticker: o for o in execute_date(audit, "2026-06-05", prices, risk=risk, cfg=cfg)}
-    assert by["B.KS"].status == "blocked" and "dd_stop" in by["B.KS"].rules_applied and "MaxDrawdown" in by["B.KS"].reason
     assert by["A.KS"].rules_applied == ["stop_loss"]                         # its own stop comes before the DD stop
+    assert "B.KS" not in by                                                  # halted: no new buy is even placed
+    (halt,) = [op for op in audit.operations() if op.kind == "halt"]
+    assert (halt.operator, halt.role, halt.target, halt.after["keep_exits"]) == ("system", "auto", "dd_stop", True)
+    assert trading_state(audit.operations())["halt_target"] == "dd_stop"
 
 
 @pytest.mark.unit

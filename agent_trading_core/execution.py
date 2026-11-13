@@ -4,12 +4,17 @@ The paper book is never stored. Cash, holdings and the equity curve are replayed
 over the cached prices (``replay``), the way the trading state is replayed from the operations log.
 One run executes one trading day (docs/02 화면 3 실행 흐름):
 
-1. refuse outside paper mode, and while halted unless the halt kept exits (``keep_exits``): then only exits run
+1. a daily-loss halt of an earlier trading day ends at that session: the next trading day's run appends a resume
+   by ``system`` first (``_auto_resume``). A person's halt and the −20% stop are never lifted here (admin only).
+   Then refuse outside paper mode, and while halted unless the halt kept exits (``keep_exits``): then only exits run
 2. fill the open orders whose next trading day now has a price (only sells while halted)
 3. the day's loss past ``AUTO_EXECUTION.auto_daily_loss_limit`` halts the loop: a halt record by ``system``
-   (keep_exits true, once per day, this market only), open buys cancelled, then the day runs exits only
+   (target daily_loss, keep_exits true, once per day, this market only), open buys cancelled, then the day runs
+   exits only
 4. rule exits at the day's close (``exit_signals``: stop-loss → trailing → expiry, then the −20% drawdown stop
    for the rest): a ``source="rule"`` decision record is appended first, then its sell ``paper-<date>-<ticker>-exit``.
+   On the −20% stop the loop then halts by ``system`` (target dd_stop, keep_exits true) until an admin resumes;
+   that resume may reset the reference peak (``after.peak_reset_to`` / ``peak_reset_at``, ``peak_base``).
    Every order has a decision behind it (``unexplained_orders``, ``PAPER_TRADING.max_unexplained_orders``).
 5. each agent decision of the date becomes one order keyed ``paper-<date>-<ticker>``, so a second run writes
    nothing: Buy/Overweight buy names not held, sized by ``risk.size_targets`` under the guards (drawdown,
@@ -21,10 +26,12 @@ One run executes one trading day (docs/02 화면 3 실행 흐름):
 Markets are separate books (docs/08 §0): one ``AuditLog`` per market (``audit.market_audit``), its own index
 calendar, currency, sell costs and caps (``paper_config``). Amounts in reasons are in the market's currency.
 
-ponytail: no sector cap (sector lookup is a network call), and after a −20% stop-out the reference peak is not
-reset as simulate.run_simulation does after its lock. The stop sells everything, an all-cash book does not move,
-so new buys stay blocked (``dd_stop``) for good while the trading state still reads running. Upgrade: write a
-system halt (target="drawdown_stop") on that day and measure the peak from the last resume.
+The drawdown peak is the highest close-of-day equity since the last peak reset (the initial cash before any):
+the −10% halving, the −20% stop and the sizing scale all read that one peak (``_peak``).
+
+ponytail: no sector cap (sector lookup is a network call). After a −20% stop simulate.run_simulation waits
+``dd_stop_lock_days`` on its own, resets the peak, and buys at half weight until it is back near the old peak; here
+the reset waits for an admin resume (no fixed lock, no half-weight phase). Upgrade: the same recovery phase here.
 """
 
 from __future__ import annotations
@@ -261,10 +268,30 @@ def _protections(closed: list[ClosedTrade], calendar: list[str], risk: RiskConfi
     return p
 
 
-def _marks(book: Book, cfg: PaperConfig, date: str) -> tuple[float, float, float | None, float | None]:
-    """Equity at ``date``'s close, its peak, the previous close's equity and the day's return (None off a trading day)."""
+def peak_base(operations: list[OperationRecord], date: str) -> tuple[str, float] | None:
+    """The last peak reset in effect at ``date``: (the close it was taken at, the equity it set), from an admin
+    resume after a −20% stop. None: no reset yet, the peak counts from the initial cash."""
+    base = None
+    for op in operations:
+        at, to = op.after.get("peak_reset_at"), op.after.get("peak_reset_to")
+        if op.kind == "resume" and at and to is not None and at <= date:
+            base = (at, float(to))
+    return base
+
+
+def _peak(book: Book, cfg: PaperConfig, base: tuple[str, float] | None, *also: float) -> float:
+    """Highest close-of-day equity since the reset (its own value included), or since the start (initial cash)."""
+    if base is None:
+        return max([cfg.initial_cash, *also] + [e for _, e in book.equity])
+    return max([base[1], *also] + [e for d, e in book.equity if d > base[0]])
+
+
+def _marks(book: Book, cfg: PaperConfig, date: str,
+           base: tuple[str, float] | None = None) -> tuple[float, float, float | None, float | None]:
+    """Equity at ``date``'s close, its peak (since ``base``), the previous close's equity and the day's return
+    (None off a trading day)."""
     equity = book.equity[-1][1] if book.equity else book.cash
-    peak = max([cfg.initial_cash] + [e for _, e in book.equity])
+    peak = _peak(book, cfg, base)
     if not book.equity or book.equity[-1][0] != date:
         return equity, peak, None, None
     prev = book.equity[-2][1] if len(book.equity) > 1 else cfg.initial_cash
@@ -367,12 +394,72 @@ def _auto_halt(audit: AuditLog, date: str, equity: float, prev: float | None, da
     return True
 
 
+def standing_halts(operations: list[OperationRecord]) -> list[OperationRecord]:
+    """The halts since the last resume, oldest first; empty while running. A person may halt over a system halt
+    (tightening keep_exits): the earlier halt still stands under it."""
+    out: list[OperationRecord] = []
+    for op in operations:
+        if op.kind == "halt":
+            out.append(op)
+        elif op.kind == "resume":
+            out = []
+    return out
+
+
+def dd_stop_standing(operations: list[OperationRecord]) -> bool:
+    """A −20% stop is among the standing halts: only an admin resume ends it, and that resume may reset the peak."""
+    return any(op.target == "dd_stop" for op in standing_halts(operations))
+
+
+def _auto_resume(audit: AuditLog, date: str, calendar: list[str], cfg: PaperConfig) -> bool:
+    """A daily-loss halt lasts its session: the first run on a later trading day appends a resume by ``system``
+    (once — the loop is running after it). Only a halt by ``system`` for ``daily_loss`` qualifies: a person's halt
+    and the −20% stop (``dd_stop``) wait for an admin. This market's log only."""
+    halts = standing_halts(audit.operations())
+    # every standing halt must be a daily-loss one: a person halting on top of it, or a −20% stop, keeps it halted
+    if not halts or date not in calendar or any(h.operator != "system" or h.target != "daily_loss" for h in halts):
+        return False
+    halt = halts[-1]
+    halted_on = halt.after.get("date")
+    if not halted_on or halted_on >= date:
+        return False
+    audit.record_operation(OperationRecord(
+        kind="resume", operator="system", role="auto", reason=f"일일 손실 정지 자동 해제(정지일 {halted_on})",
+        target="daily_loss", market=cfg.market, scope=cfg.market, before={"running": False},
+        after={"running": True, "date": date, "halted_on": halted_on}))
+    return True
+
+
+def _dd_halt(audit: AuditLog, date: str, equity: float, peak: float, cfg: PaperConfig) -> bool:
+    """The −20% stop halts the loop by ``system`` (target dd_stop, keep_exits true: the stop's own sells still fill),
+    open buys cancelled. Not written again while that halt stands; an admin resume ends it (``peak_reset_to``)."""
+    ops = audit.operations()
+    if dd_stop_standing(ops):
+        return False
+    # once a day, like the daily-loss halt: a resume without the reset, then a rerun of the stop's own day
+    if any(op.kind == "halt" and op.target == "dd_stop" and op.after.get("date") == date for op in ops):
+        return False
+    # a rerun of a day before an admin's peak reset: that stop was already dealt with, not a new one
+    if any(op.kind == "resume" and (op.after.get("peak_reset_at") or "") >= date for op in ops):
+        return False
+    running = not standing_halts(ops)
+    buys = open_orders(audit, keep_sells=True)
+    audit.record_operation(OperationRecord(
+        kind="halt", operator="system", role="auto", target="dd_stop", market=cfg.market, scope=cfg.market,
+        reason=f"드로다운 정지: 피크 대비 {equity / peak - 1:+.1%} — 전량 청산, 관리자 재가동 필요",
+        before={"running": running}, after={"running": False, "keep_exits": True, "date": date, "equity": equity,
+                                                 "peak": peak, "open_orders_cancelled": [o.order_id for o in buys]}))
+    cancel_orders(audit, buys, f"드로다운 정지 ({date} {equity / peak - 1:+.1%})")
+    return True
+
+
 def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderRecord], prices: Prices,
-           risk: RiskConfig, cfg: PaperConfig, calendar: list[str]) -> list[OrderRecord]:
+           risk: RiskConfig, cfg: PaperConfig, calendar: list[str],
+           base: tuple[str, float] | None = None) -> list[OrderRecord]:
     """One order per decision not ordered yet, open or already refused, sized from the book as of ``date``'s close.
     ``decisions`` is the whole day, so a rerun after a crash sizes the rest against the same denominator."""
     book = replay(list(current.values()), prices, cfg, until=date)
-    equity, peak, _, day_ret = _marks(book, cfg, date)
+    equity, peak, _, day_ret = _marks(book, cfg, date, base)
 
     # guards on new buys, all decided from data up to ``date``
     locks: dict[str, str] = {}                                              # rule id → text
@@ -551,13 +638,16 @@ def execute_date(audit: AuditLog, date: str, prices: Prices, *, risk: RiskConfig
     if audit.market is not None and audit.market != cfg.market:
         raise ValueError(f"{audit.market} 기록에 {cfg.market} 설정으로 실행할 수 없습니다")
     with execution_lock(audit.directory):
-        exits_only = _exits_only(audit)
         current = latest_orders(audit.orders())          # a broken line raises here, before anything is appended
         decisions = [d for d in audit.decisions() if d.trade_date == date]
         later = sorted({o.trade_date for o in current.values() if o.trade_date > date})
         if later:
             raise ExecutionRefused(f"{date}보다 늦은 결정일({later[-1]})의 주문이 이미 있습니다. 결정일 순서대로 실행합니다")
         calendar = prices.calendar(cfg.index)
+        _exits_only(audit)                               # a refused run (mode not paper) appends nothing, the lift included
+        if calendar and calendar[-1] >= date:
+            _auto_resume(audit, date, calendar, cfg)     # a daily-loss halt of an earlier session ends here
+        exits_only = _exits_only(audit)
         if not calendar:
             raise ExecutionRefused(f"거래일 달력({cfg.index} 가격)이 없습니다")
         if calendar[-1] < date:
@@ -568,8 +658,9 @@ def execute_date(audit: AuditLog, date: str, prices: Prices, *, risk: RiskConfig
         for o in written:
             audit.record_order(o)
 
+        base = peak_base(audit.operations(), date)
         book = replay(list(current.values()), prices, cfg, until=date)
-        equity, peak, prev, day_ret = _marks(book, cfg, date)
+        equity, peak, prev, day_ret = _marks(book, cfg, date, base)
         if not exits_only and _auto_halt(audit, date, equity, prev, day_ret, cfg):
             exits_only = True
             current = latest_orders(audit.orders())      # the open buys it cancelled
@@ -580,12 +671,18 @@ def execute_date(audit: AuditLog, date: str, prices: Prices, *, risk: RiskConfig
         placed = _rule_exits(audit, date, book, current, signals, rule_done, cfg)
         for o in placed:
             current[o.order_id] = o
+        # the −20% stop: its sells are placed above, then the loop halts until an admin resumes
+        if date in calendar and drawdown_scale(equity, peak, risk)[0] == 0.0 and _dd_halt(audit, date, equity, peak, cfg):
+            exits_only = True
+            for o in latest_orders(audit.orders()).values():
+                if o.status == "cancelled":
+                    current[o.order_id] = o              # the open buys it cancelled
         if not exits_only:
             latest_decision: dict[str, DecisionRecord] = {}
             for d in decisions:
                 if d.source == "agent":
                     latest_decision[d.ticker] = d            # a re-recorded decision replaces the earlier one
-            agent = _place(list(latest_decision.values()), date, current, prices, risk, cfg, calendar)
+            agent = _place(list(latest_decision.values()), date, current, prices, risk, cfg, calendar, base)
             for o in agent:
                 current[o.order_id] = o
             placed += agent
@@ -621,10 +718,12 @@ def cancel_orders(audit: AuditLog, orders: list[OrderRecord], reason: str) -> li
 # --- the positions screen (docs/02 화면 5) -----------------------------------------------------------
 
 def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | None = None,
-                   risk: RiskConfig | None = None, cfg: PaperConfig | None = None) -> dict:
+                   risk: RiskConfig | None = None, cfg: PaperConfig | None = None,
+                   operations: list[OperationRecord] | None = None) -> dict:
     """Holdings with their stop line, trailing high and expiry, the book's equity and drawdown, the guards'
     state, as of ``as_of`` (default: the last trading day in the data). ``exit_signal`` is the same verdict the
-    executor turns into a rule-exit order at that day's close (``exit_signals``)."""
+    executor turns into a rule-exit order at that day's close (``exit_signals``). ``operations``: the market's
+    operations log, for the peak reset (``peak_base``); without it the peak counts from the start."""
     risk, cfg = risk or RiskConfig(), cfg or PaperConfig()
     calendar = prices.calendar(cfg.index)
     as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else datetime.now().strftime("%Y-%m-%d"))
@@ -648,7 +747,8 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         })
     value = sum(r["market_value"] or 0.0 for r in rows)
     equity = book.cash + value
-    peak = max([cfg.initial_cash, equity] + [e for _, e in book.equity])
+    base = peak_base(operations or [], as_of)
+    peak = _peak(book, cfg, base, equity)
     signals = exit_signals(book, prices, calendar, as_of, risk, equity, peak)
     for r in rows:
         r["weight"] = (r["market_value"] or 0.0) / equity if equity > 0 else None
@@ -677,7 +777,8 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         "market": cfg.market, "currency": MARKETS[cfg.market]["currency"],
         "as_of": as_of, "initial_cash": cfg.initial_cash, "cash": book.cash, "holdings_value": value, "equity": equity,
         "peak": peak, "drawdown": equity / peak - 1 if peak > 0 else 0.0,
-        "day_return": _marks(book, cfg, as_of)[3],         # vs the previous close; None off a trading day or before a fill
+        "peak_reset": {"at": base[0], "to": base[1]} if base else None,
+        "day_return": _marks(book, cfg, as_of, base)[3],         # vs the previous close; None off a trading day or before a fill
         "gross_exposure": value / equity if equity > 0 else 0.0,
         "realized_pnl": sum(t.pnl for t in book.closed), "realized_today": sum(t.pnl for t in closed_today),
         "unrealized_pnl": sum(r["unrealized"] or 0.0 for r in rows),

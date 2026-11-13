@@ -168,7 +168,9 @@ class OperationRecord(BaseModel):
     operator: str
     role: str = Field(description="Authority used: operator / admin / admin(dev, no token) / auto (the executor's own halt)")
     reason: str
-    target: str = Field(default="", description="What changed, e.g. 'mode', 'sector_quota.sector_max'")
+    target: str = Field(default="", description="What changed, e.g. 'mode', 'sector_quota.sector_max'. A halt: "
+                                                "'manual' (a person; 'running' before halt-semantics), 'daily_loss' or "
+                                                "'dd_stop' (the executor's own, by system)")
     before: dict = Field(default_factory=dict)
     after: dict = Field(default_factory=dict)
     market: str = Field(default="KRX", description="The market whose loop this operated on")
@@ -176,19 +178,25 @@ class OperationRecord(BaseModel):
                                                          "market's log (same at, same reason), else the market")
 
 
+# what a halt stops for: a person (records before halt-semantics wrote target="running"), or the executor itself
+HALT_TARGETS = ("manual", "daily_loss", "dd_stop")
+
+
 def trading_state(operations: list[OperationRecord], default_mode: str = "paper") -> dict:
     """Replay the operations log into the live trading state the status bar shows.
 
-    ``mode``: auto | manual | paper. ``running`` is False after a halt until a resume.
+    ``mode``: auto | manual | paper. ``running`` is False after a halt until a resume. ``halt_target``: what the
+    standing halt is (``HALT_TARGETS``), None while running.
     """
     state: dict = {"mode": default_mode, "running": True, "halted_at": None, "halted_by": None,
-                   "halt_reason": None, "keep_exits": True, "mode_changed_at": None}
+                   "halt_reason": None, "keep_exits": True, "mode_changed_at": None, "halt_target": None}
     for op in operations:
         if op.kind == "halt":
             state.update(running=False, halted_at=op.at, halted_by=op.operator, halt_reason=op.reason,
-                         keep_exits=bool(op.after.get("keep_exits", True)))
+                         keep_exits=bool(op.after.get("keep_exits", True)),
+                         halt_target=op.target if op.target in HALT_TARGETS else "manual")
         elif op.kind == "resume":
-            state.update(running=True, halted_at=None, halted_by=None, halt_reason=None)
+            state.update(running=True, halted_at=None, halted_by=None, halt_reason=None, halt_target=None)
         elif op.kind == "mode_change" and "mode" in op.after:
             state.update(mode=op.after["mode"], mode_changed_at=op.at)
     return state
