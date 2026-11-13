@@ -35,10 +35,11 @@ sys.path.insert(0, str(ROOT))
 
 from agent_trading_core.config import MARKETS
 from agent_trading_core.errors import NoMarketDataError
-from agent_trading_core.identity import resolve_instrument_identity
-from agent_trading_core.kis import KisClient, load_kis_ohlcv
+from agent_trading_core.kis import KisClient
+from agent_trading_core.kis import load_ohlcv as load_kis_ohlcv
 from agent_trading_core.krx_names import display_name, korean_name
 from agent_trading_core.risk import RiskConfig
+from agent_trading_core.screening import sector_lookup
 from agent_trading_core.simulate import SimConfig, run_simulation, window_metrics
 from agent_trading_core.universe import load_history, members_on, tickers
 from agent_trading_core.yahoo import load_ohlcv
@@ -152,11 +153,7 @@ def load_frame(ticker: str, end: str, cache_dir: str) -> tuple[pd.DataFrame, boo
 
 @cache
 def sector_of(ticker: str) -> str | None:
-    try:
-        return resolve_instrument_identity(ticker).get("sector")
-    except Exception as exc:  # identity is fail-open; the quota rule then treats the name as unsectored
-        logger.warning("%s: sector lookup failed: %s", ticker, exc)
-        return None
+    return sector_lookup(ticker)     # data/universe/sectors.csv first, the Yahoo profile only for an unlisted name
 
 
 def main() -> int:

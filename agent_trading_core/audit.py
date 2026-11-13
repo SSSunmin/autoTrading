@@ -102,10 +102,11 @@ class DecisionRecord(BaseModel):
         description="Deterministic rules that changed or blocked the agent's call, e.g. 'max_position_pct'",
     )
     settings: dict = Field(default_factory=dict, description="Model/provider/debate depth that produced it")
-    source: Literal["agent", "rule"] = Field(
+    source: Literal["agent", "rule", "baseline"] = Field(
         default="agent",
-        description="agent: the manager's (or the baseline's) call; rule: a hard-rule exit the executor recorded "
-                    "before its sell order (stop-loss, trailing, expiry, drawdown stop)",
+        description="agent: the manager's call; rule: a hard-rule exit the executor recorded before its sell order "
+                    "(stop-loss, trailing, expiry, drawdown stop); baseline: the rule-only momentum baseline. "
+                    "Baseline records so far are stored as agent — read them through decision_source",
     )
     market: str = Field(default="KRX", description="config.MARKETS key of the book this belongs to; lines written "
                                                     "before the market axis have none and are KRX")
@@ -113,6 +114,17 @@ class DecisionRecord(BaseModel):
     @property
     def tradeable(self) -> bool:
         return self.rating in RATINGS_5_TIER and self.rating != RATING_REVIEW
+
+
+BASELINE_DECIDER = "rule_momentum_baseline"     # settings["decider"] of scripts/baseline_krx.py
+
+
+def decision_source(d: DecisionRecord) -> str:
+    """agent · rule · baseline. A decision whose ``settings.decider`` is the rule baseline is baseline whatever was
+    stored: the baseline's records (data/audit/, audit/KRX/, audit/US/) were written as agent and are not moved."""
+    if d.settings.get("decider") == BASELINE_DECIDER:
+        return "baseline"
+    return d.source
 
 
 class OrderRecord(BaseModel):

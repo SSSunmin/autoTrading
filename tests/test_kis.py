@@ -1,11 +1,11 @@
 """KIS loader (agent_trading_core/kis.py) with a fake HTTP session: token cache and re-issue, call spacing and the
 throttle retry, 100-row windows, response → frame, settings errors that name variables but never values, the
-KIS cache file, and the comparison helpers in scripts/kis_check.py. No network."""
+KIS cache file and its incremental update, and the comparison helpers in scripts/kis_check.py. No network."""
 
 import importlib.util
 import json
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 
@@ -20,6 +20,9 @@ from agent_trading_core.errors import NoMarketDataError, VendorNotConfiguredErro
 _spec = importlib.util.spec_from_file_location("kis_check", Path(__file__).resolve().parents[1] / "scripts" / "kis_check.py")
 kc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(kc)
+_rspec = importlib.util.spec_from_file_location("refresh_cache", Path(__file__).resolve().parents[1] / "scripts" / "refresh_cache.py")
+rc = importlib.util.module_from_spec(_rspec)
+_rspec.loader.exec_module(rc)
 
 KEY, SECRET = "PSfakeappkey0000000000000000000000000", "fakesecret" * 18
 CREDS = {"appkey": KEY, "appsecret": SECRET, "env": "paper"}
@@ -260,24 +263,180 @@ def test_settings_name_the_missing_variable_and_refuse_a_live_environment(tmp_pa
     assert os.environ["KIS_ACCOUNT_NO"] == "12345678"
 
 
+def _bars(dates, closes):
+    return pd.DataFrame({"Date": pd.to_datetime(dates), "Open": [c - 1 for c in closes], "High": closes,
+                         "Low": closes, "Close": [float(c) for c in closes], "Volume": 5})
+
+
+class Bars:
+    """A client whose ``stock_daily`` answers from a queue of frames (or exceptions) and records each request."""
+
+    def __init__(self, *answers):
+        self.answers, self.asked, self.stats = list(answers), [], {"calls": 0}
+
+    def stock_daily(self, symbol, start, end):
+        self.asked.append((start, end))
+        a = self.answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+
+NEXT_DAY = datetime(2026, 8, 5, 9, 0, tzinfo=kis.KST)          # 08-04 has passed in Seoul → its bar is final
+
+
 @pytest.mark.unit
 def test_kis_cache_sits_beside_the_yahoo_file_and_cuts_at_the_as_of_date(tmp_path):
     yahoo = tmp_path / "005930.KS-YFin-data.csv"
     yahoo.write_text("Date,Open,High,Low,Close,Volume\n2026-07-31 00:00:00+09:00,1,1,1,1,1\n", encoding="utf-8")
     before = yahoo.read_bytes()
-
-    class Stub:
-        def stock_daily(self, symbol, start, end):
-            return pd.DataFrame({"Date": pd.to_datetime(["2026-07-30", "2026-07-31", "2026-08-03"]),
-                                 "Open": 1.0, "High": 1.0, "Low": 1.0, "Close": [10.0, 11.0, 12.0], "Volume": 5})
-
-    df = kis.load_kis_ohlcv("005930.KS", "2026-07-31", str(tmp_path), Stub())
+    df = kis.load_ohlcv("005930.KS", "2026-07-31", str(tmp_path),
+                        Bars(_bars(["2026-07-30", "2026-07-31", "2026-08-03"], [10, 11, 12])))
     assert (tmp_path / "005930.KS-KIS-data.csv").exists() and yahoo.read_bytes() == before
     assert df["Close"].tolist() == [10.0, 11.0] and str(df["Date"].dtype).startswith("datetime64")
-    # written today → read from the file, no client needed
-    assert kis.load_kis_ohlcv("005930.KS", "2026-08-03", str(tmp_path))["Close"].iloc[-1] == 12.0
-    with pytest.raises(ValueError, match="국내"):
-        kis.load_kis_ohlcv("AAPL", "2026-08-03", str(tmp_path / "x"), Stub())
+    # the last row reaches the as-of date → read from the file, no client, however old the file is
+    os.utime(tmp_path / "005930.KS-KIS-data.csv", (0, 0))
+    assert kis.load_ohlcv("005930.KS", "2026-08-03", str(tmp_path), Bars())["Close"].iloc[-1] == 12.0
+    with pytest.raises(ValueError, match="모르는 심볼"):
+        kis.fetch(Bars(), "^DJI", date(2026, 8, 1), date(2026, 8, 3), tmp_path)
+
+
+@pytest.mark.unit
+def test_a_bar_is_final_once_its_day_has_passed_in_the_markets_time_zone():
+    # KIS still moves today's KRX bar at 19:19 (after-market trades), so even after the close today is not final
+    assert kis.last_final_day("KRX", datetime(2026, 8, 4, 19, 30, tzinfo=kis.KST)) == date(2026, 8, 3)
+    assert kis.last_final_day("KRX", datetime(2026, 8, 5, 0, 0, tzinfo=kis.KST)) == date(2026, 8, 4)
+    # 2026-11-14 13:59 KST = 23:59 New York on the 13th; 14:00 KST = midnight
+    assert kis.last_final_day("US", datetime(2026, 11, 14, 13, 59, tzinfo=kis.KST)) == date(2026, 11, 12)
+    assert kis.last_final_day("US", datetime(2026, 11, 14, 14, 0, tzinfo=kis.KST)) == date(2026, 11, 13)
+    assert kis.market_of("^KS11") == kis.market_of("005930.KS") == "KRX" and kis.market_of("^GSPC") == "US"
+
+
+@pytest.mark.unit
+def test_update_fetches_from_the_last_date_and_joins_new_days_in_order(tmp_path):
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-07-29", "2026-07-30", "2026-07-31"], [10, 11, 12]).to_csv(path, index=False)
+    # the answer arrives newest first, with the last cached day again (same close)
+    c = Bars(_bars(["2026-08-04", "2026-08-03", "2026-07-31"], [14, 13, 12]))
+    r = kis.update_cache("005930.KS", tmp_path, c, now=NEXT_DAY)
+    assert r == {"symbol": "005930.KS", "status": "append", "rows_added": 2, "last": "2026-08-04"}
+    assert c.asked == [(date(2026, 7, 31), date(2026, 8, 4))]
+    out = kis.read_cache(path)
+    assert out["Date"].dt.strftime("%m-%d").tolist() == ["07-29", "07-30", "07-31", "08-03", "08-04"]
+    assert out["Close"].tolist() == [10.0, 11.0, 12.0, 13.0, 14.0] and out["Open"].iloc[0] == 9.0
+    # up to date: no call at all
+    assert kis.update_cache("005930.KS", tmp_path, Bars(), now=NEXT_DAY)["status"] == "current"
+    # an explicit since refetches from there; the same closes come back → joined, nothing re-based
+    c = Bars(_bars(["2026-07-30", "2026-07-31"], [11, 12]))
+    r = kis.update_cache("005930.KS", tmp_path, c, since="2026-07-30", now=NEXT_DAY)
+    assert r["status"] == "append" and r["rows_added"] == 0 and c.asked == [(date(2026, 7, 30), date(2026, 8, 4))]
+    assert kis.read_cache(path)["Close"].tolist() == [10.0, 11.0, 12.0, 13.0, 14.0]
+
+
+@pytest.mark.unit
+def test_a_row_written_before_its_day_was_final_is_dropped(tmp_path):
+    """A cache written on 08-04 itself kept a moving 08-04 bar; on 08-04 evening it is cut, the next day replaced."""
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-08-03", "2026-08-04"], [11, 12]).to_csv(path, index=False)
+    evening = datetime(2026, 8, 4, 19, 30, tzinfo=kis.KST)
+    r = kis.update_cache("005930.KS", tmp_path, Bars(), now=evening)                 # no call: 08-03 is the last final
+    assert r == {"symbol": "005930.KS", "status": "trim", "rows_added": -1, "last": "2026-08-03"}
+    c = Bars(_bars(["2026-08-03", "2026-08-04"], [11, 12.5]))
+    r = kis.update_cache("005930.KS", tmp_path, c, now=NEXT_DAY)
+    assert r["status"] == "append" and kis.read_cache(path)["Close"].tolist() == [11.0, 12.5]
+
+
+@pytest.mark.unit
+def test_update_with_nothing_new_leaves_the_file_alone(tmp_path):
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-07-30", "2026-07-31"], [11, 12]).to_csv(path, index=False)
+    before = path.read_bytes()
+    r = kis.update_cache("005930.KS", tmp_path, Bars(NoMarketDataError("x", "x", "none")), now=NEXT_DAY)
+    assert r == {"symbol": "005930.KS", "status": "empty", "rows_added": 0, "last": "2026-07-31"}
+    assert path.read_bytes() == before
+
+
+@pytest.mark.unit
+def test_a_moved_close_on_the_overlap_day_refetches_the_whole_span(tmp_path):
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-07-30", "2026-07-31"], [100, 120]).to_csv(path, index=False)
+    full = _bars(["2026-07-30", "2026-07-31", "2026-08-03"], [50, 60, 61])          # a 2:1 split re-based the past
+    c = Bars(_bars(["2026-07-31", "2026-08-03"], [60, 61]), full)
+    r = kis.update_cache("005930.KS", tmp_path, c, now=NEXT_DAY)
+    assert r["status"] == "refetch" and c.asked[1] == (date(2026, 7, 30), date(2026, 8, 4))
+    assert kis.read_cache(path)["Close"].tolist() == [50.0, 60.0, 61.0]
+
+
+@pytest.mark.unit
+def test_since_past_the_last_date_starts_at_it_and_still_checks_for_a_re_adjustment(tmp_path):
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-07-30", "2026-07-31"], [100, 120]).to_csv(path, index=False)
+    full = _bars(["2026-07-30", "2026-07-31", "2026-08-03", "2026-08-04"], [50, 60, 61, 62])
+    c = Bars(_bars(["2026-07-31", "2026-08-03", "2026-08-04"], [60, 61, 62]), full)
+    r = kis.update_cache("005930.KS", tmp_path, c, since="2026-08-04", now=NEXT_DAY)
+    assert c.asked[0] == (date(2026, 7, 31), date(2026, 8, 4))                   # not 08-04: no 08-03 gap
+    assert r["status"] == "refetch" and kis.read_cache(path)["Close"].tolist() == [50.0, 60.0, 61.0, 62.0]
+
+
+@pytest.mark.unit
+def test_no_row_back_is_empty_not_current_and_an_unreplaced_file_is_an_error(tmp_path, monkeypatch):
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-07-30", "2026-07-31"], [11, 12]).to_csv(path, index=False)
+    r = kis.update_cache("005930.KS", tmp_path, Bars(NoMarketDataError("x", "x", "none")), now=NEXT_DAY)
+    assert r["status"] == "empty" and r["rows_added"] == 0
+    monkeypatch.setattr(kis, "replace_file", lambda p, write: None)            # a file held open elsewhere
+    with pytest.raises(OSError, match="바꾸지 못했다"):
+        kis.update_cache("005930.KS", tmp_path, Bars(_bars(["2026-07-31", "2026-08-03"], [12, 13])), now=NEXT_DAY)
+    assert kis.read_cache(path)["Close"].tolist() == [11.0, 12.0]
+    # a refetch keeps the span and the row count; only the values tell an unreplaced file apart
+    re_based = Bars(_bars(["2026-07-31"], [6]), _bars(["2026-07-30", "2026-07-31"], [5.5, 6]))
+    with pytest.raises(OSError, match="바꾸지 못했다"):
+        kis.update_cache("005930.KS", tmp_path, re_based, since="2026-07-31",
+                         now=datetime(2026, 8, 1, 9, 0, tzinfo=kis.KST))
+    assert kis.read_cache(path)["Close"].tolist() == [11.0, 12.0]
+
+
+@pytest.mark.unit
+def test_a_failed_or_broken_update_writes_nothing(tmp_path):
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-07-30", "2026-07-31"], [11, 12]).to_csv(path, index=False)
+    before = path.read_bytes()
+    with pytest.raises(VendorUnavailableError):
+        kis.update_cache("005930.KS", tmp_path, Bars(VendorUnavailableError("down")), now=NEXT_DAY)
+    broken = _bars(["2026-08-03"], [13])
+    broken.loc[0, "Close"] = float("nan")
+    with pytest.raises(ValueError, match="검사 실패"):
+        kis.update_cache("005930.KS", tmp_path, Bars(broken), now=NEXT_DAY)
+    assert path.read_bytes() == before
+    assert [f.name for f in tmp_path.iterdir()] == [path.name]                    # no temp file left behind
+
+
+@pytest.mark.unit
+def test_no_file_takes_five_years_up_to_the_last_final_day(tmp_path):
+    c = Bars(_bars(["2026-08-03", "2026-08-04", "2026-08-05"], [1, 2, 3]))        # 08-05 is past the final day
+    r = kis.update_cache("005930.KS", tmp_path, c, now=NEXT_DAY)
+    assert r["status"] == "full" and r["rows_added"] == 2 and r["last"] == "2026-08-04"
+    assert c.asked == [(date(2026, 8, 4) - timedelta(days=kis.BACKFILL_DAYS), date(2026, 8, 4))]
+
+
+@pytest.mark.unit
+def test_us_exchange_is_found_once_and_the_us_index_uses_its_own_endpoint(tmp_path):
+    row = {"xymd": "20261112", "open": "1", "high": "1", "low": "1", "clos": "1", "tvol": "1"}
+    s = FakeSession([lambda p: {"rt_cd": "0", "output2": [row] if p["EXCD"] == "NYS" else []}] * 2
+                    + [{"rt_cd": "0", "output2": [row]}] * 2)
+    c = _client(tmp_path, s)
+    df = kis.fetch(c, "JPM", date(2026, 11, 12), date(2026, 11, 12), tmp_path)
+    assert [p["EXCD"] for _, p, _ in s.calls] == ["NAS", "NYS", "NYS"] and len(df) == 1
+    assert json.loads((tmp_path / kis.EXCHANGE_FILE).read_text(encoding="utf-8")) == {"JPM": "NYS"}
+    kis.fetch(c, "JPM", date(2026, 11, 12), date(2026, 11, 12), tmp_path)        # no lookup the second time
+    assert [p["EXCD"] for _, p, _ in s.calls[3:]] == ["NYS"]
+    s2 = FakeSession([{"rt_cd": "0", "output2": [{"stck_bsop_date": "20261112", "ovrs_nmix_oprc": "1",
+                                                  "ovrs_nmix_hgpr": "2", "ovrs_nmix_lwpr": "1",
+                                                  "ovrs_nmix_prpr": "2", "acml_vol": "0"}]}])
+    df = kis.fetch(_client(tmp_path / "i", s2), "^GSPC", date(2026, 11, 1), date(2026, 11, 12), tmp_path)
+    url, params, hdr = s2.calls[0]
+    assert url.endswith(kis.US_INDEX_PATH) and hdr["tr_id"] == "FHKST03030100"
+    assert params["FID_INPUT_ISCD"] == "SPX" and params["FID_COND_MRKT_DIV_CODE"] == "N" and df["Close"].tolist() == [2.0]
 
 
 @pytest.mark.unit
@@ -299,3 +458,27 @@ def test_check_adds_kis_as_a_third_column_and_measures_close_gaps():
     m = kc.monthly_gap({"A": (y, kk), "B": (y2, k2)}, "2024-01-02", "2026-11-12")
     assert m["month"].tolist() == ["2024-01", "2024-02"] and m["symbols"].tolist() == [2, 1]
     assert m["median_pct"].iloc[0] == pytest.approx(-1.0) and m["kis_higher"].tolist() == [1, 0]
+
+
+@pytest.mark.unit
+def test_refresh_lists_the_benchmark_fixed_names_and_todays_members_once(tmp_path, monkeypatch):
+    hist = tmp_path / "h.csv"
+    hist.write_text("date,ticker,action\n2026-01-02,B.KS,start\n2026-01-02,C.KS,start\n2026-06-12,C.KS,remove\n"
+                    "2026-06-12,D.KS,add\n", encoding="utf-8")
+    monkeypatch.setattr(rc, "HISTORIES", {"KRX": hist})
+    monkeypatch.setattr(rc, "FIXED", {"KRX": ["A.KS", "B.KS"]})
+    assert rc.symbols_for("KRX", date(2026, 11, 13)) == ["^KS11", "A.KS", "B.KS", "D.KS"]
+
+
+@pytest.mark.unit
+def test_refresh_records_a_failed_symbol_and_goes_on(tmp_path):
+    class Client(Bars):
+        def stock_daily(self, symbol, start, end):
+            if symbol == "BAD.KS":
+                raise VendorUnavailableError("KIS FHKST03010100 실패: HTTP 500")
+            return _bars(["2026-08-03"], [1])
+    done, failed = rc.refresh(["BAD.KS", "OK.KS"], str(tmp_path), Client(), None)
+    assert [d["symbol"] for d in done] == ["OK.KS"] and done[0]["status"] == "full"
+    assert failed == [{"symbol": "BAD.KS", "error": "VendorUnavailableError: KIS FHKST03010100 실패: HTTP 500"}]
+    assert not kis.cache_path("BAD.KS", tmp_path).exists()
+

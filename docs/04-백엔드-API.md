@@ -37,7 +37,7 @@
 | 파일 (`audit/<시장>/`) | 모델 | 쓰는 쪽 |
 |---|---|---|
 | `screens.jsonl` | `ScreenRun` | 선별 |
-| `decisions.jsonl` | `DecisionRecord` (+ `source`: `agent` 기본 / `rule`) | 에이전트·베이스라인(`agent`) · 모의 실행기의 규칙 청산(`rule`, 주문보다 먼저 기록) |
+| `decisions.jsonl` | `DecisionRecord` (+ `source`: `agent` 기본 / `rule` / `baseline`) | 에이전트(`agent`) · 모의 실행기의 규칙 청산(`rule`, 주문보다 먼저 기록) · 규칙 베이스라인(`baseline`). 베이스라인 기록은 지금까지 모두 `agent`로 저장됐고(실행기가 `agent`만 주문으로 내므로 `baseline_krx.py`도 아직 `agent`로 쓴다) 옮기지 않는다 — 읽는 쪽은 `audit.decision_source(d)`(`settings.decider == "rule_momentum_baseline"`이면 `baseline`), 라벨 `DECISION_SOURCE_KO["baseline"]` = "규칙 베이스라인". 사람 결정(`human`)은 단계 4. API(`source_ko` · `decisions_by_source` · `?source`)는 아직 저장값 그대로(단계 4에서 연결) |
 | `orders.jsonl` | `OrderRecord` (order_id·ticker·trade_date·side·quantity·filled_*·fill_date·status·exception_kind·reason·rules_applied) | 모의 실행 `scripts/paper_execute.py`(`execution.py`) · 긴급 정지(미체결 취소). 같은 order_id의 마지막 줄이 현재 상태. 규칙 청산은 `paper-<date>-<ticker>-exit`, `rules_applied=[stop_loss/trailing/expired/force]` |
 | `operations.jsonl` | `OperationRecord` (kind halt/resume/mode_change/rule_change·at·operator·role·reason·target·before·after·market·scope) | 이 API의 쓰기 3종 · 실행기 자신의 정지·재가동(`operator=system`, `role=auto`). 정지·재가동의 `target`: `manual`(사람 — 이전 기록의 `running`도 manual로 읽음) · `daily_loss`(일일 손실) · `dd_stop`(−20% 드로다운). `effective_from`(system 일일 손실 자동 해제의 효력 거래일 — `at`은 실제로 쓴 시각 그대로). 실거래 전환 `mode_change`의 `before.paper_gate`(판정 스냅샷) |
 

@@ -23,9 +23,25 @@ import pandas as pd
 
 from agent_trading_core.audit import CandidateRecord, FilterResult, ScreenRun
 from agent_trading_core.errors import VendorError
+from agent_trading_core.identity import resolve_instrument_identity
+from agent_trading_core.universe import SECTORS, load_sectors
 from agent_trading_core.yahoo import load_ohlcv
 
 logger = logging.getLogger(__name__)
+
+
+def sector_lookup(ticker: str, path=SECTORS) -> str | None:
+    """A ``sector_of`` for the quota rule: the sector file when it lists the ticker (no network, None if it has no
+    sector), else the Yahoo profile. The profile lookup is fail-open: an error counts as no sector."""
+    known = load_sectors(path)
+    if ticker in known:
+        return known[ticker]
+    try:
+        return resolve_instrument_identity(ticker).get("sector")
+    except Exception as exc:
+        logger.warning("%s: sector lookup failed: %s", ticker, exc)
+        return None
+
 
 TRADING_DAYS = 252
 MONTH = 21

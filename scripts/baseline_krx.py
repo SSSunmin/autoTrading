@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from agent_trading_core.audit import (
+    BASELINE_DECIDER,
     DecisionRecord,
     EvidenceItem,
     baseline_summary_path,
@@ -35,7 +36,7 @@ from agent_trading_core.backtest import Decision, iter_grid, run_backtest, summa
 from agent_trading_core.config import MARKETS, default_config
 from agent_trading_core.identity import resolve_instrument_identity
 from agent_trading_core.krx_names import RULE_KO, korean_name
-from agent_trading_core.screening import ScreenConfig, screen, us_preset
+from agent_trading_core.screening import ScreenConfig, screen, sector_lookup, us_preset
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from paper_backtest import US_UNIVERSE  # the US book of the 2nd-3rd measurements, one list
@@ -76,7 +77,7 @@ class RuleReflector:
 
 @cache
 def sector_of(ticker: str) -> str | None:
-    return resolve_instrument_identity(ticker).get("sector")
+    return sector_lookup(ticker)     # data/universe/sectors.csv first, the Yahoo profile only for an unlisted name
 
 
 @cache
@@ -169,7 +170,10 @@ def main(argv: list[str] | None = None, data: Path = DATA) -> int:
                 thesis=text,
                 evidence=[EvidenceItem(source="market", summary=f"모멘텀 순위 {rank}/{len(ranked)}, {mom}", as_of=date,
                                        ref=run.run_id)],
-                settings={"decider": "rule_momentum_baseline",
+                # ponytail: stored as source "agent" — the paper executor (execution.py) places and explains only
+                # agent decisions; audit.decision_source reads the decider as "baseline". Write source="baseline"
+                # once the executor accepts it (stage 4).
+                settings={"decider": BASELINE_DECIDER,
                           "screen": setup["screen_note"]},
             ))
         return Decision(text, rating)

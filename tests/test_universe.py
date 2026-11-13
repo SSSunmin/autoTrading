@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from agent_trading_core import krx_names
+from agent_trading_core import krx_names, screening, universe
 from agent_trading_core.errors import NoMarketDataError, VendorUnavailableError
 from agent_trading_core.risk import RiskConfig
 from agent_trading_core.simulate import run_simulation
@@ -233,3 +233,74 @@ def test_load_frame_does_not_turn_other_failures_into_a_delisting(tmp_path, monk
     monkeypatch.setattr(pb, "load_ohlcv", fake)
     with pytest.raises(type(error)):
         pb.load_frame("X", "2026-11-12", str(tmp_path))
+
+
+FIXED_SECTORS = ("Technology", "Consumer Cyclical", "Technology", "Financial Services")
+SECTORS_CSV = """ticker,sector,source,as_of
+005930.KS,Technology,yahoo_profile,2026-11-13
+000660.KS,Technology,yahoo_profile,2026-11-13
+NOSECTOR.KS,,yahoo_profile,2026-11-13
+"""
+
+
+@pytest.mark.unit
+def test_sector_of_reads_only_the_file(tmp_path, monkeypatch):
+    path = tmp_path / "sectors.csv"
+    path.write_text(SECTORS_CSV, encoding="utf-8")
+
+    def no_network(ticker):
+        raise AssertionError("network")
+    monkeypatch.setattr(screening, "resolve_instrument_identity", no_network)
+    assert universe.sector_of("005930.KS", path) == "Technology"
+    assert universe.sector_of("NOSECTOR.KS", path) is None and universe.sector_of("UNLISTED.KS", path) is None
+    assert universe.load_sectors(tmp_path / "absent.csv") == {}
+    # the quota's lookup: a listed ticker never reaches the network, even one listed without a sector
+    assert screening.sector_lookup("000660.KS", path) == "Technology"
+    assert screening.sector_lookup("NOSECTOR.KS", path) is None
+
+
+@pytest.mark.unit
+def test_sector_lookup_falls_back_to_the_profile_only_for_an_unlisted_ticker(tmp_path, monkeypatch):
+    path = tmp_path / "sectors.csv"
+    path.write_text(SECTORS_CSV, encoding="utf-8")
+    asked = []
+
+    def profile(ticker):
+        asked.append(ticker)
+        if ticker == "DOWN.KS":
+            raise RuntimeError("timeout")
+        return {"sector": "Energy"}
+    monkeypatch.setattr(screening, "resolve_instrument_identity", profile)
+    assert screening.sector_lookup("NEW.KS", path) == "Energy"
+    assert screening.sector_lookup("DOWN.KS", path) is None              # fail-open, as before the file
+    assert screening.sector_lookup("005930.KS", path) == "Technology" and asked == ["NEW.KS", "DOWN.KS"]
+    # no file at all: every lookup is the profile, the behaviour before sectors.csv
+    assert screening.sector_lookup("005930.KS", tmp_path / "absent.csv") == "Energy"
+
+
+@pytest.mark.unit
+def test_the_quota_cuts_the_same_names_from_the_file_as_from_the_profile(tmp_path, monkeypatch):
+    """sector_quota sees only the sector strings, so the same strings from the file give the same verdicts."""
+    names = ["A.KS", "B.KS", "C.KS", "D.KS", "E.KS"]
+    sectors = {"A.KS": "Tech", "B.KS": "Tech", "C.KS": "Tech", "D.KS": "Tech", "E.KS": "Energy"}
+    path = tmp_path / "sectors.csv"
+    pd.DataFrame({"ticker": names, "sector": [sectors[t] for t in names], "source": "yahoo_profile",
+                  "as_of": "2026-11-13"}).to_csv(path, index=False)
+    monkeypatch.setattr(screening, "resolve_instrument_identity", lambda t: {"sector": sectors[t]})
+    from_profile = [screening.sector_lookup(t, tmp_path / "absent.csv") for t in names]
+    monkeypatch.setattr(screening, "resolve_instrument_identity", lambda t: {})
+    from_file = [screening.sector_lookup(t, path) for t in names]
+    assert from_file == from_profile == ["Tech", "Tech", "Tech", "Tech", "Energy"]
+
+
+@pytest.mark.unit
+def test_the_sector_file_covers_both_fixed_forty_books():
+    """data/universe/sectors.csv (scripts/build_sectors.py) lists every name of the fixed-forty runs with a sector,
+    so their quota no longer asks the network; the sectors are the ones those runs used (summary.json, 2026-11-13)."""
+    spec = importlib.util.spec_from_file_location("paper_backtest", Path(__file__).resolve().parents[1] / "scripts" / "paper_backtest.py")
+    pb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pb)
+    known = universe.load_sectors()
+    fixed = pb.UNIVERSE + pb.US_UNIVERSE
+    assert len(fixed) == 80 and all(known.get(t) for t in fixed)
+    assert (known["005930.KS"], known["005380.KS"], known["AAPL"], known["JPM"]) == FIXED_SECTORS

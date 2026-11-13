@@ -9,7 +9,9 @@ from agent_trading_core.audit import (
     EvidenceItem,
     FilterResult,
     ScreenRun,
+    decision_source,
 )
+from agent_trading_core.krx_names import DECISION_SOURCE_KO
 
 
 def _screen():
@@ -99,3 +101,19 @@ def test_order_record_round_trips_and_amount(tmp_path):
     rows = log.orders()
     assert [o.order_id for o in rows] == ["o1", "o2"]
     assert rows[0].amount == 700000.0 and rows[1].amount is None
+
+
+@pytest.mark.unit
+def test_decision_source_reads_the_rule_baseline_as_baseline():
+    base = {"ticker": "005930.KS", "trade_date": "2026-07-24", "rating": "Buy", "thesis": "t"}
+    old_line = DecisionRecord.model_validate_json(
+        '{"ticker": "005930.KS", "trade_date": "2026-07-24", "rating": "Buy", "thesis": "t", '
+        '"settings": {"decider": "rule_momentum_baseline"}}')                      # written before the value existed
+    assert old_line.source == "agent" and decision_source(old_line) == "baseline"
+    assert decision_source(DecisionRecord(**base)) == "agent"                     # an agent call, default kept
+    assert decision_source(DecisionRecord(**base, source="rule")) == "rule"
+    assert decision_source(DecisionRecord(**base, source="baseline")) == "baseline"
+    assert decision_source(DecisionRecord(**base, settings={"decider": "llm"})) == "agent"
+    assert DECISION_SOURCE_KO[decision_source(old_line)] == "규칙 베이스라인"
+    with pytest.raises(ValueError):
+        DecisionRecord(**base, source="human")                                    # not until stage 4
