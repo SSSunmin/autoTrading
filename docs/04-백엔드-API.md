@@ -28,7 +28,7 @@
 
 ## 기록 파일
 
-시장마다 폴더 하나: `audit/KRX/`, `audit/US/`. 세 기록 모델(`DecisionRecord`·`OrderRecord`·`OperationRecord`)에 `market` 필드(기본 `"KRX"`)가 있고, `OperationRecord`에는 `scope`(정지·재가동의 요청 범위 `all`/`KRX`/`US`, 그 외 `null`)가 있다.
+시장마다 폴더 하나: `audit/KRX/`, `audit/US/`. 기록 모델(`DecisionRecord`·`OrderRecord`·`OperationRecord`·`RunRecord`)에 `market` 필드(`RunRecord`는 필수, 나머지는 기본 `"KRX"`)가 있고, `OperationRecord`에는 `scope`(정지·재가동의 요청 범위 `all`/`KRX`/`US`, 그 외 `null`)가 있다.
 
 **호환 읽기(이전 기록):** 시장 축 이전의 `audit/*.jsonl`(루트)은 **국내 기록으로 읽고 옮기지 않는다**. 국내 장부는 루트 파일을 먼저, 그 뒤 `audit/KRX/`를 이어 읽고(`audit.market_audit`), 실행기·API가 쓰는 새 국내 기록은 `audit/KRX/`에만 append된다. 예외: `scripts/baseline_krx.py`(선별·결정)는 아직 루트 `audit/`에 쓰고, `scripts/build_mockup.py`는 루트만 읽는다(core 소유 스크립트, 후속). 읽기는 둘 다 이어 읽으므로 국내 장부는 섞이지 않는다. 루트 파일은 한 바이트도 바뀌지 않는다(옮기거나 다시 쓰면 append-only 감사 기록을 고치는 셈이라 택하지 않음). 미국 장부는 `audit/US/`만 읽는다.
 
@@ -40,6 +40,7 @@
 | `decisions.jsonl` | `DecisionRecord` (+ `source`: `agent` 기본 / `rule` / `baseline`) | 에이전트(`agent`) · 모의 실행기의 규칙 청산(`rule`, 주문보다 먼저 기록) · 규칙 베이스라인(`baseline`). 베이스라인 기록은 지금까지 모두 `agent`로 저장됐고(실행기가 `agent`만 주문으로 내므로 `baseline_krx.py`도 아직 `agent`로 쓴다) 옮기지 않는다 — 읽는 쪽은 `audit.decision_source(d)`(`settings.decider == "rule_momentum_baseline"`이면 `baseline`), 라벨 `DECISION_SOURCE_KO["baseline"]` = "규칙 베이스라인". 사람 결정(`human`)은 단계 4. API(`source_ko` · `decisions_by_source` · `?source`)는 아직 저장값 그대로(단계 4에서 연결) |
 | `orders.jsonl` | `OrderRecord` (order_id·ticker·trade_date·side·quantity·filled_*·fill_date·status·exception_kind·reason·rules_applied) | 모의 실행 `scripts/paper_execute.py`(`execution.py`) · 긴급 정지(미체결 취소). 같은 order_id의 마지막 줄이 현재 상태. 규칙 청산은 `paper-<date>-<ticker>-exit`, `rules_applied=[stop_loss/trailing/expired/force]` |
 | `operations.jsonl` | `OperationRecord` (kind halt/resume/mode_change/rule_change·at·operator·role·reason·target·before·after·market·scope) | 이 API의 쓰기 3종 · 실행기 자신의 정지·재가동(`operator=system`, `role=auto`). 정지·재가동의 `target`: `manual`(사람 — 이전 기록의 `running`도 manual로 읽음) · `daily_loss`(일일 손실) · `dd_stop`(−20% 드로다운). `effective_from`(system 일일 손실 자동 해제의 효력 거래일 — `at`은 실제로 쓴 시각 그대로). 실거래 전환 `mode_change`의 `before.paper_gate`(판정 스냅샷) |
+| `runs.jsonl` | `RunRecord` (market·stage `decide`/`fill`·trade_date·started_at·ended_at·status `ok`/`skipped`/`failed`·reason·error·counts·notes) | 매일 루프 `scripts/daily_loop.py` — 단계 하나에 한 줄. `skipped`의 `reason`: `holiday`(벤치마크 봉 없음) 또는 실행기 거부 문구(정지 · 모드). `error`: 예외 종류와 메시지(자격 증명 없음). `counts`: refreshed · provisional · screened · decisions · decisions_new · fill_open_checked · fill_open_mismatch · `orders_<status>`. `notes`: 실패가 아닌 발견(decide가 전날 체결가를 그날 확정 시가 기준과 비교해 다르면 주문 id와 두 값). `ok`와 `holiday`는 그날 그 단계의 끝 — 다시 돌지 않는다. 아직 읽는 API 없음 |
 
 ## 읽기 엔드포인트
 

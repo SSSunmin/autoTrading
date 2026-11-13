@@ -178,3 +178,9 @@ def safe_ticker_component(value: str, *, max_len: int = 32) -> str:
     if set(value) == {"."}:
         raise ValueError(f"ticker cannot consist solely of dots: {value!r}")
     return value
+
+
+def kis_us_symbol(ticker: str) -> str:
+    """A US ticker as KIS's overseas quotes spell it: a share class after ``/``, not Yahoo's ``-`` (``BRK-B`` →
+    ``BRK/B``; ``BRK.B`` and ``BRKB`` return no rows, 2026-11-13)."""
+    return ticker.replace("-", "/")

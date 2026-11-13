@@ -482,3 +482,53 @@ def test_refresh_records_a_failed_symbol_and_goes_on(tmp_path):
     assert failed == [{"symbol": "BAD.KS", "error": "VendorUnavailableError: KIS FHKST03010100 실패: HTTP 500"}]
     assert not kis.cache_path("BAD.KS", tmp_path).exists()
 
+
+
+@pytest.mark.unit
+def test_todays_bar_is_a_provisional_row_until_the_next_update_takes_that_day_as_final(tmp_path):
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-08-03"], [11]).to_csv(path, index=False)
+    after_close = datetime(2026, 8, 4, 15, 40, tzinfo=kis.KST)
+    out = kis.fetch_today_close("KRX", ["005930.KS", "000660.KS"], tmp_path,
+                                Bars(_bars(["2026-08-04"], [12])), now=after_close)
+    assert out["date"] == "2026-08-04" and out["written"] == ["005930.KS"]
+    assert out["failed"][0]["symbol"] == "000660.KS" and "update_cache 먼저" in out["failed"][0]["error"]
+    assert kis.provisional(tmp_path) == {"2026-08-04": ["005930.KS"]}
+    # the loader reads the provisional row with the rest, without a call
+    assert kis.load_ohlcv("005930.KS", "2026-08-04", str(tmp_path), Bars())["Close"].tolist() == [11.0, 12.0]
+    # a second fetch the same day replaces the row, not adds one
+    kis.fetch_today_close("KRX", ["005930.KS"], tmp_path, Bars(_bars(["2026-08-04"], [12.2])), now=after_close)
+    assert kis.read_cache(path)["Close"].tolist() == [11.0, 12.2]
+    # next day: 08-04 is final — fetched from 08-03 (the last final row), not kept as it was
+    c = Bars(_bars(["2026-08-03", "2026-08-04"], [11, 12.5]))
+    r = kis.update_cache("005930.KS", tmp_path, c, now=NEXT_DAY)
+    assert c.asked == [(date(2026, 8, 3), date(2026, 8, 4))] and r["status"] == "append"
+    assert kis.read_cache(path)["Close"].tolist() == [11.0, 12.5] and kis.provisional(tmp_path) == {}
+
+
+@pytest.mark.unit
+def test_a_listed_day_without_its_row_is_fetched_and_a_holiday_writes_nothing(tmp_path):
+    path = kis.cache_path("005930.KS", tmp_path)
+    _bars(["2026-08-03", "2026-08-04"], [11, 12]).to_csv(path, index=False)
+    (tmp_path / kis.PROVISIONAL_FILE).write_text('{"2026-08-04": ["005930.KS", "^KS11"]}', encoding="utf-8")
+    c = Bars(_bars(["2026-08-03", "2026-08-04"], [11, 12.5]))
+    kis.update_cache("005930.KS", tmp_path, c, now=NEXT_DAY)        # the listed 08-04 row is not kept as final
+    assert kis.read_cache(path)["Close"].tolist() == [11.0, 12.5]
+    assert kis.provisional(tmp_path) == {"2026-08-04": ["^KS11"]}     # only this symbol left the list
+    before = path.read_bytes()
+    out = kis.fetch_today_close("KRX", ["005930.KS"], tmp_path, Bars(NoMarketDataError("x", "x", "none")),
+                                now=datetime(2026, 8, 5, 15, 40, tzinfo=kis.KST))
+    assert out["missing"] == ["005930.KS"] and not out["written"] and path.read_bytes() == before
+    assert kis.provisional(tmp_path) == {"2026-08-04": ["^KS11"]}
+
+
+@pytest.mark.unit
+def test_a_us_share_class_is_asked_with_a_slash(tmp_path):
+    from agent_trading_core.symbols import kis_us_symbol
+
+    assert kis_us_symbol("BRK-B") == "BRK/B" and kis_us_symbol("AAPL") == "AAPL"
+    row = {"xymd": "20261112", "open": "1", "high": "1", "low": "1", "clos": "1", "tvol": "1"}
+    s = FakeSession([lambda p: {"rt_cd": "0", "output2": [row] if p["SYMB"] == "BRK/B" else []}] * 3)
+    df = kis.fetch(_client(tmp_path, s), "BRK-B", date(2026, 11, 12), date(2026, 11, 12), tmp_path)
+    assert len(df) == 1 and {p["SYMB"] for _, p, _ in s.calls} == {"BRK/B"}
+    assert json.loads((tmp_path / kis.EXCHANGE_FILE).read_text(encoding="utf-8")) == {"BRK-B": "NAS"}

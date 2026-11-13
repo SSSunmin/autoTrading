@@ -4,8 +4,9 @@ Quotations only — no order, balance or account call is made here. Paper (모�
 ``KIS_ENV`` is refused before a request is sent.
 
 - Credentials come from the environment or the repository's ``.env`` (``KIS_APP_KEY`` · ``KIS_APP_SECRET`` ·
-  ``KIS_ENV``); a missing one raises ``VendorNotConfiguredError`` naming the variable, never a value.
-- The access token is cached in ``data/.kis_token.json`` (gitignored) until shortly before it expires: KIS sends a
+  ``KIS_ENV``; ``TRADING_ENV_FILE`` names another file); a missing one raises ``VendorNotConfiguredError`` naming the
+  variable, never a value.
+- The access token is cached in ``data/.kis_token.json`` (gitignored; under ``TRADING_DATA_DIR`` when set) until shortly before it expires: KIS sends a
   notice on every issuance and allows one per minute; a token lives a day.
 - Calls are spaced ``CALL_INTERVAL`` apart; a throttled answer (``EGW00201``) is retried after a pause. At the
   official samples' 0.5 s a paper account was throttled on 388 of 962 calls, at 1.0 s on 14 of 29 (2026-11-13),
@@ -28,6 +29,10 @@ Daily use (``update_cache`` · ``load_ohlcv``, scripts/refresh_cache.py): a cach
 day has passed (``last_final_day``) by fetching from its last date on, not five years again. The last date is fetched again and its
 close compared: KIS re-adjusts past prices after a split or rights issue, and a changed close means the whole
 history is taken again rather than joined onto rows on the old basis.
+
+Today's bar (``fetch_today_close``, scripts/daily_loop.py): the 15:35 decision needs the day's close before it is
+final. It is written into the cache as a provisional row and its date listed in ``<cache_dir>/_provisional.json``;
+the next ``update_cache`` drops the listed rows, fetches those days as final bars and takes the symbol off the list.
 """
 
 from __future__ import annotations
@@ -44,10 +49,11 @@ import pandas as pd
 import requests
 
 from agent_trading_core.errors import NoMarketDataError, VendorNotConfiguredError, VendorUnavailableError
-from agent_trading_core.files import replace_file
+from agent_trading_core.files import locked, replace_file
+from agent_trading_core.symbols import kis_us_symbol, safe_ticker_component
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN_FILE = ROOT / "data" / ".kis_token.json"
+TOKEN_FILE = Path(os.environ.get("TRADING_DATA_DIR") or ROOT / "data") / ".kis_token.json"
 BASE_URL = {"paper": "https://openapivts.koreainvestment.com:29443"}   # 실전(openapi…:9443) deliberately absent
 CALL_INTERVAL = 1.1            # seconds between calls on a paper account (1.0 was throttled half the time)
 TOKEN_MARGIN = 600             # re-issue this many seconds before the stated expiry
@@ -78,16 +84,18 @@ US_EXCHANGES = ("NAS", "NYS", "AMS")  # a symbol asked on the wrong exchange com
 EXCHANGE_FILE = "_kis_us_exchange.json"
 BACKFILL_DAYS = 5 * 365
 CLOSE_TOL = 1e-6                      # relative change of the overlap day's close that counts as a re-adjustment
+PROVISIONAL_FILE = "_provisional.json"   # {"YYYY-MM-DD": [symbols whose row of that day is provisional]}
 
 
 def credentials() -> dict[str, str]:
-    """The KIS settings from the environment, after the repository ``.env`` (which does not override it)."""
+    """The KIS settings from the environment, after the repository ``.env`` or ``TRADING_ENV_FILE`` (neither
+    overrides it)."""
     from dotenv import load_dotenv
 
-    load_dotenv(ROOT / ".env", override=False)
+    load_dotenv(os.environ.get("TRADING_ENV_FILE") or ROOT / ".env", override=False)
     missing = [k for k in REQUIRED if not os.environ.get(k)]
     if missing:
-        raise VendorNotConfiguredError(f"KIS 설정 없음: {', '.join(missing)} — 환경변수나 저장소 루트 .env에 넣는다")
+        raise VendorNotConfiguredError(f"KIS 설정 없음: {', '.join(missing)} — 환경변수나 저장소 루트 .env(또는 TRADING_ENV_FILE)에 넣는다")
     env = os.environ["KIS_ENV"]
     if env not in BASE_URL:
         raise VendorNotConfiguredError(f"KIS_ENV={env!r}: paper(모의투자)만 지원한다 — 실전 키로 시작하지 않는다")
@@ -232,7 +240,7 @@ class KisClient:
         a base date, newest first, so it pages backward from ``end`` until it passes ``start``."""
         rows, base = [], end
         while base >= start:
-            page = self.get(US_PATH, "HHDFS76240000", {"AUTH": "", "EXCD": exchange, "SYMB": symbol, "GUBN": "0",
+            page = self.get(US_PATH, "HHDFS76240000", {"AUTH": "", "EXCD": exchange, "SYMB": kis_us_symbol(symbol), "GUBN": "0",
                                                       "BYMD": f"{base:%Y%m%d}", "MODP": "1"}).get("output2") or []
             dated = [r for r in page if str(r.get("xymd", "")).isdigit()]
             if not dated:
@@ -253,7 +261,7 @@ class KisClient:
     def us_exchange(self, symbol: str) -> str | None:
         """The first of NAS · NYS · AMS that has rows for ``symbol`` (one call each until found)."""
         for ex in US_EXCHANGES:
-            page = self.get(US_PATH, "HHDFS76240000", {"AUTH": "", "EXCD": ex, "SYMB": symbol, "GUBN": "0",
+            page = self.get(US_PATH, "HHDFS76240000", {"AUTH": "", "EXCD": ex, "SYMB": kis_us_symbol(symbol), "GUBN": "0",
                                                        "BYMD": "", "MODP": "1"}).get("output2") or []
             if any(str(r.get("xymd", "")).isdigit() for r in page):
                 return ex
@@ -283,8 +291,6 @@ def last_final_day(market: str, now: datetime | None = None) -> date:
 
 
 def cache_path(symbol: str, cache_dir: str | Path) -> Path:
-    from agent_trading_core.symbols import safe_ticker_component
-
     return Path(cache_dir) / f"{safe_ticker_component(symbol)}-KIS-data.csv"
 
 
@@ -323,6 +329,39 @@ def read_cache(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, parse_dates=["Date"])
 
 
+def provisional(cache_dir: str | Path) -> dict[str, list[str]]:
+    """``_provisional.json``: per date, the symbols whose cached row of that day is provisional."""
+    path = Path(cache_dir) / PROVISIONAL_FILE
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def _mark_provisional(cache_dir: str | Path, symbol: str, day: str | None) -> None:
+    """Take ``symbol`` off every date of the list, then (``day`` given) list it under ``day``."""
+    path = Path(cache_dir) / PROVISIONAL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with locked(path):
+        marks = {d: [s for s in syms if s != symbol] for d, syms in provisional(cache_dir).items()}
+        if day is not None:
+            marks[day] = sorted([*marks.get(day, []), symbol])
+        marks = {d: syms for d, syms in sorted(marks.items()) if syms}
+        replace_file(path, lambda tmp: Path(tmp).write_text(json.dumps(marks, indent=1), encoding="utf-8"))
+        if provisional(cache_dir) != marks:
+            raise OSError(f"{PROVISIONAL_FILE}를 바꾸지 못했다(다른 프로세스가 파일을 열고 있음?)")
+
+
+def _write_checked(symbol: str, path: Path, merged: pd.DataFrame) -> None:
+    """Check ``merged`` (dates unique and rising, every close present), replace the file in one move, read it back."""
+    if not (merged["Date"].is_unique and merged["Date"].is_monotonic_increasing and merged["Close"].notna().all()):
+        raise ValueError(f"{symbol}: KIS 캐시 검사 실패(날짜 중복·역순 또는 종가 빈 칸) — 파일을 바꾸지 않는다")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    replace_file(path, lambda tmp: merged.to_csv(tmp, index=False, encoding="utf-8"))
+    back = read_cache(path)
+    if len(back) != len(merged) or back["Date"].iloc[-1] != merged["Date"].iloc[-1] or \
+            not (back["Close"].to_numpy() == merged["Close"].to_numpy()).all():   # a refetch keeps span and rows
+        # replace_file keeps the old file when another process holds it open (Windows) and only logs it
+        raise OSError(f"{symbol}: KIS 캐시를 바꾸지 못했다(다른 프로세스가 파일을 열고 있음?) — 이전 파일 그대로")
+
+
 def update_cache(symbol: str, cache_dir: str | Path, client: KisClient, *, since: str | None = None,
                  start: str | None = None, now: datetime | None = None) -> dict:
     """Bring ``<symbol>-KIS-data.csv`` up to ``last_final_day`` and say what changed.
@@ -335,13 +374,16 @@ def update_cache(symbol: str, cache_dir: str | Path, client: KisClient, *, since
     the last date instead, so no gap opens. If the earliest refetched day's close moved (KIS re-adjusted its past
     prices) the whole span of the file is taken again — ``refetch``. The file is replaced in one move after the new
     frame is checked (dates unique and rising, every close present) and read back; a failure, or a file another
-    process holds open, raises and leaves the old file as it was."""
+    process holds open, raises and leaves the old file as it was. Rows listed as provisional (``fetch_today_close``)
+    are dropped first, so their days are fetched as final bars; the symbol then leaves the list."""
     path = cache_path(symbol, cache_dir)
     end = last_final_day(market_of(symbol), now)
+    marked = [d for d, syms in provisional(cache_dir).items() if symbol in syms]
     old = read_cache(path) if path.exists() else None
     written = 0 if old is None else len(old)
     if old is not None:
-        old = old[old["Date"] <= pd.Timestamp(end)].reset_index(drop=True)
+        keep = (old["Date"] <= pd.Timestamp(end)) & ~old["Date"].isin(pd.to_datetime(marked))
+        old = old[keep].reset_index(drop=True)
     if old is None or old.empty:
         first = date.fromisoformat(start) if start else end - timedelta(days=BACKFILL_DAYS)
         new = fetch(client, symbol, first, end, cache_dir)
@@ -355,6 +397,8 @@ def update_cache(symbol: str, cache_dir: str | Path, client: KisClient, *, since
             except NoMarketDataError:  # not even the last cached day came back
                 quiet = "empty"
         if new.empty and len(old) == written:
+            if marked:                 # listed, but the row never reached the file
+                _mark_provisional(cache_dir, symbol, None)
             return {"symbol": symbol, "status": quiet, "rows_added": 0, "last": str(last)}
         both = new.merge(old[["Date", "Close"]], on="Date", suffixes=("", "_old"))
         if not both.empty and abs(both["Close"].iloc[0] / both["Close_old"].iloc[0] - 1) > CLOSE_TOL:
@@ -364,17 +408,47 @@ def update_cache(symbol: str, cache_dir: str | Path, client: KisClient, *, since
             status = "append" if len(new) else "trim"
             merged = (pd.concat([old, new], ignore_index=True).drop_duplicates("Date", keep="last")
                       .sort_values("Date").reset_index(drop=True))
-    if not (merged["Date"].is_unique and merged["Date"].is_monotonic_increasing and merged["Close"].notna().all()):
-        raise ValueError(f"{symbol}: KIS 캐시 검사 실패(날짜 중복·역순 또는 종가 빈 칸) — 파일을 바꾸지 않는다")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    replace_file(path, lambda tmp: merged.to_csv(tmp, index=False, encoding="utf-8"))
-    back = read_cache(path)
-    if len(back) != len(merged) or back["Date"].iloc[-1] != merged["Date"].iloc[-1] or \
-            not (back["Close"].to_numpy() == merged["Close"].to_numpy()).all():   # a refetch keeps span and rows
-        # replace_file keeps the old file when another process holds it open (Windows) and only logs it
-        raise OSError(f"{symbol}: KIS 캐시를 바꾸지 못했다(다른 프로세스가 파일을 열고 있음?) — 이전 파일 그대로")
+    _write_checked(symbol, path, merged)
+    if marked:
+        _mark_provisional(cache_dir, symbol, None)
     return {"symbol": symbol, "status": status, "rows_added": len(merged) - written,
             "last": merged["Date"].iloc[-1].strftime("%Y-%m-%d")}
+
+
+def fetch_today_close(market: str, tickers: list[str], cache_dir: str | Path, client: KisClient,
+                      now: datetime | None = None) -> dict:
+    """Today's bar (the market's local date) of each ticker, written into its cache as a provisional row. Before
+    the close its Close is the latest trade; after it, the close as KIS has it so far (``last_final_day``).
+
+    The date is listed in ``_provisional.json`` before the row is written: a crash in between leaves a listed date
+    with no row, which ``update_cache`` simply fetches — never an unlisted provisional row it would keep as final.
+    A ticker needs a cache file (``update_cache`` first). Returns the day, the tickers written, the ones with no
+    row of that day (a holiday when the benchmark is among them) and the failures."""
+    from agent_trading_core.config import MARKETS
+
+    day = (now or datetime.now(KST)).astimezone(ZoneInfo(MARKETS[market]["timezone"])).date()
+    out: dict = {"date": day.isoformat(), "written": [], "missing": [], "failed": []}
+    for t in tickers:
+        try:
+            path = cache_path(t, cache_dir)
+            if not path.exists():
+                raise FileNotFoundError(f"{t}: KIS 캐시 없음 — update_cache 먼저")
+            try:
+                bar = fetch(client, t, day, day, cache_dir)
+            except NoMarketDataError:
+                bar = None
+            if bar is None or bar.empty or bar["Date"].iloc[-1] != pd.Timestamp(day):
+                out["missing"].append(t)
+                continue
+            old = read_cache(path)
+            merged = (pd.concat([old[old["Date"] != pd.Timestamp(day)], bar.tail(1)], ignore_index=True)
+                      .sort_values("Date").reset_index(drop=True))
+            _mark_provisional(cache_dir, t, day.isoformat())
+            _write_checked(t, path, merged)
+            out["written"].append(t)
+        except Exception as e:  # one ticker's failure is reported, the rest still run
+            out["failed"].append({"symbol": t, "error": f"{type(e).__name__}: {e}"[:300]})
+    return out
 
 
 def load_ohlcv(symbol: str, as_of_date: str, cache_dir: str, client: KisClient | None = None,

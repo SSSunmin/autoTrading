@@ -9,6 +9,7 @@ models are the contract between the screening/decision program and the UI:
 - ``ScreenRun``      one screening pass: universe size, rules, survivors, written once
 - ``EvidenceItem``   one piece of evidence a decision cites, with its source and as-of date
 - ``DecisionRecord`` one agent decision: rating, evidence list, link to the memory log entry
+- ``RunRecord``      one stage of the daily loop (scripts/daily_loop.py): market, stage, start/end, result, error
 
 Records are appended as JSON lines so a run can be replayed and nothing is
 overwritten. The memory log stays the system of record for outcomes; a
@@ -195,6 +196,30 @@ class OperationRecord(BaseModel):
                                                                  "``at`` is when the line was written, later")
 
 
+class RunRecord(BaseModel):
+    """One stage of the daily paper loop (scripts/daily_loop.py) for one market and trading day. ``ok`` and
+    ``skipped`` for a holiday are final: the loop does not run that stage of that day again. ``failed`` is run again
+    by a scheduler's next call while the day is due; ``skipped`` for any other reason (the executor refused: halted,
+    not paper mode; ``missed``) only by a call with ``--date``."""
+
+    market: str
+    stage: Literal["decide", "fill"]
+    trade_date: str
+    started_at: str
+    ended_at: str = Field(default_factory=_now)
+    status: Literal["ok", "skipped", "failed"]
+    reason: str | None = Field(default=None, description="skipped: 'holiday' or the executor's refusal")
+    error: str | None = Field(default=None, description="failed: the exception type and message, never a credential")
+    counts: dict[str, int] = Field(default_factory=dict, description="what the stage wrote or saw, e.g. decisions, "
+                                                                      "orders_open, orders_filled, provisional")
+    notes: list[str] = Field(default_factory=list, description="findings that are not failures, e.g. a fill price "
+                                                               "that differs from the final open")
+
+    @property
+    def final(self) -> bool:
+        return self.status == "ok" or (self.status == "skipped" and self.reason == "holiday")
+
+
 # what a halt stops for: a person (records before halt-semantics wrote target="running"), or the executor itself
 HALT_TARGETS = ("manual", "daily_loss", "dd_stop")
 
@@ -280,6 +305,12 @@ class AuditLog:
 
     def operations(self) -> list[OperationRecord]:
         return self._read("operations", OperationRecord)
+
+    def record_run(self, run: RunRecord) -> None:
+        self._append("runs", run)
+
+    def runs(self) -> list[RunRecord]:
+        return self._read("runs", RunRecord)
 
 
 def market_audit(root: str | Path, market: str) -> AuditLog:
