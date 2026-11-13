@@ -1,12 +1,17 @@
 """Paper execution: fill the recorded decisions at the next trading day's open (agent_trading_core/execution.py).
 
 Run:  .venv/Scripts/python scripts/paper_execute.py --date 2026-07-24
-      .venv/Scripts/python scripts/paper_execute.py --all        # every decision date not executed yet, in order
+      .venv/Scripts/python scripts/paper_execute.py --all        # every trading day not executed yet, in order
 Reads data/audit/decisions.jsonl and operations.jsonl and the OHLCV cache (data/cache, never downloads);
-appends to data/audit/orders.jsonl. TRADING_DATA_DIR overrides data/.
+appends to data/audit/orders.jsonl, and rule-exit decisions / an automatic halt to decisions / operations.
+TRADING_DATA_DIR overrides data/.
 
-Exit codes: 0 done (also when nothing new was written), 2 bad arguments, 3 refused (halted, not paper mode,
-out of order) with nothing written, 4 an audit log line is broken or invalid (nothing written).
+``--all`` runs every trading day from the first decision (or the last executed day) to the end of the price
+data, not only decision days: the rule exits are judged at each day's close. It ends with the audit count of
+orders that have no decision behind them (PAPER_TRADING.max_unexplained_orders).
+
+Exit codes: 0 done (also when nothing new was written), 2 bad arguments, 3 refused (halted with exits stopped,
+not paper mode, out of order) with nothing written, 4 an audit log line is broken or invalid (nothing written).
 """
 
 from __future__ import annotations
@@ -20,15 +25,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from agent_trading_core.audit import AuditLog, latest_orders
-from agent_trading_core.execution import ExecutionRefused, Prices, check_date, execute_date
+from agent_trading_core.audit import AuditLog, latest_orders, trading_state
+from agent_trading_core.execution import (
+    EXIT_SUFFIX,
+    ExecutionRefused,
+    PaperConfig,
+    Prices,
+    check_date,
+    execute_date,
+    unexplained_orders,
+)
+
+
+def _broken(exc: ValueError, where: str = "") -> int:
+    print(f"{where}기록 파손 — {type(exc).__name__}: {str(exc).splitlines()[0]}", file=sys.stderr)
+    return 4
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     which = parser.add_mutually_exclusive_group(required=True)
-    which.add_argument("--date", help="decision date YYYY-MM-DD")
-    which.add_argument("--all", action="store_true", help="every decision date from the last executed one on")
+    which.add_argument("--date", help="trading day YYYY-MM-DD")
+    which.add_argument("--all", action="store_true", help="every trading day from the last executed one on")
     parser.add_argument("--data-dir", default=os.environ.get("TRADING_DATA_DIR") or str(ROOT / "data"))
     args = parser.parse_args(argv)
     if args.date:
@@ -43,23 +61,46 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.all:
             done = [o.trade_date for o in latest_orders(audit.orders()).values()]
-            dates = sorted({d.trade_date for d in audit.decisions() if not done or d.trade_date >= max(done)})
+            agent_days = [d.trade_date for d in audit.decisions() if d.source == "agent"]
+            start = max(done) if done else min(agent_days, default=None)
+            calendar = prices.calendar(PaperConfig().index)
+            # a decision dated on a holiday still runs on its own date (it fills at the next session's open)
+            dates = sorted({d for d in calendar + agent_days if start and d >= start})
         else:
             dates = [args.date]
     except ValueError as exc:                    # json / pydantic: a cut-short or invalid line
-        print(f"기록 파손 — {type(exc).__name__}: {str(exc).splitlines()[0]}", file=sys.stderr)
-        return 4
+        return _broken(exc)
+    halts = 0
     for date in dates:
         try:
+            before = trading_state(audit.operations())["running"]
             written = execute_date(audit, date, prices)
+            after = trading_state(audit.operations())
         except ExecutionRefused as exc:
             print(f"{date}: 거부 — {exc}", file=sys.stderr)
             return 3
         except ValueError as exc:
-            print(f"{date}: 기록 파손 — {type(exc).__name__}: {str(exc).splitlines()[0]}", file=sys.stderr)
-            return 4
-        counts = Counter(o.status for o in written)
-        print(f"{date}: {len(written)}건 기록 " + (", ".join(f"{k} {n}" for k, n in sorted(counts.items())) or "(새 기록 없음)"))
+            return _broken(exc, f"{date}: ")
+        exits = sum(o.order_id.endswith(EXIT_SUFFIX) and o.trade_date == date for o in written)
+        auto_halt = before and not after["running"] and after["halted_by"] == "system"
+        halts += auto_halt
+        if written or auto_halt or not args.all:
+            counts = Counter(o.status for o in written)
+            print(f"{date}: {len(written)}건 기록 " + (", ".join(f"{k} {n}" for k, n in sorted(counts.items())) or "(새 기록 없음)")
+                  + (f" · 규칙 청산 {exits}" if exits else "")
+                  + (f" · 자동 정지: {after['halt_reason']}" if auto_halt else ""))
+    try:
+        orders, decisions = audit.orders(), audit.decisions()
+    except ValueError as exc:
+        return _broken(exc)
+    missing = unexplained_orders(orders, decisions)
+    current = latest_orders(orders).values()
+    state = trading_state(audit.operations())
+    print(f"주문 {len(current)}건 · 규칙 청산 {sum(o.order_id.endswith(EXIT_SUFFIX) for o in current)}건 · "
+          f"자동 정지 {halts}회 · 미설명 주문 {len(missing)}건 · 상태 "
+          + ("실행 중" if state["running"] else f"정지({state['halted_by']}: {state['halt_reason']})"))
+    for o in missing:
+        print(f"  미설명: {o.order_id}", file=sys.stderr)
     return 0
 
 

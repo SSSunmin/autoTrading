@@ -102,6 +102,11 @@ class DecisionRecord(BaseModel):
         description="Deterministic rules that changed or blocked the agent's call, e.g. 'max_position_pct'",
     )
     settings: dict = Field(default_factory=dict, description="Model/provider/debate depth that produced it")
+    source: Literal["agent", "rule"] = Field(
+        default="agent",
+        description="agent: the manager's (or the baseline's) call; rule: a hard-rule exit the executor recorded "
+                    "before its sell order (stop-loss, trailing, expiry, drawdown stop)",
+    )
 
     @property
     def tradeable(self) -> bool:
@@ -158,7 +163,7 @@ class OperationRecord(BaseModel):
     kind: Literal["halt", "resume", "mode_change", "rule_change"]
     at: str = Field(default_factory=_now)
     operator: str
-    role: str = Field(description="Authority used: operator / admin / admin(dev, no token)")
+    role: str = Field(description="Authority used: operator / admin / admin(dev, no token) / auto (the executor's own halt)")
     reason: str
     target: str = Field(default="", description="What changed, e.g. 'mode', 'sector_quota.sector_max'")
     before: dict = Field(default_factory=dict)

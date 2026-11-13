@@ -110,7 +110,7 @@ function ModePanel({ state, onChanged }: { state: TradingState; onChanged: () =>
           <span className="muted">{current?.desc}</span>
         </div>
         {!state.running && (
-          <AgentAlert tone="warning" title={`정지됨 · ${utc(state.halted_at)} · ${state.halted_by}`}>
+          <AgentAlert tone="warning" title={`정지됨 · ${utc(state.halted_at)} · ${state.halted_by_ko ?? state.halted_by}`}>
             사유: {state.halt_reason} · 손절·트레일링 청산 {state.keep_exits ? '계속 작동' : '중단'}. 다시 켜기는 관리자만 할 수 있습니다.
           </AgentAlert>
         )}

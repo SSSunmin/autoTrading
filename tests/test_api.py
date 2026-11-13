@@ -150,7 +150,7 @@ def test_exception_queue_lists_review_decisions_for_the_latest_date(client):
 @pytest.mark.unit
 def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client):
     assert client.get("/api/trading/mode").json() == {
-        "mode": "paper", "mode_ko": "모의투자", "running": True, "halted_at": None, "halted_by": None, "halt_reason": None,
+        "mode": "paper", "mode_ko": "모의투자", "running": True, "halted_at": None, "halted_by": None, "halted_by_ko": None, "halt_reason": None,
         "keep_exits": True, "mode_changed_at": None, "label_ko": "모의투자 모드", "admin_token_required": False}
 
     r = client.post("/api/trading/halt", json={"operator": "운영자A", "reason": "벤더 지연", "keep_exits": False})
@@ -302,3 +302,44 @@ def test_resume_cancels_open_orders_a_broken_log_kept_through_the_halt(executed,
     assert executed.post("/api/trading/resume", json={"operator": "관리자", "reason": "복구"}).status_code == 200
     rows = {o["ticker"]: o["status"] for o in executed.get("/api/orders").json()}
     assert rows["005380.KS"] == "cancelled"
+
+
+@pytest.mark.unit
+def test_a_rule_exit_is_served_as_its_own_decision_with_its_own_order(tmp_path, monkeypatch):
+    from agent_trading_core.execution import Prices, execute_date
+    from agent_trading_core.risk import RiskConfig
+
+    data = tmp_path / "data"
+    days = ["2026-06-01", "2026-06-02", "2026-06-04", "2026-06-05"]
+    _cache(data, "^KS11", [(d, 100 + i, 100 + i) for i, d in enumerate(days)])
+    # bought at the 06-02 open (10,000), -30% close on 06-04: stop-loss, and a -3% day that halts the loop
+    _cache(data, "005930.KS", [("2026-06-01", 10_000, 10_000), ("2026-06-02", 10_000, 10_000),
+                               ("2026-06-04", 7_000, 7_000), ("2026-06-05", 7_000, 7_000)])
+    audit = AuditLog(data / "audit")
+    audit.record_decision(DecisionRecord(ticker="005930.KS", trade_date="2026-06-01", rating="Buy", thesis="b"))
+    audit.record_decision(DecisionRecord(ticker="005930.KS", trade_date="2026-06-04", rating="Sell", thesis="에이전트 매도"))
+    prices, risk = Prices(data / "cache"), RiskConfig(regime_ma_days=3)
+    execute_date(audit, "2026-06-01", prices, risk=risk)
+    execute_date(audit, "2026-06-04", prices, risk=risk)
+    monkeypatch.setenv("TRADING_DATA_DIR", str(data))
+    from backend import main
+    importlib.reload(main)
+    c = TestClient(main.app)
+
+    by = {d["source"]: d for d in c.get("/api/decisions", params={"date": "2026-06-04"}).json()}
+    assert by["rule"]["source_ko"] == "규칙 청산" and by["rule"]["rating"] == "Sell" and by["rule"]["outcome"] is None
+    assert [o["order_id"] for o in by["rule"]["orders"]] == ["paper-2026-06-04-005930.KS-exit"]
+    assert by["rule"]["orders"][0]["rules_applied"] == ["stop_loss"]
+    # the agent's sell of the same day is its own card; the loop halted that day (daily loss), so it has no order
+    assert [(o["order_id"], o["status"]) for o in by["agent"]["orders"]] == []   # halted that day: no agent order
+    sells = c.get("/api/orders", params={"date": "2026-06-04", "ticker": "005930.KS"}).json()
+    assert [o["side"] for o in sells] == ["Sell"]
+
+    st = c.get("/api/trading/mode").json()
+    assert st["running"] is False and st["halted_by"] == "system" and st["halted_by_ko"] == "시스템 자동 정지"
+    assert st["label_ko"].endswith("· 시스템 자동 정지") and "일일 손실 한도 초과" in st["halt_reason"]
+    assert c.get("/api/labels").json()["decision_source_ko"]["rule"] == "규칙 청산"
+    # the agent's own calls can be read without the rule exits, and the health count says which is which
+    assert [d["source"] for d in c.get("/api/decisions", params={"source": "agent", "rating": "Sell"}).json()] == ["agent"]
+    assert c.get("/api/decisions", params={"source": "robot"}).status_code == 422
+    assert c.get("/api/health").json()["decisions_by_source"] == {"agent": 2, "rule": 1}

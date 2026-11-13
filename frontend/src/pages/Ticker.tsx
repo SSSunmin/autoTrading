@@ -49,7 +49,7 @@ function Body({ d, tab, setTab }: { d: TickerDetail; tab: string; setTab: (t: st
             <div className="timeline" style={{ marginBottom: '1.2rem' }}>
               {d.timeline.map((t) => <span key={t.date} className={`tl ${t.rating}`} title={`${t.date} ${t.rating}`}>{t.date.slice(5).replace('-', '/')}</span>)}
             </div>
-            {d.decisions.length ? <div className="cards">{d.decisions.map((x) => <DecisionCard key={x.trade_date} d={x} />)}</div>
+            {d.decisions.length ? <div className="cards">{d.decisions.map((x) => <DecisionCard key={`${x.trade_date}-${x.source}`} d={x} />)}</div>
               : <AgentEmptyState title="보유 외 결정이 없습니다" description="투자 메모(사업 요약 → 논지 → 불/베어 → 밸류에이션 → 촉매 → 논지 깨짐 조건 → 등급·비중 → 매도 계획)는 LLM 에이전트가 연결되면 같은 순서로 표시됩니다." />}
           </>
         )}
