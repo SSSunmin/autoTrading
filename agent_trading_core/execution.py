@@ -76,6 +76,7 @@ from agent_trading_core.symbols import safe_ticker_component
 BUY_RATINGS = ("Buy", "Overweight")
 SELL_RATINGS = ("Sell", "Underweight")
 EXIT_SUFFIX = "-exit"                        # order id of a rule exit: paper-<date>-<ticker>-exit
+NEAR_STOP_PCT = 0.02                         # "손절 근접": the last close within 2% above the stop line (screens 1 · 5)
 
 
 @dataclass(frozen=True)
@@ -175,6 +176,29 @@ def next_session(calendar: list[str], date: str) -> str | None:
     """The first trading day strictly after ``date`` (weekends and holidays skipped), None if not yet in the data."""
     i = bisect.bisect_right(calendar, date)
     return calendar[i] if i < len(calendar) else None
+
+
+def session_amounts(orders, prices: Prices, calendar: list[str], date: str) -> tuple[str | None, float, float]:
+    """The session that orders decided on ``date`` fill at (None: not in the data yet), and the buy and sell amounts of
+    every order filling there, whatever its decision date: filled at the fill price, open at the decision-day close.
+    The daily cap counts the buys only (selling reduces risk); the home KPI shows both."""
+    session = next_session(calendar, date)
+    buy = sell = 0.0
+    for o in orders:
+        if o.status in ("filled", "partial", "open") and next_session(calendar, o.trade_date) == session:
+            amount = o.amount if o.amount is not None else o.quantity * (prices.close_asof(o.ticker, o.trade_date) or 0.0)
+            if o.side == "Buy":
+                buy += amount
+            else:
+                sell += amount
+    return session, buy, sell
+
+
+def _regime_gap(index_closes: pd.Series, days: int) -> float | None:
+    """The index's last close against its ``days`` simple average (risk.regime_on's test, as a distance); None with
+    fewer bars than the window, where the filter treats the regime as on."""
+    s = index_closes.dropna()
+    return float(s.iloc[-1]) / float(s.iloc[-days:].mean()) - 1 if len(s) >= days else None
 
 
 def _day_index(calendar: list[str], date: str) -> int:
@@ -484,11 +508,7 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
     pending_buys = {o.ticker for o in current.values() if o.side == "Buy" and _unsettled(o, date)}
     pending_sells = {o.ticker for o in current.values() if o.side == "Sell" and _unsettled(o, date)}
     # the daily cap counts every buy filling at the same session, whatever its decision date
-    session = next_session(calendar, date)
-    day_amount = 0.0
-    for o in current.values():
-        if o.side == "Buy" and o.status in ("filled", "partial", "open") and next_session(calendar, o.trade_date) == session:
-            day_amount += o.amount if o.amount is not None else o.quantity * (prices.close_asof(o.ticker, o.trade_date) or 0.0)
+    session, day_amount, _ = session_amounts(current.values(), prices, calendar, date)
 
     caps = auto_execution(cfg.market)
 
@@ -733,13 +753,15 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
     for h in sorted(book.holdings.values(), key=lambda h: h.entry_date):
         st = position_state(h, prices, calendar, as_of, risk)
         last, high, expiry_i = st["last"], st["high"], st["entry_i"] + risk.max_holding_days
+        stop = h.avg_price * (1 + risk.stop_loss_pct)
+        gap = last / stop - 1 if last is not None and stop > 0 else None
         rows.append({
             "ticker": h.ticker, "quantity": h.quantity, "avg_price": h.avg_price, "entry_date": h.entry_date,
             "last_price": last, "last_date": st["last_date"],
             "market_value": h.quantity * last if last is not None else None,
             "unrealized": (last - h.avg_price) * h.quantity if last is not None else None,
             "unrealized_pct": last / h.avg_price - 1 if last is not None else None,
-            "stop_price": h.avg_price * (1 + risk.stop_loss_pct),
+            "stop_price": stop, "stop_gap": gap, "near_stop": gap is not None and gap <= NEAR_STOP_PCT,
             "trailing_active": st["active"], "trailing_high": high,
             "trailing_stop_price": high * (1 - risk.trailing_pct) if st["active"] else None,
             "holding_days": day - st["entry_i"],
@@ -772,7 +794,11 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         for hits in [[(t, r) for t, r in locked_tickers.items() if r and r.startswith(kind)]]
     ]
     index_closes = prices.frame(cfg.index)["Close"]
+    index_closes = index_closes[index_closes.index <= as_of]
     closed_today = [t for t in book.closed if t.exit_date == as_of]
+    session, buy_amount, sell_amount = session_amounts(latest_orders(orders).values(), prices, calendar, as_of)
+    cap = auto_execution(cfg.market)["auto_daily_order_cap"]
+    top = max(rows, key=lambda r: r["weight"] or 0.0, default=None)
     return {
         "market": cfg.market, "currency": MARKETS[cfg.market]["currency"],
         "as_of": as_of, "initial_cash": cfg.initial_cash, "cash": book.cash, "holdings_value": value, "equity": equity,
@@ -782,8 +808,16 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         "gross_exposure": value / equity if equity > 0 else 0.0,
         "realized_pnl": sum(t.pnl for t in book.closed), "realized_today": sum(t.pnl for t in closed_today),
         "unrealized_pnl": sum(r["unrealized"] or 0.0 for r in rows),
-        "regime_on": regime_on(index_closes[index_closes.index <= as_of], risk) if cfg.regime_filter else None,
+        "regime_on": regime_on(index_closes, risk) if cfg.regime_filter else None,
+        "regime_gap": _regime_gap(index_closes, risk.regime_ma_days),
         "positions": rows, "protections": guards,
+        "protections_active": sum(g["active"] for g in guards),
+        "near_stop_count": sum(r["near_stop"] for r in rows),
+        "max_position_weight": (top["weight"] or 0.0) if top else 0.0,
+        "max_position_ticker": top["ticker"] if top else None,
+        # orders decided on as_of and every other order filling at their session (the daily cap's scope)
+        "today_session": session, "today_buy_amount": buy_amount, "today_sell_amount": sell_amount,
+        "today_buy_cap_used": buy_amount / cap if cap > 0 else None,
         "exits_by_reason": dict(Counter(t.reason for t in book.closed)),
         "closed": [{"ticker": t.ticker, "entry_date": t.entry_date, "exit_date": t.exit_date, "quantity": t.quantity,
                     "entry_price": t.entry_price, "exit_price": t.exit_price, "pnl": t.pnl, "pnl_pct": t.pnl_pct,
@@ -791,8 +825,8 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
                    for t in reversed(book.closed)],
         "limits": {"stop_loss_pct": risk.stop_loss_pct, "dd_halve": risk.dd_halve, "dd_stop": risk.dd_stop,
                    "max_position_pct": risk.max_position_pct, "max_gross_pct": risk.max_gross_pct,
-                   "daily_loss_limit": risk.daily_loss_limit,
-                   "auto_daily_order_cap": auto_execution(cfg.market)["auto_daily_order_cap"]},
+                   "daily_loss_limit": risk.daily_loss_limit, "auto_daily_order_cap": cap,
+                   "near_stop_pct": NEAR_STOP_PCT, "regime_ma_days": risk.regime_ma_days},
         "note": "모의투자 장부: orders.jsonl 체결 기록을 캐시 종가로 재생한 값. 실현 손익은 체결가 기준(수수료·세금 제외), "
                 "평가 금액·드로다운은 수수료·세금 포함. 룰 판정(손절·트레일링·만료·DD 정지)은 실행기가 그날 종가로 "
                 "규칙 청산 결정을 기록하고 다음 거래일 시가에 매도합니다.",

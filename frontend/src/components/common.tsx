@@ -5,6 +5,7 @@ import { pct } from '../api/client'
 import { kst, marketClock } from '../api/marketTime'
 import type { ApiState } from '../hooks/useApi'
 import { MARKETS, useMarket } from '../hooks/useMarket'
+import { tickerCellParts } from './partsLogic'
 import type { FilterResult, Market, MarketInfo, OrderStatus, Rating, TradingState } from '../api/types'
 
 const MARKET_LABEL: Record<Market, string> = { KRX: '국내', US: '미국' }
@@ -41,12 +42,14 @@ export function RatingBadge({ rating, label }: { rating: Rating | 'pending'; lab
   return <span className={`rating ${rating}`}>{label ?? rating}</span>
 }
 
-/** Instrument as the plan (v0.3) writes it everywhere: code tag on the first line, Korean name on the second. */
-export function TickerCell({ ticker, name, size }: { ticker: string; name?: string | null; size?: 'lg' }) {
+/** Instrument in tables, cards and headings, both markets alike; ``stockName`` stays for running text. */
+export function TickerCell({ ticker, name, size, market }: { ticker: string; name?: string | null; size?: 'lg'; market?: Market }) {
+  const [current] = useMarket()
+  const { primary, tag } = tickerCellParts(ticker, name, market ?? current)
   return (
-    <span className={`tkr ${size ?? ''}`}>
-      <span className="code num">{ticker}</span>
-      <span className="name">{name ?? '회사명 미확인'}</span>
+    <span className={`tk ${size ?? ''}`}>
+      <span className="tk-n">{primary}</span>
+      {tag && <span className="tag mono">{tag}</span>}
     </span>
   )
 }
