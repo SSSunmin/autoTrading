@@ -177,9 +177,15 @@ def _panel(frames: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, col: str) -
 
 def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, cfg: SimConfig, *,
                    sector_of: Callable[[str], str | None] | None = None,
-                   progress: Callable[[int, int, str], None] | None = None) -> SimResult:
+                   progress: Callable[[int, int, str], None] | None = None,
+                   universe_on: Callable[[pd.Timestamp], set[str]] | None = None) -> SimResult:
     """``frames``: full OHLCV history per ticker (Date naive, ascending). ``index_frame``: the benchmark index OHLCV,
-    which also sets the trading calendar and feeds the regime filter."""
+    which also sets the trading calendar and feeds the regime filter.
+
+    ``universe_on(date)``: the index members on that date (point-in-time universe, ``universe.members_on``). Each
+    rebalance then screens only members whose prices still run; a name that leaves the index is kept until its own
+    exit rules sell it, it just is not bought again. Without it every frame whose prices still run is a candidate.
+    A held name whose prices stop (delisted, acquired) is closed at its last close on the first day without a bar."""
     risk = cfg.risk
     mkt = MARKETS[cfg.market]
     idx = index_frame.set_index("Date")["Close"].sort_index()
@@ -190,6 +196,7 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
     closes = _panel(frames, dates, "Close").ffill()
     opens = _panel(frames, dates, "Open").fillna(closes)
     universe = list(frames)
+    last_bar = {t: f.loc[f["Close"].notna(), "Date"].max() for t, f in frames.items()}
 
     def load(ticker, as_of, cache_dir=None, fill_gaps=True):
         f = frames[ticker]
@@ -219,6 +226,19 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
     for i, date in enumerate(dates):
         if progress and i % 50 == 0:
             progress(i, len(dates), date.strftime("%Y-%m-%d"))
+        # 0. a held name with no bar today and none after: its series ended, close at the last price we saw
+        for t in [t for t in positions if last_bar[t] < date]:
+            pos = positions.pop(t)
+            pending_sells.pop(t, None)
+            px = float(closes.at[date, t]) * (1 - cfg.slippage)     # forward-filled last close
+            cash += sell_proceeds(pos.quantity, px, cfg)
+            pnl = px / pos.entry_price - 1
+            trades.append(Trade(t, dates[pos.entry_day].strftime("%Y-%m-%d"), date.strftime("%Y-%m-%d"), pos.entry_price,
+                                px, pos.quantity, "delisted", pnl, i - pos.entry_day))
+            event(date, "exit", f"{t} delisted {pnl:+.1%}: 마지막 시세 {last_bar[t]:%Y-%m-%d} 이후 거래 없음 → 마지막 종가로 청산")
+            if protections:
+                for fired in protections.record(TradeOutcome(t, i, "delisted", pnl)):
+                    event(date, "protection", fired)
         # 1. fills at today's open, decided at yesterday's close
         for t, sig in list(pending_sells.items()):
             pos = positions.pop(t, None)
@@ -239,7 +259,7 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
                     event(date, "protection", fired)
         pending_sells.clear()
         for t, value in pending_buys.items():
-            if t in positions:
+            if t in positions or last_bar[t] < date:
                 continue
             px = float(opens.at[date, t])
             if math.isnan(px) or px <= 0:
@@ -297,7 +317,10 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
         # 4. rebalance: screen → rating → targets, orders for the next open
         if i % cfg.rebalance_every == 0 and i < len(dates) - 1:
             rebalances += 1
-            run = screen(universe, date.strftime("%Y-%m-%d"), cfg.screen, load=load, sector_of=sector_of,
+            # a name whose prices have stopped is never a candidate (fixed lists: none stop, so nothing changes)
+            members = universe_on(date) if universe_on is not None else None
+            candidates = [t for t in universe if last_bar[t] >= date and (members is None or t in members)]
+            run = screen(candidates, date.strftime("%Y-%m-%d"), cfg.screen, load=load, sector_of=sector_of,
                          run_id=f"{cfg.label}_{date:%Y-%m-%d}")
             ranked = [c for c in run.candidates if c.rank is not None]
             ranked.sort(key=lambda c: c.rank)

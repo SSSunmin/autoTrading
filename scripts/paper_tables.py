@@ -3,6 +3,8 @@
 Run:  .venv/Scripts/python scripts/paper_tables.py [--us data/results/paper_us/summary.json]
                                                   [--krx data/results/paper/summary.json]
 Prints the variant table, the window table and the worst trades for the US book, then the KRX-vs-US comparison.
+With --universe <constituents summary.json> (docs/09) it prints the fixed-40 vs point-in-time table instead, the
+fixed side read from --fixed (default: the --us file).
 """
 
 from __future__ import annotations
@@ -83,11 +85,36 @@ def compare_table(krx: dict, us: dict) -> str:
     return "\n".join(rows)
 
 
+def universe_table(fixed: dict, pit: dict) -> str:
+    rows = ["| | 고정 40 최대 드로다운 | 시점 구성 최대 드로다운 | 고정 40 수익 | 시점 구성 수익 | 고정 40 거래 | 시점 구성 거래 | "
+            "시점 구성 상장폐지 청산 |", "|---|---|---|---|---|---|---|---|"]
+    for key, label in VARIANTS.items():
+        f, p = fixed["variants"][key], pit["variants"][key]
+        rows.append(f"| {label} | {pct(f['metrics']['max_drawdown'])} | {pct(p['metrics']['max_drawdown'])} | "
+                    f"{pct(f['metrics']['total_return'])} | {pct(p['metrics']['total_return'])} | {f['trades']} | {p['trades']} | "
+                    f"{p['exits_by_reason'].get('delisted', 0)} |")
+    return "\n".join(rows)
+
+
+def universe_facts(pit: dict) -> str:
+    return (f"등장 종목 {pit['unique_tickers']} · 시세 받음 {pit['loaded'] - len(pit['no_history'])} · "
+            f"못 받음 {len(pit['failed'])} · 구성 기간 이력 없음 {len(pit['no_history'])} · "
+            f"시작 구성 {pit['start_members']} · 끝 구성 {pit['end_members']} · 기간 중 시세가 끝난 종목 {len(pit['ended_early'])} · "
+            f"마지막 시세까지로 읽음 {len(pit['read_to_last_bar'])}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--us", default=str(ROOT / "data" / "results" / "paper_us" / "summary.json"))
     parser.add_argument("--krx", default=str(ROOT / "data" / "results" / "paper" / "summary.json"))
+    parser.add_argument("--universe", help="constituents summary.json (docs/09)")
+    parser.add_argument("--fixed", help="fixed-40 summary.json for --universe (default: --us)")
     args = parser.parse_args()
+    if args.universe:
+        pit = json.loads(Path(args.universe).read_text(encoding="utf-8"))
+        fixed = json.loads(Path(args.fixed or args.us).read_text(encoding="utf-8"))
+        print(universe_table(fixed, pit), "", universe_facts(pit), sep="\n")
+        return 0
     us = json.loads(Path(args.us).read_text(encoding="utf-8"))
     krx = json.loads(Path(args.krx).read_text(encoding="utf-8"))
     print(variant_table(us, "S&P 500"), "", window_table(us, "S&P 500"), "", sep="\n")

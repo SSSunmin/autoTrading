@@ -6,28 +6,39 @@ drawdown and how long it took to recover, inside the crash episodes especially; 
 ``--market US`` runs the same three variants over a separate US large-cap book (3rd measurement, docs/07):
 own cash in USD, own benchmark, no FX, the same RiskConfig defaults measured once.
 
-Run:  .venv/Scripts/python scripts/paper_backtest.py [--market KRX|US] [--start 2024-01-02] [--end 2026-11-12]
-Writes data/results/paper/ (KRX) or data/results/paper_us/ (US): summary.json and <variant>_equity.csv.
+``--universe constituents`` runs the same book on point-in-time index members instead of the fixed forty
+(4th measurement, docs/09): data/universe/<index>_history.csv from scripts/build_universe.py.
+
+Run:  .venv/Scripts/python scripts/paper_backtest.py [--market KRX|US] [--universe fixed40|constituents]
+                                                    [--start 2024-01-02] [--end 2026-11-12]
+Writes data/results/paper/ (KRX) or data/results/paper_us/ (US), or data/results/paper_universe/<market>/ for
+constituents: summary.json and <variant>_equity.csv.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import logging
+import os
 import sys
 from dataclasses import asdict
 from functools import cache
 from pathlib import Path
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from agent_trading_core.config import MARKETS
+from agent_trading_core.errors import NoMarketDataError
 from agent_trading_core.identity import resolve_instrument_identity
-from agent_trading_core.krx_names import korean_name
+from agent_trading_core.krx_names import display_name, korean_name
 from agent_trading_core.risk import RiskConfig
 from agent_trading_core.simulate import SimConfig, run_simulation, window_metrics
+from agent_trading_core.universe import load_history, members_on, tickers
 from agent_trading_core.yahoo import load_ohlcv
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
@@ -105,6 +116,38 @@ SETUPS = {
 }
 
 
+# Point-in-time membership (docs/09, scripts/build_universe.py). --universe constituents runs on these.
+HISTORIES = {"KRX": DATA / "universe" / "kospi200_history.csv", "US": DATA / "universe" / "sp500_history.csv"}
+
+
+def load_frame(ticker: str, end: str, cache_dir: str) -> tuple[pd.DataFrame, bool, str | None]:
+    """(frame, not_cached_today, cut_at).
+
+    A name whose prices stop before ``end`` (delisted, acquired) fails load_ohlcv's staleness check right after the
+    download is cached; only then (a NoMarketDataError on a cache file written today) is it read up to its own last
+    bar, returned as ``cut_at``. Any other failure (Yahoo down, rate limit, no rows, a stale cache from another day)
+    raises, so the caller lists the name as failed instead of the simulator closing it as delisted.
+    ``not_cached_today``: the cache was not already written today, so load_ohlcv downloaded it; only
+    names that load are counted (a failure raises and goes to the caller's failed list) —
+    yahoo._cache_is_fresh only trusts today's file, so on a new day every name is fetched again and overwritten."""
+    path = os.path.join(cache_dir, f"{ticker}-YFin-data.csv")
+
+    def written_today() -> bool:
+        return os.path.exists(path) and datetime.date.fromtimestamp(os.path.getmtime(path)) == datetime.date.today()
+
+    fresh = written_today()
+    try:
+        return load_ohlcv(ticker, end, cache_dir=cache_dir), not fresh, None
+    except NoMarketDataError:
+        if not written_today():
+            raise
+        last = pd.to_datetime(pd.read_csv(path, usecols=["Date"])["Date"].str[:10]).max()
+        if pd.isna(last) or last >= pd.Timestamp(end):
+            raise
+        cut = last.strftime("%Y-%m-%d")
+        return load_ohlcv(ticker, cut, cache_dir=cache_dir), not fresh, cut
+
+
 @cache
 def sector_of(ticker: str) -> str | None:
     try:
@@ -117,23 +160,46 @@ def sector_of(ticker: str) -> str | None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--market", default="KRX", choices=sorted(SETUPS))
+    parser.add_argument("--universe", default="fixed40", choices=["fixed40", "constituents"])
     parser.add_argument("--start", default="2024-01-02")
     parser.add_argument("--end", default="2026-11-12")
     args = parser.parse_args()
     setup, market = SETUPS[args.market], MARKETS[args.market]
     out, windows, index_symbol = setup["out"], setup["windows"], market["benchmark"]
-    out.mkdir(parents=True, exist_ok=True)
     cache_dir = str(DATA / "cache")
 
-    frames, failed = {}, []
-    for t in setup["universe"]:
+    names, history, universe_on = setup["universe"], None, None
+    if args.universe == "constituents":
+        path = HISTORIES[args.market]
+        if not path.exists():
+            print(f"{args.market}: {path} 없음 — scripts/build_universe.py로 먼저 만든다(KRX는 수동 다운로드 필요). 건너뜀")
+            return 0
+        history = load_history(path)
+        names = tickers(history)
+        out = DATA / "results" / "paper_universe" / args.market.lower()
+        seen: dict[pd.Timestamp, set[str]] = {}
+
+        def universe_on(d: pd.Timestamp) -> set[str]:
+            if d not in seen:
+                seen[d] = members_on(history, d)
+            return seen[d]
+        print(f"{args.market} constituents: {len(names)} unique tickers in {path.name}")
+    out.mkdir(parents=True, exist_ok=True)
+
+    frames, failed, downloaded, cut = {}, [], 0, {}
+    for k, t in enumerate(names):
         try:
-            frames[t] = load_ohlcv(t, args.end, cache_dir=cache_dir)
+            frames[t], fetched, cut_at = load_frame(t, args.end, cache_dir)
+            downloaded += fetched
+            if cut_at:
+                cut[t] = cut_at
         except Exception as exc:
             print(f"  skip {t}: {exc}")
             failed.append(t)
+        if k % 50 == 49:
+            print(f"  prices {k + 1}/{len(names)} (not cached today {downloaded}, failed {len(failed)})")
     index = load_ohlcv(index_symbol, args.end, cache_dir=cache_dir)
-    print(f"universe {len(frames)} tickers ({len(failed)} failed), index {index_symbol} "
+    print(f"universe {len(frames)} tickers ({len(failed)} failed, {downloaded} not cached today), index {index_symbol} "
           f"{index['Date'].iloc[0].date()}..{index['Date'].iloc[-1].date()}")
     sectors = {t: sector_of(t) for t in frames}
     print(f"sectors resolved {sum(1 for v in sectors.values() if v)}/{len(frames)}")
@@ -148,7 +214,7 @@ def main() -> int:
     for cfg in variants:
         print(f"\n== {cfg.label} ==")
         r = run_simulation(frames, index, cfg, sector_of=sector_of,
-                           progress=lambda i, n, d: print(f"  {d} ({i}/{n})", end="\r"))
+                           progress=lambda i, n, d: print(f"  {d} ({i}/{n})", end="\r"), universe_on=universe_on)
         print()
         m = r.metrics
         print(f"  return {m['total_return']:+.1%} (CAGR {m['cagr']:+.1%})  maxDD {m['max_drawdown']:+.1%} "
@@ -177,9 +243,26 @@ def main() -> int:
         "benchmark": bench, "variants": results,
         "caveats": setup["caveats"],
     }
-    if args.market != "KRX":  # the KRX file keeps its shape for GET /api/paper
+    if args.market != "KRX" or history is not None:  # the fixed KRX file keeps its shape for GET /api/paper
         summary.update({"market": args.market, "currency": market["currency"], "initial_cash": setup["initial_cash"],
                         "commission": setup["commission"], "failed": failed, "sectors": sectors})
+    if history is not None:
+        end = pd.Timestamp(args.end)
+        # a name whose first bar comes well after it joined the index: no usable history while a member (Yahoo keeps
+        # one stray row for some acquired names), so it could never pass the screen — survivorship like `failed`
+        joined = history.groupby("ticker")["date"].min().clip(lower=pd.Timestamp(args.start))
+        no_history = {t: f["Date"].iloc[0].strftime("%Y-%m-%d") for t, f in frames.items()
+                      if f["Date"].iloc[0] > joined[t] + pd.Timedelta(days=7)}
+        summary["universe_ko"] = {t: display_name(t) for t in frames}
+        summary.update({
+            "universe_mode": "constituents", "history_file": str(HISTORIES[args.market].relative_to(ROOT)),
+            "unique_tickers": len(names), "loaded": len(frames), "not_cached_today": downloaded,
+            "read_to_last_bar": cut, "no_history": no_history,
+            "start_members": len(members_on(history, args.start)), "end_members": len(members_on(history, end)),
+            # prices that stop more than a week before the end: the names the delisted rule can fire on
+            "ended_early": {t: f["Date"].iloc[-1].strftime("%Y-%m-%d") for t, f in frames.items()
+                            if f["Date"].iloc[-1] < end - pd.Timedelta(days=7) and t not in no_history},
+        })
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     print(f"\nwrote {out / 'summary.json'}")
     return 0
