@@ -247,3 +247,49 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .go-sum.no { background: var(--app-warn-bg); color: var(--app-warn); }
 .go-h { font-size: var(--bv-font-size-body-3-normal); }
 .go-warn { margin: 0; font-size: var(--bv-font-size-body-3-normal); color: var(--app-fg-2); }
+
+/* risk-panels (docs/10 §3 단계 3): halted home, resume modal, exit-reason bar, Protections cards, guard/lock history */
+.halt-band { display: grid; gap: 0.6rem; font-size: var(--bv-font-size-body-2-normal); padding: 1.2rem 1.6rem; border: 1px solid var(--app-fail-line); border-left: 4px solid var(--app-fail-strong);
+  border-radius: var(--bv-radius-200); background: var(--app-fail-tint); }
+.halt-band .hb-head { display: flex; gap: 1.2rem; align-items: baseline; color: var(--app-fail-strong); }
+.hb-dl, .rs-dl { margin: 0; display: grid; gap: 0.4rem; }
+.rs-dl, .xbar-wrap, .pcards, .evlist, .sector-off { font-size: var(--bv-font-size-body-3-normal); }
+.hb-dl > div, .rs-dl > div { display: grid; grid-template-columns: 8rem 1fr; gap: 1rem; }
+.hb-dl dt, .rs-dl dt { color: var(--app-fg-3); }
+.hb-dl dd, .rs-dl dd { margin: 0; color: var(--app-fg); }
+.who { display: inline-block; padding: 0 0.8rem; border-radius: var(--bv-radius-100); font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); }
+.who.system { background: var(--app-warn-bg); color: var(--app-warn); }
+.who.person { background: var(--app-down-bg); color: var(--app-down-strong); }
+.st-halt-chip { display: inline-block; padding: 0.1rem 0.8rem; border-radius: var(--bv-radius-100); background: var(--app-fg); color: var(--bv-color-common-100);
+  font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); }
+.st { display: inline-block; padding: 0.1rem 0.8rem; border-radius: var(--bv-radius-100); font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); }
+.st.halt { background: var(--app-fg); color: var(--bv-color-common-100); }
+.st.wait { border: 1px dashed var(--app-fg-3); color: var(--app-fg-2); }
+.halt-row td { background: var(--app-surface-2); }
+.rs-preview caption { caption-side: top; text-align: left; padding-bottom: 0.4rem; }
+.xbar { display: flex; height: 24px; border-radius: var(--bv-radius-100); overflow: hidden; background: var(--app-gauge-track); }
+.xseg { display: block; height: 100%; }
+.xseg.stop_loss, .xsw.stop_loss { background: var(--app-fail); }
+.xseg.trailing, .xsw.trailing { background: var(--app-trailing); }
+.xseg.expired, .xsw.expired { background: var(--app-fg-3); }
+.xseg.exit_signal, .xsw.exit_signal { background: var(--app-gauge); }
+.xseg.force, .xsw.force { background: var(--app-forced); }
+.xseg, .xsw { background: var(--app-review); }
+.xlegend { list-style: none; margin: 0.8rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 1.6rem; }
+.xlegend li { display: flex; gap: 0.6rem; align-items: center; }
+.xsw { display: inline-block; width: 1rem; height: 1rem; border-radius: 2px; }
+.pcards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+.pcard { border: 1px solid var(--app-line); border-radius: var(--bv-radius-200); padding: 0.8rem 1.2rem; display: grid; gap: 0.2rem; }
+.pcard.on { border-color: var(--app-fail-strong); }
+.pcard .pc-head { display: flex; justify-content: space-between; }
+.pcard .pc-meta, .pcard .pc-detail { font-size: var(--bv-font-size-caption-1); color: var(--app-fg-2); }
+.evlist { list-style: none; margin: 0; padding: 0; }
+.evlist li { display: grid; grid-template-columns: 96px 104px 1fr; gap: 0.8rem; align-items: baseline; padding: 0.6rem 0; border-bottom: 1px solid var(--app-line); }
+.evk { justify-self: start; padding: 0 0.8rem; border-radius: var(--bv-radius-100); font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); }
+.evk.guard { background: var(--app-warn-bg); color: var(--app-warn); }
+.evk.lock { background: var(--app-up-bg); color: var(--app-fail-strong); }
+.evk.protections { border: 1px solid var(--app-fail-strong); color: var(--app-fail-strong); }
+.evk.intervention { background: var(--app-down-bg); color: var(--app-down-strong); }
+.evk.peak_reset { background: var(--app-pass-bg); color: var(--app-pass-strong); }
+.ev-foot { margin-top: 0.8rem; font-size: var(--bv-font-size-caption-1); }
+.sector-off { display: flex; justify-content: space-between; margin: 0.8rem 0 0; padding-top: 0.8rem; border-top: 1px solid var(--app-line); }

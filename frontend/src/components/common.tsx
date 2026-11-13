@@ -6,6 +6,7 @@ import { kst, marketClock } from '../api/marketTime'
 import type { ApiState } from '../hooks/useApi'
 import { MARKETS, useMarket } from '../hooks/useMarket'
 import { tickerCellParts } from './partsLogic'
+import { modeBadge } from './riskLogic'
 import type { FilterResult, Market, MarketInfo, OrderStatus, Rating, TradingState } from '../api/types'
 
 const MARKET_LABEL: Record<Market, string> = { KRX: '국내', US: '미국' }
@@ -66,11 +67,12 @@ export function ExecStatus({ status, label }: { status: OrderStatus; label: stri
   return <AgentChip variant={variant}>{label}</AgentChip>
 }
 
-/** Operating mode badge for the status bar: running auto = live, halted = hot, manual/paper = labelled. */
+/** Operating mode badge for the status bar: running auto = live, manual/paper = labelled; halted = hot, saying whether
+ *  it lifts itself (daily loss, at the next open) or needs a resume (riskLogic.modeBadge). */
 export function ModeBadge({ state }: { state: TradingState | null }) {
   if (!state) return <AgentChip variant="neutral">운용 상태 확인 중</AgentChip>
-  const variant = !state.running ? 'hot' : state.mode === 'auto' ? 'live' : state.mode === 'paper' ? 'new' : 'secondary'
-  return <AgentChip variant={variant} title={state.halt_reason ?? undefined}>{state.running && state.mode === 'auto' ? '● ' : ''}{state.label_ko}</AgentChip>
+  const b = modeBadge(state)
+  return <AgentChip variant={b.variant} title={state.running ? undefined : `${state.label_ko} · ${state.halt_reason ?? ''}`}>{b.text}</AgentChip>
 }
 
 function fmtValue(v: FilterResult['value']): string {

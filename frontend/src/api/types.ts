@@ -5,7 +5,8 @@ export type Rating = 'Buy' | 'Overweight' | 'Hold' | 'Underweight' | 'Sell' | 'R
 export type Market = 'KRX' | 'US'
 export type Mode = 'auto' | 'manual' | 'paper'
 export type OrderStatus = 'filled' | 'partial' | 'open' | 'blocked' | 'rejected' | 'exception' | 'cancelled'
-export type ExceptionKind = 'review' | 'cap_exceeded' | 'order_rejected' | 'vendor_unavailable'
+/** luld_halt · pdt_blocked: value and label only (the server cannot raise them without live data) */
+export type ExceptionKind = 'review' | 'cap_exceeded' | 'order_rejected' | 'vendor_unavailable' | 'data_delayed' | 'luld_halt' | 'pdt_blocked'
 
 export interface FilterResult {
   rule: string
@@ -81,6 +82,11 @@ export interface Order {
   reason: string
   rules_applied: string[]
   market: Market
+  /** the session open it filled at (filled · partial) or will (open: the next trading day), market time and KST (ISO);
+   *  null for an order that does not fill */
+  fill_at_local: string | null
+  fill_at_kst: string | null
+  fill_planned: boolean
 }
 
 export interface Decision {
@@ -150,6 +156,39 @@ export interface TradingState {
   account_mode_ko: string
   execution_mode: 'auto' | 'manual'
   execution_mode_ko: string
+  /** the standing halt's scope as it was sent (all | KRX | US); null while running */
+  halt_scope: 'all' | Market | null
+  halt_scope_ko: string | null
+  /** the session open on the day a daily-loss halt ends (KST ISO) and "07-28(화) 09:00 KST"; null for any other state */
+  auto_resume_open_kst: string | null
+  auto_resume_label_ko: string | null
+}
+
+/** GET /api/trading/resume-preview: the modal's variant, and after a −20% stop the three drawdown lines the resume
+ *  would leave (the same peak-reset calculation the resume writes). */
+export interface ResumePreview {
+  market: Market
+  variant: 'running' | 'manual' | 'daily_loss' | 'dd_stop'
+  variant_ko: string
+  can_resume: boolean
+  reset_peak: boolean
+  equity: number | null
+  as_of: string | null
+  peak_before: number | null
+  base: number | null
+  /** the base is the old peak and the equity already reads −20% from it: the next run halts again */
+  restops: boolean
+  lines: { id: 'peak' | 'dd_halve' | 'dd_stop'; label_ko: string; level: number; amount: number; vs_equity: number | null }[]
+}
+
+export type BookEventKind = 'guard' | 'lock' | 'protections' | 'intervention' | 'peak_reset'
+
+/** GET /api/events: the guard / lock history, newest first. */
+export interface BookEvents {
+  market: Market
+  total: number
+  counts: Partial<Record<BookEventKind, number>>
+  events: { date: string; kind: BookEventKind; kind_ko: string; ticker: string | null; name: string | null; text: string }[]
 }
 
 export interface HaltEffects { new_orders: string; open_orders_cancelled: number | null; positions: string; exits_active: boolean; note: string }
@@ -262,6 +301,7 @@ export interface Labels {
   halt_target_ko: Record<string, string>
   market_ko: Record<Market, string>
   halt_scope_ko: Record<string, string>
+  book_event_ko: Record<string, string>
   markets: Record<Market, MarketInfo>
   color_convention: { up: string; down: string; note: string }
 }
@@ -444,6 +484,9 @@ export interface ProtectionState {
   detail: string | null
   until: string | null
   tickers: { ticker: string; until: string | null }[]
+  /** the guard's own window in trading days and its triggers inside it, up to as_of */
+  lookback_days: number
+  lookback_hits: number
 }
 
 export interface ClosedTrade {
@@ -498,6 +541,8 @@ export interface Positions {
             daily_loss_limit: number; auto_daily_order_cap: number; near_stop_pct: number; regime_ma_days: number }
   note: string
   mode: TradingState
+  /** no sector data is connected yet: always null */
+  sector_exposure: null
 }
 
 /** GET /api/paper/progress — screen 8, judged by the server (docs/05 §4). */

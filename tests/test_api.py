@@ -171,7 +171,8 @@ def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client
         "keep_exits": True, "mode_changed_at": None, "label_ko": "국내 모의투자 모드", "admin_token_required": False,
         "market": "KRX", "market_ko": "국내", "halt_target": None, "halt_target_ko": None, "dd_stop": False,
         "auto_resume_at": None, "auto_resumed": False, "account_mode": "paper", "account_mode_ko": "모의투자",
-        "execution_mode": "auto", "execution_mode_ko": "자동 실행"}
+        "execution_mode": "auto", "execution_mode_ko": "자동 실행", "halt_scope": None, "halt_scope_ko": None,
+        "auto_resume_open_kst": None, "auto_resume_label_ko": None}
 
     r = client.post("/api/trading/halt", json={"operator": "운영자A", "reason": "벤더 지연", "keep_exits": False, "scope": "KRX"})
     assert r.status_code == 200

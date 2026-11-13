@@ -136,7 +136,9 @@ class OrderRecord(BaseModel):
     filled_price: float | None = None
     status: Literal["filled", "partial", "open", "blocked", "rejected", "exception", "cancelled"]
     fill_date: str | None = Field(default=None, description="Trading day the fill happened (next open), YYYY-MM-DD")
-    exception_kind: Literal["review", "cap_exceeded", "order_rejected", "vendor_unavailable"] | None = None
+    # luld_halt / pdt_blocked: value and label only — raising them needs a live data layer (docs/04)
+    exception_kind: Literal["review", "cap_exceeded", "order_rejected", "vendor_unavailable",
+                            "data_delayed", "luld_halt", "pdt_blocked"] | None = None
     reason: str = Field(default="", description="Fill note, or why it was blocked / rejected / exceptional")
     rules_applied: list[str] = Field(default_factory=list,
                                      description="Hard-rule and auto-execution rule ids that touched this order")

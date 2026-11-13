@@ -52,11 +52,13 @@ from agent_trading_core.config import AUTO_EXECUTION, MARKETS, PAPER_TRADING, au
 from agent_trading_core.execution import (
     EXIT_SUFFIX,
     Prices,
+    book_events,
     cancel_orders,
     check_date,
     dd_stop_standing,
     effective_state,
     execution_lock,
+    next_trading_day,
     open_orders,
     paper_config,
     paper_expected,
@@ -66,6 +68,7 @@ from agent_trading_core.execution import (
 from agent_trading_core.krx_names import (
     ACCOUNT_MODE_KO,
     AUTO_RULE_KO,
+    BOOK_EVENT_KO,
     DECISION_SOURCE_KO,
     EXCEPTION_KIND_KO,
     EXECUTION_MODE_KO,
@@ -91,11 +94,12 @@ from agent_trading_core.krx_names import (
 )
 from agent_trading_core.memory import TradingMemoryLog
 from agent_trading_core.rating import RATING_REVIEW, RATINGS_5_TIER
-from agent_trading_core.risk import RiskConfig
+from agent_trading_core.risk import RiskConfig, drawdown_scale
 from agent_trading_core.screening import ScreenConfig
 
 VARIANT_KO = {"rules_off": "하드 룰 끔", "rules_on": "하드 룰 켬", "rules_on_regime": "하드 룰 + 국면 필터"}
 KST = ZoneInfo("Asia/Seoul")
+WEEKDAY_KO = "월화수목금토일"
 # the executor runs after the close: the decision is made on the close, the fill at the next open
 RUN_AFTER_CLOSE = timedelta(minutes=5)
 # where scripts/paper_backtest.py --market M writes its summary
@@ -246,10 +250,25 @@ def _name(ticker: str, screens: list[ScreenRun]) -> str | None:
     return None
 
 
+def _fill_at(o: OrderRecord) -> dict:
+    """When the order filled (its fill day) or will (open: the trading day after its decision): that session's open in
+    market time and in KST, as ISO — the zone database applies daylight saving, the screen only formats. None for an
+    order that does not fill (blocked, rejected, cancelled, exception)."""
+    if o.status in ("filled", "partial") and o.fill_date:
+        day, planned = o.fill_date, False
+    elif o.status == "open":
+        day, planned = next_trading_day(PRICES.calendar(MARKETS[o.market]["benchmark"]), o.trade_date), True
+    else:
+        return {"fill_at_local": None, "fill_at_kst": None, "fill_planned": False}
+    at = session_window(o.market, date.fromisoformat(day))[0]
+    return {"fill_at_local": at.astimezone(ZoneInfo(MARKETS[o.market]["timezone"])).isoformat(),
+            "fill_at_kst": at.isoformat(), "fill_planned": planned}
+
+
 def _order_out(o: OrderRecord, st: _Store) -> dict:
     out = o.model_dump()
     out.update(name=_name(o.ticker, st.screens), side_ko=SIDE_KO.get(o.side, o.side),
-               status_ko=ORDER_STATUS_KO.get(o.status, o.status), amount=o.amount)
+               status_ko=ORDER_STATUS_KO.get(o.status, o.status), amount=o.amount, **_fill_at(o))
     return out
 
 
@@ -295,7 +314,13 @@ def _state_out(market: str, st: dict | None = None) -> dict:
     # two axes on the stored mode (docs/10 D4): account paper | live, execution auto | manual approval
     account = "paper" if st["mode"] == "paper" else "live"
     execution = "manual" if st["mode"] == "manual" else "auto"
-    return st | {"market": market, "market_ko": market_ko, "mode_ko": mode_ko, "label_ko": label, "halted_by_ko": by_ko,
+    scope = st.get("halt_scope")
+    # a daily-loss halt ends at 00:00 market time; trading starts at that day's session open, shown in KST
+    opens = session_window(market, date.fromisoformat(st["auto_resume_at"][:10]))[0] if st.get("auto_resume_at") else None
+    return st | {"halt_scope": scope, "halt_scope_ko": HALT_SCOPE_KO.get(scope, scope) if scope else None,
+                 "auto_resume_open_kst": opens.isoformat() if opens else None,
+                 "auto_resume_label_ko": f"{opens:%m-%d}({WEEKDAY_KO[opens.weekday()]}) {opens:%H:%M} KST" if opens else None,
+                 "market": market, "market_ko": market_ko, "mode_ko": mode_ko, "label_ko": label, "halted_by_ko": by_ko,
                  "account_mode": account, "account_mode_ko": ACCOUNT_MODE_KO[account],
                  "execution_mode": execution, "execution_mode_ko": EXECUTION_MODE_KO[execution],
                  "halt_target_ko": target_ko, "admin_token_required": ADMIN_TOKEN is not None,
@@ -443,7 +468,7 @@ def labels() -> dict:
             "rule_desc_ko": RULE_DESC_KO, "sell_reason_ko": SELL_REASON_KO, "mode_ko": MODE_KO,
             "order_status_ko": ORDER_STATUS_KO, "exception_kind_ko": EXCEPTION_KIND_KO, "exit_reason_ko": EXIT_REASON_KO,
             "risk_rule_ko": RISK_RULE_KO, "decision_source_ko": DECISION_SOURCE_KO, "market_ko": MARKET_KO,
-            "halt_scope_ko": HALT_SCOPE_KO, "halt_target_ko": HALT_TARGET_KO, "markets": {m: _market_labels(m, now) for m in MARKETS},
+            "halt_scope_ko": HALT_SCOPE_KO, "halt_target_ko": HALT_TARGET_KO, "book_event_ko": BOOK_EVENT_KO, "markets": {m: _market_labels(m, now) for m in MARKETS},
             # one convention for both markets (docs/08 §4 Q1): a person reading both books must not flip colours
             "color_convention": {"up": "red", "down": "blue",
                                  "note": "국내 관례로 통일(시장 무관): 빨강=상승·매수, 파랑=하락·매도"}}
@@ -761,7 +786,21 @@ def positions(as_of: str | None = None, market: str | None = MarketQuery) -> dic
         g["label_ko"] = RISK_RULE_KO.get(g["id"], g["id"])
     out["exits_by_reason_ko"] = {EXIT_REASON_KO.get(k, k): n for k, n in out["exits_by_reason"].items()}
     out["mode"] = _state_out(st.market)
+    # ponytail: no sector data is connected (no network lookup); the screen shows one "미연결" row until there is
+    out["sector_exposure"] = None
     return out
+
+
+@app.get("/api/events", tags=["positions"])
+def events(market: str | None = MarketQuery, limit: int = Query(50, ge=1, le=500)) -> dict:
+    """가드·잠금 이력(화면 5): 그 시장의 주문·운영 기록에서 모은 가드 · 잠금 · Protections · 개입 · 피크 재설정, 최신순.
+    저장된 이력은 없다(execution.book_events)."""
+    st = _store(market)
+    rows = book_events(st.audit.orders(), st.operations, PRICES, cfg=paper_config(st.market))
+    for e in rows:
+        e["kind_ko"] = BOOK_EVENT_KO[e["kind"]]
+        e["name"] = _name(e["ticker"], st.screens) if e["ticker"] else None
+    return {"market": st.market, "total": len(rows), "counts": dict(Counter(e["kind"] for e in rows)), "events": rows[:limit]}
 
 
 # --- write endpoints: the three the plan allows, each appended to the operations log ------
@@ -862,6 +901,44 @@ def halt(body: HaltRequest) -> dict:
     return {"scope": body.scope, "scope_ko": HALT_SCOPE_KO.get(body.scope, body.scope), "results": results, "skipped": skipped}
 
 
+def _peak_reset(st: _Store) -> dict:
+    """What a resume after a −20% stop resets the peak to: the book's equity at the last close. The preview and the
+    resume both call this, so the preview is the resume's own number."""
+    book = positions_view(st.audit.orders(), PRICES, cfg=paper_config(st.market), operations=st.operations)
+    return {"to": book["equity"], "at": book["as_of"], "before": book["peak"]}
+
+
+RESUME_VARIANT_KO = {"running": "실행 중", "manual": "사람 정지", "daily_loss": "일일 손실 정지(자동 해제)", "dd_stop": "−20% 정지"}
+
+
+@app.get("/api/trading/resume-preview", tags=["trading"])
+def resume_preview(market: str | None = MarketQuery,
+                   reset_peak: bool = Query(True, description="−20% 정지 뒤 피크를 지금 평가액으로 재설정할 때의 기준")) -> dict:
+    """재가동 모달(읽기 전용): 그 시장의 정지 변형과, −20% 정지면 재가동 뒤 드로다운 기준 3줄(피크 · 반감 · 정지 금액,
+    지금 평가액 ÷ 그 금액 − 1). 재설정 금액은 재가동이 쓰는 값과 같은 계산(`_peak_reset`). 일일 손실 정지는
+    `can_resume` false — 다음 거래일 자동 해제를 기다린다."""
+    st = _store(market)
+    state = st.state()
+    dd = not state["running"] and dd_stop_standing(st.operations)
+    variant = ("running" if state["running"] else "daily_loss" if state["auto_resume_at"] else
+               "dd_stop" if dd else "manual")
+    out = {"market": st.market, "variant": variant, "variant_ko": RESUME_VARIANT_KO[variant],
+           "can_resume": variant in ("manual", "dd_stop"), "reset_peak": reset_peak and dd, "equity": None,
+           "as_of": None, "peak_before": None, "base": None, "restops": False, "lines": []}
+    if not dd:
+        return out
+    r, risk = _peak_reset(st), RiskConfig()
+    base = r["to"] if reset_peak else r["before"]
+    lines = [("peak", 0.0, "피크 · DD 0%"), ("dd_halve", risk.dd_halve, f"반감 {risk.dd_halve:+.0%}"),
+             ("dd_stop", risk.dd_stop, f"정지 {risk.dd_stop:+.0%}")]
+    return out | {"equity": r["to"], "as_of": r["at"], "peak_before": r["before"], "base": base,
+                  # without the reset the old peak still reads −20%: the next run halts again
+                  "restops": drawdown_scale(r["to"], base, risk)[0] == 0.0,
+                  "lines": [{"id": k, "label_ko": label.replace("-", "−"), "level": lv, "amount": base * (1 + lv),
+                             "vs_equity": r["to"] / (base * (1 + lv)) - 1 if base > 0 else None}
+                            for k, lv, label in lines]}
+
+
 class ResumeRequest(BaseModel):
     operator: str = Field(min_length=1)
     reason: str = Field(min_length=1)
@@ -889,9 +966,8 @@ def resume(body: ResumeRequest, x_admin_token: str | None = Header(default=None)
             after = {"running": True} | ({"open_orders_cancelled": [o.order_id for o in stale]} if stale else {})
             # after a −20% stop: the book's equity at the last close becomes the peak the drawdown counts from
             if body.reset_peak and dd_stop_standing(st.operations):
-                book = positions_view(st.audit.orders(), PRICES, cfg=paper_config(m), operations=st.operations)
-                after |= {"peak_reset_to": book["equity"], "peak_reset_at": book["as_of"], "peak_before": book["peak"]}
-                peak_resets[m] = {"to": book["equity"], "at": book["as_of"], "before": book["peak"]}
+                peak_resets[m] = r = _peak_reset(st)
+                after |= {"peak_reset_to": r["to"], "peak_reset_at": r["at"], "peak_before": r["before"]}
             st.audit.record_operation(OperationRecord(
                 kind="resume", at=at, operator=body.operator, role=role, reason=body.reason, market=m, scope=body.scope,
                 target="manual", before={"running": False}, after=after))
