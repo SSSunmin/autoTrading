@@ -15,13 +15,13 @@ import Performance from './pages/Performance'
 import Positions from './pages/Positions'
 import Settings from './pages/Settings'
 
-// Screen plan docs/02 v0.3 §1. Stubs (positions) are real routes so the nav is complete.
+// Screen plan docs/02 v0.3 §1.
 const NAV = [
   { to: '/', label: '오늘 요약' },
   { to: '/screens', label: '종목 선별' },
   { to: '/decisions', label: '결정·실행', badge: 'exceptions' },
   { to: '/tickers', label: '종목 상세' },
-  { to: '/positions', label: '포지션·리스크', stub: true },
+  { to: '/positions', label: '포지션·리스크' },
   { to: '/performance', label: '성과·백테스트' },
   { to: '/settings', label: '설정·감사 로그' },
 ]
@@ -45,7 +45,7 @@ export default function App() {
         <ul className="nav">
           {NAV.map((n) => (
             <li key={n.to}>
-              <NavLink to={n.to} end={n.to === '/'} className={({ isActive }) => `${isActive ? 'active' : ''} ${n.stub ? 'stub' : ''}`}>
+              <NavLink to={n.to} end={n.to === '/'} className={({ isActive }) => (isActive ? 'active' : '')}>
                 <span>{n.label}</span>
                 {n.badge === 'exceptions' && nException > 0 && <span className="nav-badge num" aria-label={`예외 ${nException}건`}>예외 {nException}</span>}
               </NavLink>

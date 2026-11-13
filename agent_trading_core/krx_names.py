@@ -51,7 +51,7 @@ MODE_KO: dict[str, str] = {"auto": "자동 매매", "manual": "수동 승인", "
 SIDE_KO: dict[str, str] = {"Buy": "매수", "Sell": "매도"}
 
 ORDER_STATUS_KO: dict[str, str] = {
-    "filled": "체결", "partial": "부분 체결", "open": "미체결", "blocked": "차단", "rejected": "거부", "exception": "예외",
+    "filled": "체결", "partial": "부분 체결", "open": "미체결", "blocked": "차단", "rejected": "거부", "exception": "예외", "cancelled": "취소",
 }
 
 EXCEPTION_KIND_KO: dict[str, str] = {

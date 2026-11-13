@@ -25,9 +25,10 @@ export function Pct({ value, digits = 1 }: { value: number | null | undefined; d
   return <span className={`num ${cls}`}>{pct(value, digits)}</span>
 }
 
-/** Order status as a strip: filled/partial neutral, blocked and rejected hot, open live. */
+/** Order status as a strip: filled/partial neutral, open live, cancelled (by a halt) secondary, blocked and rejected hot. */
 export function ExecStatus({ status, label }: { status: OrderStatus; label: string }) {
-  const variant = status === 'filled' || status === 'partial' ? 'neutral' : status === 'open' ? 'live' : 'hot'
+  const variant = status === 'filled' || status === 'partial' ? 'neutral' : status === 'open' ? 'live'
+    : status === 'cancelled' ? 'secondary' : 'hot'
   return <AgentChip variant={variant}>{label}</AgentChip>
 }
 

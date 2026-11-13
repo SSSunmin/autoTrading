@@ -33,7 +33,7 @@ export function DecisionCard({ d }: { d: Decision }) {
           <span className="muted num" style={{ marginLeft: 'auto' }}>{utc(o.placed_at)}</span>
         </div>
       )) : d.tradeable && (
-        <div className="exec none muted">주문 기록 없음 · 실행 레이어 연결 전 (결정은 다음 거래일 09:00 시가에 자동 주문됩니다)</div>
+        <div className="exec none muted">주문 기록 없음 · 아직 모의 실행 전 (결정은 다음 거래일 09:00 시가에 주문됩니다)</div>
       )}
 
       <div className="memo">{d.thesis.replace(/\*\*/g, '')}</div>
