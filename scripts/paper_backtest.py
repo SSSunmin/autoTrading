@@ -7,7 +7,8 @@ drawdown and how long it took to recover, inside the crash episodes especially; 
 own cash in USD, own benchmark, no FX, the same RiskConfig defaults measured once.
 
 ``--universe constituents`` runs the same book on point-in-time index members instead of the fixed forty
-(4th measurement, docs/09): data/universe/<index>_history.csv from scripts/build_universe.py.
+(4th measurement, docs/09): data/universe/<index>_history.csv from scripts/build_universe.py (US) or
+scripts/ingest_krx_constituents.py (KRX).
 
 Run:  .venv/Scripts/python scripts/paper_backtest.py [--market KRX|US] [--universe fixed40|constituents]
                                                     [--start 2024-01-02] [--end 2026-11-12]
@@ -176,7 +177,7 @@ def main() -> int:
     if args.universe == "constituents":
         path = HISTORIES[args.market]
         if not path.exists():
-            print(f"{args.market}: {path} 없음 — scripts/build_universe.py로 먼저 만든다(KRX는 수동 다운로드 필요). 건너뜀")
+            print(f"{args.market}: {path} 없음 — US는 scripts/build_universe.py, KRX는 scripts/ingest_krx_constituents.py로 먼저 만든다. 건너뜀")
             return 0
         history = load_history(path)
         names = tickers(history)
