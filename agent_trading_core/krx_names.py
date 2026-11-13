@@ -110,3 +110,6 @@ HALTED_BY_KO: dict[str, str] = {"system": "시스템 자동 정지"}
 MARKET_KO: dict[str, str] = {"KRX": "국내", "US": "미국"}
 
 HALT_SCOPE_KO: dict[str, str] = {"all": "전체 시장", "KRX": "국내만", "US": "미국만"}
+
+HALT_TARGET_KO: dict[str, str] = {"manual": "운영자 긴급 정지", "daily_loss": "시스템 · 일일 손실 정지",
+                                  "dd_stop": "시스템 · 드로다운 정지"}

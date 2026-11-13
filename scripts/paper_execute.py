@@ -6,8 +6,9 @@ Run:  .venv/Scripts/python scripts/paper_execute.py --date 2026-07-24
 One market per run (``--market``, default KRX): its own book under data/audit/<market>/ (decisions, orders,
 operations), its own index calendar (MARKETS[market]["benchmark"]: KRX ^KS11, US ^GSPC), currency and caps.
 KRX also reads the files written straight under data/audit/ before the market axis (never moved or rewritten).
-Reads the OHLCV cache (data/cache, never downloads); appends orders, and rule-exit decisions / an automatic halt
-to decisions / operations. TRADING_DATA_DIR overrides data/.
+Reads the OHLCV cache (data/cache, never downloads); appends orders, and rule-exit decisions / the executor's own
+halts (daily loss, −20% drawdown) and the next session's lift of a daily-loss halt to decisions / operations.
+TRADING_DATA_DIR overrides data/.
 
 ``--all`` runs every trading day from the first decision (or the last executed day) to the end of the price
 data, not only decision days: the rule exits are judged at each day's close. It ends with the audit count of
@@ -76,25 +77,25 @@ def main(argv: list[str] | None = None) -> int:
             dates = [args.date]
     except ValueError as exc:                    # json / pydantic: a cut-short or invalid line
         return _broken(exc)
-    halts = 0
+    halts = resumes = 0
     for date in dates:
         try:
-            before = trading_state(audit.operations())["running"]
+            seen = len(audit.operations())
             written = execute_date(audit, date, prices, cfg=cfg)
-            after = trading_state(audit.operations())
+            ops = [op for op in audit.operations()[seen:] if op.operator == "system"]   # the executor's own lines
         except ExecutionRefused as exc:
             print(f"{date}: 거부 — {exc}", file=sys.stderr)
             return 3
         except ValueError as exc:
             return _broken(exc, f"{date}: ")
         exits = sum(o.order_id.endswith(EXIT_SUFFIX) and o.trade_date == date for o in written)
-        auto_halt = before and not after["running"] and after["halted_by"] == "system"
-        halts += auto_halt
-        if written or auto_halt or not args.all:
+        halts += sum(op.kind == "halt" for op in ops)
+        resumes += sum(op.kind == "resume" for op in ops)
+        if written or ops or not args.all:
             counts = Counter(o.status for o in written)
             print(f"{date}: {len(written)}건 기록 " + (", ".join(f"{k} {n}" for k, n in sorted(counts.items())) or "(새 기록 없음)")
                   + (f" · 규칙 청산 {exits}" if exits else "")
-                  + (f" · 자동 정지: {after['halt_reason']}" if auto_halt else ""))
+                  + "".join(f" · {'자동 정지' if op.kind == 'halt' else '자동 재가동'}: {op.reason}" for op in ops))
     try:
         orders, decisions = audit.orders(), audit.decisions()
     except ValueError as exc:
@@ -103,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     current = latest_orders(orders).values()
     state = trading_state(audit.operations())
     print(f"{args.market} · 주문 {len(current)}건 · 규칙 청산 {sum(o.order_id.endswith(EXIT_SUFFIX) for o in current)}건 · "
-          f"자동 정지 {halts}회 · 미설명 주문 {len(missing)}건 · 상태 "
+          f"자동 정지 {halts}회 · 자동 재가동 {resumes}회 · 미설명 주문 {len(missing)}건 · 상태 "
           + ("실행 중" if state["running"] else f"정지({state['halted_by']}: {state['halt_reason']})"))
     for o in missing:
         print(f"  미설명: {o.order_id}", file=sys.stderr)

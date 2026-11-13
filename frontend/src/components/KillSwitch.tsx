@@ -44,7 +44,7 @@ export function KillSwitch({ state, market }: { state: TradingState | null; mark
   return (
     <>
       <AgentButton variant="primary" size="sm" disabled={!state} onClick={openModal}
-        title={state && !state.running ? `${MARKET_KO[market]}은 이미 정지된 상태입니다. 전체 정지는 아직 실행 중인 시장만 멈춥니다.` : undefined}>
+        title={state && !state.running ? `${MARKET_KO[market]}은 이미 정지된 상태입니다(${state.halt_target_ko ?? state.halted_by_ko ?? ''}). 전체 정지는 아직 실행 중인 시장만 멈춥니다.` : undefined}>
         긴급 정지
       </AgentButton>
       {done && <span className="muted">{done}</span>}

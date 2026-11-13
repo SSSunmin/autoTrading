@@ -61,7 +61,7 @@ export const api = {
   rules: (market: Market) => get<RulesSettings>('/api/settings/rules', { market }),
   mode: (market: Market) => get<TradingState>('/api/trading/mode', { market }),
   halt: (body: { operator: string; reason: string; keep_exits: boolean; scope: 'all' | Market }) => post<HaltResult>('/api/trading/halt', body),
-  resume: (body: { operator: string; reason: string; scope: 'all' | Market }, adminToken?: string) =>
+  resume: (body: { operator: string; reason: string; scope: 'all' | Market; reset_peak?: boolean }, adminToken?: string) =>
     post<ResumeResult>('/api/trading/resume', body, adminToken),
   setMode: (body: { operator: string; mode: Mode; reason: string; market: Market }, adminToken?: string) =>
     post<{ state: TradingState }>('/api/trading/mode', body, adminToken),

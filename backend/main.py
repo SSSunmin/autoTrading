@@ -53,6 +53,7 @@ from agent_trading_core.execution import (
     Prices,
     cancel_orders,
     check_date,
+    dd_stop_standing,
     execution_lock,
     open_orders,
     paper_config,
@@ -64,6 +65,7 @@ from agent_trading_core.krx_names import (
     EXCEPTION_KIND_KO,
     EXIT_REASON_KO,
     HALT_SCOPE_KO,
+    HALT_TARGET_KO,
     HALTED_BY_KO,
     MARKET_KO,
     MODE_KO,
@@ -258,10 +260,24 @@ def _state_out(market: str, st: dict | None = None) -> dict:
     mode_ko = MODE_KO.get(st["mode"], st["mode"])
     market_ko = MARKET_KO.get(market, market)
     by_ko = HALTED_BY_KO.get(st["halted_by"], st["halted_by"]) if st["halted_by"] else None
-    label = f"{market_ko} 정지됨 · {st['halted_at'][:16].replace('T', ' ')} UTC · {by_ko}" if not st["running"] else (
+    target_ko = HALT_TARGET_KO.get(st.get("halt_target") or "", None)
+    # a system halt names what stopped it (일일 손실 / 드로다운); a person's names the person
+    who = target_ko if st["halted_by"] == "system" and target_ko else by_ko
+    label = f"{market_ko} 정지됨 · {st['halted_at'][:16].replace('T', ' ')} UTC · {who}" if not st["running"] else (
         f"{market_ko} 자동 매매 실행 중" if st["mode"] == "auto" else f"{market_ko} {mode_ko} 모드")
     return st | {"market": market, "market_ko": market_ko, "mode_ko": mode_ko, "label_ko": label, "halted_by_ko": by_ko,
-                 "admin_token_required": ADMIN_TOKEN is not None}
+                 "halt_target_ko": target_ko, "admin_token_required": ADMIN_TOKEN is not None,
+                 # a −20% stop stands (perhaps under a person's halt): the admin resume offers the peak reset
+                 "dd_stop": not st["running"] and _dd_stop(market)}
+
+
+def _dd_stop(market: str) -> bool:
+    """Read from the operations log alone: a broken orders log (or an unreadable operations one) must not fail the
+    state a halt returns."""
+    try:
+        return dd_stop_standing(STORES[market].audit.operations())
+    except ValueError:
+        return False
 
 
 def _exception_kind(o: OrderRecord) -> str:
@@ -371,7 +387,7 @@ def labels() -> dict:
             "rule_desc_ko": RULE_DESC_KO, "sell_reason_ko": SELL_REASON_KO, "mode_ko": MODE_KO,
             "order_status_ko": ORDER_STATUS_KO, "exception_kind_ko": EXCEPTION_KIND_KO, "exit_reason_ko": EXIT_REASON_KO,
             "risk_rule_ko": RISK_RULE_KO, "decision_source_ko": DECISION_SOURCE_KO, "market_ko": MARKET_KO,
-            "halt_scope_ko": HALT_SCOPE_KO, "markets": {m: _market_labels(m, now) for m in MARKETS},
+            "halt_scope_ko": HALT_SCOPE_KO, "halt_target_ko": HALT_TARGET_KO, "markets": {m: _market_labels(m, now) for m in MARKETS},
             # one convention for both markets (docs/08 §4 Q1): a person reading both books must not flip colours
             "color_convention": {"up": "red", "down": "blue",
                                  "note": "국내 관례로 통일(시장 무관): 빨강=상승·매수, 파랑=하락·매도"}}
@@ -387,7 +403,8 @@ def markets() -> list[dict]:
         run = next_run(m, now)
         card = _market_labels(m, now) | {"next_run_kst": run.isoformat(), "next_run_label_ko": f"{run:%m-%d %H:%M} KST"}
         try:
-            book = positions_view(_store(m).audit.orders(), PRICES, cfg=paper_config(m))
+            st = _store(m)
+            book = positions_view(st.audit.orders(), PRICES, cfg=paper_config(m), operations=st.operations)
             card |= {"as_of": book["as_of"], "equity": book["equity"], "initial_cash": book["initial_cash"],
                      "day_return": book["day_return"], "drawdown": book["drawdown"], "positions": len(book["positions"]),
                      "state": _state_out(m), "error": None}
@@ -611,7 +628,7 @@ def positions(as_of: str | None = None, market: str | None = MarketQuery) -> dic
     """모의투자 장부(화면 5): 그 시장의 orders.jsonl 체결 기록을 캐시 종가로 재생한 보유·평가·드로다운·가드 상태. 저장된 상태 없음."""
     _date_param(as_of, "as_of")
     st = _store(market)
-    out = positions_view(st.audit.orders(), PRICES, as_of=as_of, cfg=paper_config(st.market))
+    out = positions_view(st.audit.orders(), PRICES, as_of=as_of, cfg=paper_config(st.market), operations=st.operations)
     for r in out["positions"] + out["closed"]:
         r["name"] = _name(r["ticker"], st.screens)
     for g in out["protections"]:
@@ -698,7 +715,7 @@ def halt(body: HaltRequest) -> dict:
             # halt first: while halted the executor fills nothing, so the cancellations after it are safe
             op = OperationRecord(
                 kind="halt", at=at, operator=body.operator, role="operator", market=m, scope=body.scope,
-                reason=body.reason + (f" ({error})" if error else ""), target="running",
+                reason=body.reason + (f" ({error})" if error else ""), target="manual",
                 # an unreadable log: the state before is unknown, and an append-only line must not claim it
                 before={"running": None, "unreadable": True} if before is None
                 else {"running": True} if before["running"] else {"running": False, "keep_exits": True},
@@ -723,6 +740,8 @@ class ResumeRequest(BaseModel):
     operator: str = Field(min_length=1)
     reason: str = Field(min_length=1)
     scope: str = Field(default="all", description="all(기본, 정지된 모든 시장) | KRX | US")
+    reset_peak: bool = Field(default=True, description="−20% 드로다운 정지 뒤에만 의미: 드로다운 피크를 지금 평가액으로 재설정. "
+                                                        "false면 피크를 그대로 둔다(드로다운이 여전히 −20%면 다음 실행에서 다시 정지)")
 
 
 @app.post("/api/trading/resume", tags=["trading"])
@@ -730,7 +749,7 @@ def resume(body: ResumeRequest, x_admin_token: str | None = Header(default=None)
     """재가동. 관리자만(kill_switch_reset = admin). scope=all이면 정지된 모든 시장, 시장 이름이면 그 시장만 — 다른 시장은 그대로."""
     role = _require_admin(x_admin_token)
     markets = _scope_markets(body.scope)
-    resumed, skipped = [], []
+    resumed, skipped, peak_resets = [], [], {}
     with _locks(markets):
         at = _now()
         for m in markets:
@@ -741,16 +760,21 @@ def resume(body: ResumeRequest, x_admin_token: str | None = Header(default=None)
                 continue
             # a halt that could not read the orders log left its open orders standing; they must not fill at an old open
             stale = [o for o in open_orders(st.audit, keep_sells=state["keep_exits"]) if o.placed_at <= state["halted_at"]]
+            after = {"running": True} | ({"open_orders_cancelled": [o.order_id for o in stale]} if stale else {})
+            # after a −20% stop: the book's equity at the last close becomes the peak the drawdown counts from
+            if body.reset_peak and dd_stop_standing(st.operations):
+                book = positions_view(st.audit.orders(), PRICES, cfg=paper_config(m), operations=st.operations)
+                after |= {"peak_reset_to": book["equity"], "peak_reset_at": book["as_of"], "peak_before": book["peak"]}
+                peak_resets[m] = {"to": book["equity"], "at": book["as_of"], "before": book["peak"]}
             st.audit.record_operation(OperationRecord(
                 kind="resume", at=at, operator=body.operator, role=role, reason=body.reason, market=m, scope=body.scope,
-                target="running", before={"running": False},
-                after={"running": True} | ({"open_orders_cancelled": [o.order_id for o in stale]} if stale else {})))
+                target="manual", before={"running": False}, after=after))
             cancel_orders(st.audit, stale, f"정지 전 미체결 — 재가동 시 취소 ({body.operator})")
             resumed.append(m)
         if not resumed:
             raise HTTPException(409, "이미 실행 중입니다" + ("" if len(markets) == 1 else " (모든 시장)"))
     return {"scope": body.scope, "scope_ko": HALT_SCOPE_KO.get(body.scope, body.scope), "resumed": resumed,
-            "skipped": skipped, "states": {m: _state_out(m) for m in markets}}
+            "skipped": skipped, "peak_resets": peak_resets, "states": {m: _state_out(m) for m in markets}}
 
 
 class ModeRequest(BaseModel):
