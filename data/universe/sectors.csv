@@ -1,0 +1,789 @@
+ticker,sector,source,as_of
+005930.KS,Technology,yahoo_profile,2026-11-13
+000660.KS,Technology,yahoo_profile,2026-11-13
+373220.KS,Industrials,yahoo_profile,2026-11-13
+207940.KS,Healthcare,yahoo_profile,2026-11-13
+005380.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+000270.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+068270.KS,Healthcare,yahoo_profile,2026-11-13
+105560.KS,Financial Services,yahoo_profile,2026-11-13
+055550.KS,Financial Services,yahoo_profile,2026-11-13
+035420.KS,Communication Services,yahoo_profile,2026-11-13
+012330.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+028260.KS,Industrials,yahoo_profile,2026-11-13
+006400.KS,Industrials,yahoo_profile,2026-11-13
+051910.KS,Basic Materials,yahoo_profile,2026-11-13
+003670.KS,Industrials,yahoo_profile,2026-11-13
+035720.KS,Communication Services,yahoo_profile,2026-11-13
+032830.KS,Financial Services,yahoo_profile,2026-11-13
+066570.KS,Technology,yahoo_profile,2026-11-13
+015760.KS,Utilities,yahoo_profile,2026-11-13
+034730.KS,Industrials,yahoo_profile,2026-11-13
+005490.KS,Basic Materials,yahoo_profile,2026-11-13
+011200.KS,Industrials,yahoo_profile,2026-11-13
+009150.KS,Technology,yahoo_profile,2026-11-13
+018260.KS,Technology,yahoo_profile,2026-11-13
+017670.KS,Communication Services,yahoo_profile,2026-11-13
+030200.KS,Communication Services,yahoo_profile,2026-11-13
+086790.KS,Financial Services,yahoo_profile,2026-11-13
+316140.KS,Financial Services,yahoo_profile,2026-11-13
+000810.KS,Financial Services,yahoo_profile,2026-11-13
+010950.KS,Energy,yahoo_profile,2026-11-13
+096770.KS,Energy,yahoo_profile,2026-11-13
+009540.KS,Industrials,yahoo_profile,2026-11-13
+329180.KS,Industrials,yahoo_profile,2026-11-13
+042660.KS,Industrials,yahoo_profile,2026-11-13
+012450.KS,Industrials,yahoo_profile,2026-11-13
+010140.KS,Industrials,yahoo_profile,2026-11-13
+000100.KS,Healthcare,yahoo_profile,2026-11-13
+033780.KS,Consumer Defensive,yahoo_profile,2026-11-13
+259960.KS,Communication Services,yahoo_profile,2026-11-13
+036570.KS,Communication Services,yahoo_profile,2026-11-13
+000080.KS,Consumer Defensive,yahoo_profile,2026-11-13
+000120.KS,Industrials,yahoo_profile,2026-11-13
+000150.KS,Industrials,yahoo_profile,2026-11-13
+000210.KS,Basic Materials,yahoo_profile,2026-11-13
+000240.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+000670.KS,Technology,yahoo_profile,2026-11-13
+000720.KS,Industrials,yahoo_profile,2026-11-13
+000880.KS,Industrials,yahoo_profile,2026-11-13
+000990.KS,Technology,yahoo_profile,2026-11-13
+001040.KS,Industrials,yahoo_profile,2026-11-13
+001120.KS,Industrials,yahoo_profile,2026-11-13
+001430.KS,Basic Materials,yahoo_profile,2026-11-13
+001440.KS,Industrials,yahoo_profile,2026-11-13
+001450.KS,Financial Services,yahoo_profile,2026-11-13
+001570.KS,Basic Materials,yahoo_profile,2026-11-13
+001680.KS,Consumer Defensive,yahoo_profile,2026-11-13
+001740.KS,Industrials,yahoo_profile,2026-11-13
+001800.KS,Consumer Defensive,yahoo_profile,2026-11-13
+002380.KS,Basic Materials,yahoo_profile,2026-11-13
+002710.KS,Basic Materials,yahoo_profile,2026-11-13
+002790.KS,Consumer Defensive,yahoo_profile,2026-11-13
+003090.KS,Healthcare,yahoo_profile,2026-11-13
+003230.KS,Consumer Defensive,yahoo_profile,2026-11-13
+003410.KS,,yahoo_profile,2026-11-13
+003490.KS,Industrials,yahoo_profile,2026-11-13
+003550.KS,Technology,yahoo_profile,2026-11-13
+003620.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+004000.KS,Basic Materials,yahoo_profile,2026-11-13
+004020.KS,Basic Materials,yahoo_profile,2026-11-13
+004170.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+004370.KS,Consumer Defensive,yahoo_profile,2026-11-13
+004490.KS,Industrials,yahoo_profile,2026-11-13
+004800.KS,Industrials,yahoo_profile,2026-11-13
+004990.KS,Consumer Defensive,yahoo_profile,2026-11-13
+005250.KS,Healthcare,yahoo_profile,2026-11-13
+005300.KS,Consumer Defensive,yahoo_profile,2026-11-13
+005420.KS,Basic Materials,yahoo_profile,2026-11-13
+005830.KS,Financial Services,yahoo_profile,2026-11-13
+005850.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+005940.KS,Financial Services,yahoo_profile,2026-11-13
+006110.KS,Basic Materials,yahoo_profile,2026-11-13
+006260.KS,Industrials,yahoo_profile,2026-11-13
+006280.KS,Healthcare,yahoo_profile,2026-11-13
+006360.KS,Industrials,yahoo_profile,2026-11-13
+006650.KS,Basic Materials,yahoo_profile,2026-11-13
+006800.KS,Financial Services,yahoo_profile,2026-11-13
+007070.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+007310.KS,Consumer Defensive,yahoo_profile,2026-11-13
+008730.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+008770.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+008930.KS,Healthcare,yahoo_profile,2026-11-13
+009240.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+009420.KS,Healthcare,yahoo_profile,2026-11-13
+009830.KS,Technology,yahoo_profile,2026-11-13
+009900.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+009970.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+010060.KS,Financial Services,yahoo_profile,2026-11-13
+010120.KS,Industrials,yahoo_profile,2026-11-13
+010130.KS,Basic Materials,yahoo_profile,2026-11-13
+010620.KS,,yahoo_profile,2026-11-13
+010780.KS,Industrials,yahoo_profile,2026-11-13
+011070.KS,Technology,yahoo_profile,2026-11-13
+011170.KS,Basic Materials,yahoo_profile,2026-11-13
+011210.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+011780.KS,Basic Materials,yahoo_profile,2026-11-13
+011790.KS,Basic Materials,yahoo_profile,2026-11-13
+012750.KS,Industrials,yahoo_profile,2026-11-13
+014680.KS,Basic Materials,yahoo_profile,2026-11-13
+014820.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+016360.KS,Financial Services,yahoo_profile,2026-11-13
+016380.KS,Basic Materials,yahoo_profile,2026-11-13
+017800.KS,Industrials,yahoo_profile,2026-11-13
+018880.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+019170.KS,Healthcare,yahoo_profile,2026-11-13
+020150.KS,Industrials,yahoo_profile,2026-11-13
+020560.KS,Industrials,yahoo_profile,2026-11-13
+021240.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+023530.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+024110.KS,Financial Services,yahoo_profile,2026-11-13
+026960.KS,Consumer Defensive,yahoo_profile,2026-11-13
+028050.KS,Industrials,yahoo_profile,2026-11-13
+028670.KS,Industrials,yahoo_profile,2026-11-13
+029780.KS,Financial Services,yahoo_profile,2026-11-13
+030000.KS,Communication Services,yahoo_profile,2026-11-13
+031430.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+032350.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+032640.KS,Communication Services,yahoo_profile,2026-11-13
+034020.KS,Industrials,yahoo_profile,2026-11-13
+034220.KS,Technology,yahoo_profile,2026-11-13
+035250.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+036460.KS,Utilities,yahoo_profile,2026-11-13
+039130.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+039490.KS,Financial Services,yahoo_profile,2026-11-13
+042670.KS,,yahoo_profile,2026-11-13
+047040.KS,Industrials,yahoo_profile,2026-11-13
+047050.KS,Industrials,yahoo_profile,2026-11-13
+047810.KS,Industrials,yahoo_profile,2026-11-13
+051600.KS,Industrials,yahoo_profile,2026-11-13
+051900.KS,Consumer Defensive,yahoo_profile,2026-11-13
+052690.KS,Industrials,yahoo_profile,2026-11-13
+064350.KS,Industrials,yahoo_profile,2026-11-13
+069260.KS,Basic Materials,yahoo_profile,2026-11-13
+069620.KS,Healthcare,yahoo_profile,2026-11-13
+069960.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+071050.KS,Financial Services,yahoo_profile,2026-11-13
+073240.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+078930.KS,Industrials,yahoo_profile,2026-11-13
+079550.KS,Industrials,yahoo_profile,2026-11-13
+081660.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+086280.KS,Industrials,yahoo_profile,2026-11-13
+088350.KS,Financial Services,yahoo_profile,2026-11-13
+090430.KS,Consumer Defensive,yahoo_profile,2026-11-13
+093370.KS,Basic Materials,yahoo_profile,2026-11-13
+097950.KS,Consumer Defensive,yahoo_profile,2026-11-13
+103140.KS,Industrials,yahoo_profile,2026-11-13
+105630.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+111770.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+112610.KS,Industrials,yahoo_profile,2026-11-13
+114090.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+120110.KS,Basic Materials,yahoo_profile,2026-11-13
+128940.KS,Healthcare,yahoo_profile,2026-11-13
+137310.KS,Healthcare,yahoo_profile,2026-11-13
+138040.KS,Financial Services,yahoo_profile,2026-11-13
+138930.KS,Financial Services,yahoo_profile,2026-11-13
+139130.KS,Financial Services,yahoo_profile,2026-11-13
+139480.KS,Consumer Defensive,yahoo_profile,2026-11-13
+145720.KS,Healthcare,yahoo_profile,2026-11-13
+161390.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+161890.KS,Consumer Defensive,yahoo_profile,2026-11-13
+175330.KS,Financial Services,yahoo_profile,2026-11-13
+178920.KS,Basic Materials,yahoo_profile,2026-11-13
+180640.KS,Real Estate,yahoo_profile,2026-11-13
+185750.KS,Healthcare,yahoo_profile,2026-11-13
+192080.KS,Communication Services,yahoo_profile,2026-11-13
+192820.KS,Consumer Defensive,yahoo_profile,2026-11-13
+204320.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+241560.KS,Industrials,yahoo_profile,2026-11-13
+251270.KS,Communication Services,yahoo_profile,2026-11-13
+267250.KS,Energy,yahoo_profile,2026-11-13
+267260.KS,Industrials,yahoo_profile,2026-11-13
+271560.KS,Consumer Defensive,yahoo_profile,2026-11-13
+271940.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+272210.KS,Industrials,yahoo_profile,2026-11-13
+280360.KS,Consumer Defensive,yahoo_profile,2026-11-13
+282330.KS,Consumer Defensive,yahoo_profile,2026-11-13
+285130.KS,Basic Materials,yahoo_profile,2026-11-13
+298020.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+298050.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+300720.KS,Basic Materials,yahoo_profile,2026-11-13
+302440.KS,Healthcare,yahoo_profile,2026-11-13
+323410.KS,Financial Services,yahoo_profile,2026-11-13
+326030.KS,Healthcare,yahoo_profile,2026-11-13
+336260.KS,Industrials,yahoo_profile,2026-11-13
+352820.KS,Communication Services,yahoo_profile,2026-11-13
+361610.KS,Technology,yahoo_profile,2026-11-13
+375500.KS,Industrials,yahoo_profile,2026-11-13
+377300.KS,Technology,yahoo_profile,2026-11-13
+383220.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+402340.KS,Financial Services,yahoo_profile,2026-11-13
+450080.KS,Industrials,yahoo_profile,2026-11-13
+003030.KS,Basic Materials,yahoo_profile,2026-11-13
+005070.KS,Basic Materials,yahoo_profile,2026-11-13
+022100.KS,Technology,yahoo_profile,2026-11-13
+042700.KS,Technology,yahoo_profile,2026-11-13
+066970.KS,Industrials,yahoo_profile,2026-11-13
+454910.KS,Industrials,yahoo_profile,2026-11-13
+457190.KS,,yahoo_profile,2026-11-13
+002840.KS,Basic Materials,yahoo_profile,2026-11-13
+278470.KS,Consumer Defensive,yahoo_profile,2026-11-13
+298040.KS,Industrials,yahoo_profile,2026-11-13
+456040.KS,Basic Materials,yahoo_profile,2026-11-13
+489790.KS,Industrials,yahoo_profile,2026-11-13
+003240.KS,Basic Materials,yahoo_profile,2026-11-13
+006040.KS,Consumer Defensive,yahoo_profile,2026-11-13
+007340.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+012630.KS,Industrials,yahoo_profile,2026-11-13
+017960.KS,Basic Materials,yahoo_profile,2026-11-13
+071320.KS,Utilities,yahoo_profile,2026-11-13
+268280.KS,Basic Materials,yahoo_profile,2026-11-13
+443060.KS,Industrials,yahoo_profile,2026-11-13
+002030.KS,Basic Materials,yahoo_profile,2026-11-13
+007660.KS,Technology,yahoo_profile,2026-11-13
+0126Z0.KS,Healthcare,yahoo_profile,2026-11-13
+034230.KS,Consumer Cyclical,yahoo_profile,2026-11-13
+062040.KS,Industrials,yahoo_profile,2026-11-13
+064400.KS,Technology,yahoo_profile,2026-11-13
+082740.KS,Industrials,yahoo_profile,2026-11-13
+307950.KS,Technology,yahoo_profile,2026-11-13
+071970.KS,Industrials,yahoo_profile,2026-11-13
+267270.KS,Industrials,yahoo_profile,2026-11-13
+483650.KS,Consumer Defensive,yahoo_profile,2026-11-13
+AAPL,Technology,yahoo_profile,2026-11-13
+MSFT,Technology,yahoo_profile,2026-11-13
+NVDA,Technology,yahoo_profile,2026-11-13
+AVGO,Technology,yahoo_profile,2026-11-13
+ORCL,Technology,yahoo_profile,2026-11-13
+CRM,Technology,yahoo_profile,2026-11-13
+GOOGL,Communication Services,yahoo_profile,2026-11-13
+META,Communication Services,yahoo_profile,2026-11-13
+NFLX,Communication Services,yahoo_profile,2026-11-13
+DIS,Communication Services,yahoo_profile,2026-11-13
+AMZN,Consumer Cyclical,yahoo_profile,2026-11-13
+TSLA,Consumer Cyclical,yahoo_profile,2026-11-13
+HD,Consumer Cyclical,yahoo_profile,2026-11-13
+MCD,Consumer Cyclical,yahoo_profile,2026-11-13
+WMT,Consumer Defensive,yahoo_profile,2026-11-13
+COST,Consumer Defensive,yahoo_profile,2026-11-13
+PG,Consumer Defensive,yahoo_profile,2026-11-13
+KO,Consumer Defensive,yahoo_profile,2026-11-13
+LLY,Healthcare,yahoo_profile,2026-11-13
+JNJ,Healthcare,yahoo_profile,2026-11-13
+UNH,Healthcare,yahoo_profile,2026-11-13
+ABBV,Healthcare,yahoo_profile,2026-11-13
+BRK-B,Financial Services,yahoo_profile,2026-11-13
+JPM,Financial Services,yahoo_profile,2026-11-13
+V,Financial Services,yahoo_profile,2026-11-13
+MA,Financial Services,yahoo_profile,2026-11-13
+BAC,Financial Services,yahoo_profile,2026-11-13
+GE,Industrials,yahoo_profile,2026-11-13
+CAT,Industrials,yahoo_profile,2026-11-13
+RTX,Industrials,yahoo_profile,2026-11-13
+UNP,Industrials,yahoo_profile,2026-11-13
+XOM,Energy,yahoo_profile,2026-11-13
+CVX,Energy,yahoo_profile,2026-11-13
+COP,Energy,yahoo_profile,2026-11-13
+NEE,Utilities,yahoo_profile,2026-11-13
+SO,Utilities,yahoo_profile,2026-11-13
+PLD,Real Estate,yahoo_profile,2026-11-13
+AMT,Real Estate,yahoo_profile,2026-11-13
+LIN,Basic Materials,yahoo_profile,2026-11-13
+SHW,Basic Materials,yahoo_profile,2026-11-13
+A,Healthcare,yahoo_profile,2026-11-13
+AAL,Industrials,yahoo_profile,2026-11-13
+ABNB,Consumer Cyclical,yahoo_profile,2026-11-13
+ABT,Healthcare,yahoo_profile,2026-11-13
+ACGL,Financial Services,yahoo_profile,2026-11-13
+ACN,Technology,yahoo_profile,2026-11-13
+ADBE,Technology,yahoo_profile,2026-11-13
+ADI,Technology,yahoo_profile,2026-11-13
+ADM,Consumer Defensive,yahoo_profile,2026-11-13
+ADP,Technology,yahoo_profile,2026-11-13
+ADSK,Technology,yahoo_profile,2026-11-13
+AEE,Utilities,yahoo_profile,2026-11-13
+AEP,Utilities,yahoo_profile,2026-11-13
+AES,Utilities,yahoo_profile,2026-11-13
+AFL,Financial Services,yahoo_profile,2026-11-13
+AIG,Financial Services,yahoo_profile,2026-11-13
+AIZ,Financial Services,yahoo_profile,2026-11-13
+AJG,Financial Services,yahoo_profile,2026-11-13
+AKAM,Technology,yahoo_profile,2026-11-13
+ALB,Basic Materials,yahoo_profile,2026-11-13
+ALGN,Healthcare,yahoo_profile,2026-11-13
+ALL,Financial Services,yahoo_profile,2026-11-13
+ALLE,Industrials,yahoo_profile,2026-11-13
+AMAT,Technology,yahoo_profile,2026-11-13
+AMCR,Consumer Cyclical,yahoo_profile,2026-11-13
+AMD,Technology,yahoo_profile,2026-11-13
+AME,Industrials,yahoo_profile,2026-11-13
+AMGN,Healthcare,yahoo_profile,2026-11-13
+AMP,Financial Services,yahoo_profile,2026-11-13
+ANET,Technology,yahoo_profile,2026-11-13
+ANSS,,yahoo_profile,2026-11-13
+AON,Financial Services,yahoo_profile,2026-11-13
+AOS,Industrials,yahoo_profile,2026-11-13
+APA,Energy,yahoo_profile,2026-11-13
+APD,Basic Materials,yahoo_profile,2026-11-13
+APH,Technology,yahoo_profile,2026-11-13
+APTV,Consumer Cyclical,yahoo_profile,2026-11-13
+ARE,Real Estate,yahoo_profile,2026-11-13
+ATO,Utilities,yahoo_profile,2026-11-13
+AVB,Real Estate,yahoo_profile,2026-11-13
+AVY,Consumer Cyclical,yahoo_profile,2026-11-13
+AWK,Utilities,yahoo_profile,2026-11-13
+AXON,Industrials,yahoo_profile,2026-11-13
+AXP,Financial Services,yahoo_profile,2026-11-13
+AZO,Consumer Cyclical,yahoo_profile,2026-11-13
+BA,Industrials,yahoo_profile,2026-11-13
+BALL,Consumer Cyclical,yahoo_profile,2026-11-13
+BAX,Healthcare,yahoo_profile,2026-11-13
+BBWI,Consumer Cyclical,yahoo_profile,2026-11-13
+BBY,Consumer Cyclical,yahoo_profile,2026-11-13
+BDX,Healthcare,yahoo_profile,2026-11-13
+BEN,Financial Services,yahoo_profile,2026-11-13
+BF-B,Consumer Defensive,yahoo_profile,2026-11-13
+BG,Consumer Defensive,yahoo_profile,2026-11-13
+BIIB,Healthcare,yahoo_profile,2026-11-13
+BIO,Healthcare,yahoo_profile,2026-11-13
+BKNG,Consumer Cyclical,yahoo_profile,2026-11-13
+BKR,Energy,yahoo_profile,2026-11-13
+BLDR,Industrials,yahoo_profile,2026-11-13
+BLK,Financial Services,yahoo_profile,2026-11-13
+BMY,Healthcare,yahoo_profile,2026-11-13
+BNY,Financial Services,yahoo_profile,2026-11-13
+BR,Technology,yahoo_profile,2026-11-13
+BRO,Financial Services,yahoo_profile,2026-11-13
+BSX,Healthcare,yahoo_profile,2026-11-13
+BWA,Consumer Cyclical,yahoo_profile,2026-11-13
+BX,Financial Services,yahoo_profile,2026-11-13
+BXP,Real Estate,yahoo_profile,2026-11-13
+C,Financial Services,yahoo_profile,2026-11-13
+CAG,Consumer Defensive,yahoo_profile,2026-11-13
+CAH,Healthcare,yahoo_profile,2026-11-13
+CARR,Industrials,yahoo_profile,2026-11-13
+CB,Financial Services,yahoo_profile,2026-11-13
+CBOE,Financial Services,yahoo_profile,2026-11-13
+CBRE,Real Estate,yahoo_profile,2026-11-13
+CCI,Real Estate,yahoo_profile,2026-11-13
+CCL,Consumer Cyclical,yahoo_profile,2026-11-13
+CDAY,,yahoo_profile,2026-11-13
+CDNS,Technology,yahoo_profile,2026-11-13
+CDW,Technology,yahoo_profile,2026-11-13
+CE,Basic Materials,yahoo_profile,2026-11-13
+CEG,Utilities,yahoo_profile,2026-11-13
+CF,Basic Materials,yahoo_profile,2026-11-13
+CFG,Financial Services,yahoo_profile,2026-11-13
+CHD,Consumer Defensive,yahoo_profile,2026-11-13
+CHRW,Industrials,yahoo_profile,2026-11-13
+CHTR,Communication Services,yahoo_profile,2026-11-13
+CI,Healthcare,yahoo_profile,2026-11-13
+CINF,Financial Services,yahoo_profile,2026-11-13
+CL,Consumer Defensive,yahoo_profile,2026-11-13
+CLX,Consumer Defensive,yahoo_profile,2026-11-13
+CMA,,yahoo_profile,2026-11-13
+CMCSA,Communication Services,yahoo_profile,2026-11-13
+CME,Financial Services,yahoo_profile,2026-11-13
+CMG,Consumer Cyclical,yahoo_profile,2026-11-13
+CMI,Industrials,yahoo_profile,2026-11-13
+CMS,Utilities,yahoo_profile,2026-11-13
+CNC,Healthcare,yahoo_profile,2026-11-13
+CNP,Utilities,yahoo_profile,2026-11-13
+COF,Financial Services,yahoo_profile,2026-11-13
+COO,Healthcare,yahoo_profile,2026-11-13
+COR,Healthcare,yahoo_profile,2026-11-13
+CPAY,Technology,yahoo_profile,2026-11-13
+CPB,Consumer Defensive,yahoo_profile,2026-11-13
+CPRT,Industrials,yahoo_profile,2026-11-13
+CPT,Real Estate,yahoo_profile,2026-11-13
+CRL,Healthcare,yahoo_profile,2026-11-13
+CSCO,Technology,yahoo_profile,2026-11-13
+CSGP,Real Estate,yahoo_profile,2026-11-13
+CSX,Industrials,yahoo_profile,2026-11-13
+CTAS,Industrials,yahoo_profile,2026-11-13
+CTLT,,yahoo_profile,2026-11-13
+CTRA,,yahoo_profile,2026-11-13
+CTSH,Technology,yahoo_profile,2026-11-13
+CTVA,Basic Materials,yahoo_profile,2026-11-13
+CVS,Healthcare,yahoo_profile,2026-11-13
+CZR,Consumer Cyclical,yahoo_profile,2026-11-13
+D,Utilities,yahoo_profile,2026-11-13
+DAL,Industrials,yahoo_profile,2026-11-13
+DD,Basic Materials,yahoo_profile,2026-11-13
+DE,Industrials,yahoo_profile,2026-11-13
+DFS,,yahoo_profile,2026-11-13
+DG,Consumer Defensive,yahoo_profile,2026-11-13
+DGX,Healthcare,yahoo_profile,2026-11-13
+DHI,Consumer Cyclical,yahoo_profile,2026-11-13
+DHR,Healthcare,yahoo_profile,2026-11-13
+DLR,Real Estate,yahoo_profile,2026-11-13
+DLTR,Consumer Defensive,yahoo_profile,2026-11-13
+DOC,Real Estate,yahoo_profile,2026-11-13
+DOV,Industrials,yahoo_profile,2026-11-13
+DOW,Basic Materials,yahoo_profile,2026-11-13
+DPZ,Consumer Cyclical,yahoo_profile,2026-11-13
+DRI,Consumer Cyclical,yahoo_profile,2026-11-13
+DTE,Utilities,yahoo_profile,2026-11-13
+DUK,Utilities,yahoo_profile,2026-11-13
+DVA,Healthcare,yahoo_profile,2026-11-13
+DVN,Energy,yahoo_profile,2026-11-13
+DXCM,Healthcare,yahoo_profile,2026-11-13
+EA,Communication Services,yahoo_profile,2026-11-13
+EBAY,Consumer Cyclical,yahoo_profile,2026-11-13
+ECL,Basic Materials,yahoo_profile,2026-11-13
+ED,Utilities,yahoo_profile,2026-11-13
+EFX,Industrials,yahoo_profile,2026-11-13
+EG,Financial Services,yahoo_profile,2026-11-13
+EIX,Utilities,yahoo_profile,2026-11-13
+EL,Consumer Defensive,yahoo_profile,2026-11-13
+ELV,Healthcare,yahoo_profile,2026-11-13
+EMN,Basic Materials,yahoo_profile,2026-11-13
+EMR,Industrials,yahoo_profile,2026-11-13
+ENPH,Technology,yahoo_profile,2026-11-13
+EOG,Energy,yahoo_profile,2026-11-13
+EPAM,Technology,yahoo_profile,2026-11-13
+EQIX,Real Estate,yahoo_profile,2026-11-13
+EQT,Energy,yahoo_profile,2026-11-13
+ES,Utilities,yahoo_profile,2026-11-13
+ESS,Real Estate,yahoo_profile,2026-11-13
+ETN,Industrials,yahoo_profile,2026-11-13
+ETR,Utilities,yahoo_profile,2026-11-13
+ETSY,Consumer Cyclical,yahoo_profile,2026-11-13
+EVRG,Utilities,yahoo_profile,2026-11-13
+EW,Healthcare,yahoo_profile,2026-11-13
+EXC,Utilities,yahoo_profile,2026-11-13
+EXPD,Industrials,yahoo_profile,2026-11-13
+EXPE,Consumer Cyclical,yahoo_profile,2026-11-13
+EXR,Real Estate,yahoo_profile,2026-11-13
+F,Consumer Cyclical,yahoo_profile,2026-11-13
+FANG,Energy,yahoo_profile,2026-11-13
+FAST,Industrials,yahoo_profile,2026-11-13
+FCX,Basic Materials,yahoo_profile,2026-11-13
+FDS,Financial Services,yahoo_profile,2026-11-13
+FDX,Industrials,yahoo_profile,2026-11-13
+FE,Utilities,yahoo_profile,2026-11-13
+FFIV,Technology,yahoo_profile,2026-11-13
+FICO,Technology,yahoo_profile,2026-11-13
+FIS,Technology,yahoo_profile,2026-11-13
+FISV,,yahoo_profile,2026-11-13
+FITB,Financial Services,yahoo_profile,2026-11-13
+FMC,Basic Materials,yahoo_profile,2026-11-13
+FOX,Communication Services,yahoo_profile,2026-11-13
+FOXA,Communication Services,yahoo_profile,2026-11-13
+FRT,Real Estate,yahoo_profile,2026-11-13
+FSLR,Technology,yahoo_profile,2026-11-13
+FTNT,Technology,yahoo_profile,2026-11-13
+FTV,Technology,yahoo_profile,2026-11-13
+GD,Industrials,yahoo_profile,2026-11-13
+GEHC,Healthcare,yahoo_profile,2026-11-13
+GEN,Technology,yahoo_profile,2026-11-13
+GILD,Healthcare,yahoo_profile,2026-11-13
+GIS,Consumer Defensive,yahoo_profile,2026-11-13
+GL,Financial Services,yahoo_profile,2026-11-13
+GLW,Technology,yahoo_profile,2026-11-13
+GM,Consumer Cyclical,yahoo_profile,2026-11-13
+GNRC,Industrials,yahoo_profile,2026-11-13
+GOOG,Communication Services,yahoo_profile,2026-11-13
+GPC,Consumer Cyclical,yahoo_profile,2026-11-13
+GPN,Industrials,yahoo_profile,2026-11-13
+GRMN,Technology,yahoo_profile,2026-11-13
+GS,Financial Services,yahoo_profile,2026-11-13
+GWW,Industrials,yahoo_profile,2026-11-13
+HAL,Energy,yahoo_profile,2026-11-13
+HAS,Consumer Cyclical,yahoo_profile,2026-11-13
+HBAN,Financial Services,yahoo_profile,2026-11-13
+HCA,Healthcare,yahoo_profile,2026-11-13
+HES,,yahoo_profile,2026-11-13
+HIG,Financial Services,yahoo_profile,2026-11-13
+HII,Industrials,yahoo_profile,2026-11-13
+HLT,Consumer Cyclical,yahoo_profile,2026-11-13
+HOLX,,yahoo_profile,2026-11-13
+HON,Industrials,yahoo_profile,2026-11-13
+HPE,Technology,yahoo_profile,2026-11-13
+HPQ,Technology,yahoo_profile,2026-11-13
+HRL,Consumer Defensive,yahoo_profile,2026-11-13
+HSIC,Healthcare,yahoo_profile,2026-11-13
+HST,Real Estate,yahoo_profile,2026-11-13
+HSY,Consumer Defensive,yahoo_profile,2026-11-13
+HUBB,Industrials,yahoo_profile,2026-11-13
+HUM,Healthcare,yahoo_profile,2026-11-13
+HWM,Industrials,yahoo_profile,2026-11-13
+IBM,Technology,yahoo_profile,2026-11-13
+ICE,Financial Services,yahoo_profile,2026-11-13
+IDXX,Healthcare,yahoo_profile,2026-11-13
+IEX,Industrials,yahoo_profile,2026-11-13
+IFF,Basic Materials,yahoo_profile,2026-11-13
+ILMN,Healthcare,yahoo_profile,2026-11-13
+INCY,Healthcare,yahoo_profile,2026-11-13
+INTC,Technology,yahoo_profile,2026-11-13
+INTU,Technology,yahoo_profile,2026-11-13
+INVH,Real Estate,yahoo_profile,2026-11-13
+IP,Consumer Cyclical,yahoo_profile,2026-11-13
+IPG,,yahoo_profile,2026-11-13
+IQV,Healthcare,yahoo_profile,2026-11-13
+IR,Industrials,yahoo_profile,2026-11-13
+IRM,Real Estate,yahoo_profile,2026-11-13
+ISRG,Healthcare,yahoo_profile,2026-11-13
+IT,Technology,yahoo_profile,2026-11-13
+ITW,Industrials,yahoo_profile,2026-11-13
+IVZ,Financial Services,yahoo_profile,2026-11-13
+J,Industrials,yahoo_profile,2026-11-13
+JBHT,Industrials,yahoo_profile,2026-11-13
+JBL,Technology,yahoo_profile,2026-11-13
+JCI,Industrials,yahoo_profile,2026-11-13
+JKHY,Technology,yahoo_profile,2026-11-13
+JNPR,,yahoo_profile,2026-11-13
+K,,yahoo_profile,2026-11-13
+KDP,Consumer Defensive,yahoo_profile,2026-11-13
+KEY,Financial Services,yahoo_profile,2026-11-13
+KEYS,Technology,yahoo_profile,2026-11-13
+KHC,Consumer Defensive,yahoo_profile,2026-11-13
+KIM,Real Estate,yahoo_profile,2026-11-13
+KLAC,Technology,yahoo_profile,2026-11-13
+KMB,Consumer Defensive,yahoo_profile,2026-11-13
+KMI,Energy,yahoo_profile,2026-11-13
+KMX,Consumer Cyclical,yahoo_profile,2026-11-13
+KR,Consumer Defensive,yahoo_profile,2026-11-13
+KVUE,Consumer Defensive,yahoo_profile,2026-11-13
+L,Financial Services,yahoo_profile,2026-11-13
+LDOS,Technology,yahoo_profile,2026-11-13
+LEN,Consumer Cyclical,yahoo_profile,2026-11-13
+LH,Healthcare,yahoo_profile,2026-11-13
+LHX,Industrials,yahoo_profile,2026-11-13
+LKQ,Consumer Cyclical,yahoo_profile,2026-11-13
+LMT,Industrials,yahoo_profile,2026-11-13
+LNT,Utilities,yahoo_profile,2026-11-13
+LOW,Consumer Cyclical,yahoo_profile,2026-11-13
+LRCX,Technology,yahoo_profile,2026-11-13
+LULU,Consumer Cyclical,yahoo_profile,2026-11-13
+LUV,Industrials,yahoo_profile,2026-11-13
+LVS,Consumer Cyclical,yahoo_profile,2026-11-13
+LW,Consumer Defensive,yahoo_profile,2026-11-13
+LYB,Basic Materials,yahoo_profile,2026-11-13
+LYV,Communication Services,yahoo_profile,2026-11-13
+MAA,Real Estate,yahoo_profile,2026-11-13
+MAR,Consumer Cyclical,yahoo_profile,2026-11-13
+MAS,Industrials,yahoo_profile,2026-11-13
+MCHP,Technology,yahoo_profile,2026-11-13
+MCK,Healthcare,yahoo_profile,2026-11-13
+MCO,Financial Services,yahoo_profile,2026-11-13
+MDLZ,Consumer Defensive,yahoo_profile,2026-11-13
+MDT,Healthcare,yahoo_profile,2026-11-13
+MET,Financial Services,yahoo_profile,2026-11-13
+MGM,Consumer Cyclical,yahoo_profile,2026-11-13
+MHK,Consumer Cyclical,yahoo_profile,2026-11-13
+MKC,Consumer Defensive,yahoo_profile,2026-11-13
+MKTX,Financial Services,yahoo_profile,2026-11-13
+MLM,Basic Materials,yahoo_profile,2026-11-13
+MMM,Industrials,yahoo_profile,2026-11-13
+MNST,Consumer Defensive,yahoo_profile,2026-11-13
+MO,Consumer Defensive,yahoo_profile,2026-11-13
+MOH,Healthcare,yahoo_profile,2026-11-13
+MOS,Basic Materials,yahoo_profile,2026-11-13
+MPC,Energy,yahoo_profile,2026-11-13
+MPWR,Technology,yahoo_profile,2026-11-13
+MRK,Healthcare,yahoo_profile,2026-11-13
+MRNA,Healthcare,yahoo_profile,2026-11-13
+MRO,,yahoo_profile,2026-11-13
+MRSH,Financial Services,yahoo_profile,2026-11-13
+MS,Financial Services,yahoo_profile,2026-11-13
+MSCI,Financial Services,yahoo_profile,2026-11-13
+MSI,Technology,yahoo_profile,2026-11-13
+MTB,Financial Services,yahoo_profile,2026-11-13
+MTCH,Communication Services,yahoo_profile,2026-11-13
+MTD,Healthcare,yahoo_profile,2026-11-13
+MU,Technology,yahoo_profile,2026-11-13
+NCLH,Consumer Cyclical,yahoo_profile,2026-11-13
+NDAQ,Financial Services,yahoo_profile,2026-11-13
+NDSN,Industrials,yahoo_profile,2026-11-13
+NEM,Basic Materials,yahoo_profile,2026-11-13
+NI,Utilities,yahoo_profile,2026-11-13
+NKE,Consumer Cyclical,yahoo_profile,2026-11-13
+NOC,Industrials,yahoo_profile,2026-11-13
+NOW,Technology,yahoo_profile,2026-11-13
+NRG,Utilities,yahoo_profile,2026-11-13
+NSC,Industrials,yahoo_profile,2026-11-13
+NTAP,Technology,yahoo_profile,2026-11-13
+NTRS,Financial Services,yahoo_profile,2026-11-13
+NUE,Basic Materials,yahoo_profile,2026-11-13
+NVR,Consumer Cyclical,yahoo_profile,2026-11-13
+NWS,Communication Services,yahoo_profile,2026-11-13
+NWSA,Communication Services,yahoo_profile,2026-11-13
+NXPI,Technology,yahoo_profile,2026-11-13
+O,Real Estate,yahoo_profile,2026-11-13
+ODFL,Industrials,yahoo_profile,2026-11-13
+OKE,Energy,yahoo_profile,2026-11-13
+OMC,Communication Services,yahoo_profile,2026-11-13
+ON,Technology,yahoo_profile,2026-11-13
+ORLY,Consumer Cyclical,yahoo_profile,2026-11-13
+OTIS,Industrials,yahoo_profile,2026-11-13
+OXY,Energy,yahoo_profile,2026-11-13
+PANW,Technology,yahoo_profile,2026-11-13
+PAYC,Technology,yahoo_profile,2026-11-13
+PAYX,Technology,yahoo_profile,2026-11-13
+PCAR,Industrials,yahoo_profile,2026-11-13
+PCG,Utilities,yahoo_profile,2026-11-13
+PEG,Utilities,yahoo_profile,2026-11-13
+PEP,Consumer Defensive,yahoo_profile,2026-11-13
+PFE,Healthcare,yahoo_profile,2026-11-13
+PFG,Financial Services,yahoo_profile,2026-11-13
+PGR,Financial Services,yahoo_profile,2026-11-13
+PH,Industrials,yahoo_profile,2026-11-13
+PHM,Consumer Cyclical,yahoo_profile,2026-11-13
+PKG,Consumer Cyclical,yahoo_profile,2026-11-13
+PM,Consumer Defensive,yahoo_profile,2026-11-13
+PNC,Financial Services,yahoo_profile,2026-11-13
+PNR,Industrials,yahoo_profile,2026-11-13
+PNW,Utilities,yahoo_profile,2026-11-13
+PODD,Healthcare,yahoo_profile,2026-11-13
+POOL,Industrials,yahoo_profile,2026-11-13
+PPG,Basic Materials,yahoo_profile,2026-11-13
+PPL,Utilities,yahoo_profile,2026-11-13
+PRU,Financial Services,yahoo_profile,2026-11-13
+PSA,Real Estate,yahoo_profile,2026-11-13
+PSX,Energy,yahoo_profile,2026-11-13
+PTC,Technology,yahoo_profile,2026-11-13
+PWR,Industrials,yahoo_profile,2026-11-13
+PXD,,yahoo_profile,2026-11-13
+PYPL,Financial Services,yahoo_profile,2026-11-13
+QCOM,Technology,yahoo_profile,2026-11-13
+QRVO,Technology,yahoo_profile,2026-11-13
+RCL,Consumer Cyclical,yahoo_profile,2026-11-13
+REG,Real Estate,yahoo_profile,2026-11-13
+REGN,Healthcare,yahoo_profile,2026-11-13
+RF,Financial Services,yahoo_profile,2026-11-13
+RHI,Industrials,yahoo_profile,2026-11-13
+RJF,Financial Services,yahoo_profile,2026-11-13
+RL,Consumer Cyclical,yahoo_profile,2026-11-13
+RMD,Healthcare,yahoo_profile,2026-11-13
+ROK,Industrials,yahoo_profile,2026-11-13
+ROL,Consumer Cyclical,yahoo_profile,2026-11-13
+ROP,Technology,yahoo_profile,2026-11-13
+ROST,Consumer Cyclical,yahoo_profile,2026-11-13
+RSG,Industrials,yahoo_profile,2026-11-13
+RVTY,Healthcare,yahoo_profile,2026-11-13
+SBAC,Real Estate,yahoo_profile,2026-11-13
+SBUX,Consumer Cyclical,yahoo_profile,2026-11-13
+SCHW,Financial Services,yahoo_profile,2026-11-13
+SJM,Consumer Defensive,yahoo_profile,2026-11-13
+SKYD,Communication Services,yahoo_profile,2026-11-13
+SLB,Energy,yahoo_profile,2026-11-13
+SNA,Industrials,yahoo_profile,2026-11-13
+SNPS,Technology,yahoo_profile,2026-11-13
+SPG,Real Estate,yahoo_profile,2026-11-13
+SPGI,Financial Services,yahoo_profile,2026-11-13
+SRE,Utilities,yahoo_profile,2026-11-13
+STE,Healthcare,yahoo_profile,2026-11-13
+STLD,Basic Materials,yahoo_profile,2026-11-13
+STT,Financial Services,yahoo_profile,2026-11-13
+STX,Technology,yahoo_profile,2026-11-13
+STZ,Consumer Defensive,yahoo_profile,2026-11-13
+SW,Consumer Cyclical,yahoo_profile,2026-11-13
+SWK,Industrials,yahoo_profile,2026-11-13
+SWKS,Technology,yahoo_profile,2026-11-13
+SYF,Financial Services,yahoo_profile,2026-11-13
+SYK,Healthcare,yahoo_profile,2026-11-13
+SYY,Consumer Defensive,yahoo_profile,2026-11-13
+T,Communication Services,yahoo_profile,2026-11-13
+TAP,Consumer Defensive,yahoo_profile,2026-11-13
+TDG,Industrials,yahoo_profile,2026-11-13
+TDY,Technology,yahoo_profile,2026-11-13
+TECH,Healthcare,yahoo_profile,2026-11-13
+TEL,Technology,yahoo_profile,2026-11-13
+TER,Technology,yahoo_profile,2026-11-13
+TFC,Financial Services,yahoo_profile,2026-11-13
+TFX,Healthcare,yahoo_profile,2026-11-13
+TGT,Consumer Defensive,yahoo_profile,2026-11-13
+TJX,Consumer Cyclical,yahoo_profile,2026-11-13
+TMO,Healthcare,yahoo_profile,2026-11-13
+TMUS,Communication Services,yahoo_profile,2026-11-13
+TPR,Consumer Cyclical,yahoo_profile,2026-11-13
+TRGP,Energy,yahoo_profile,2026-11-13
+TRMB,Technology,yahoo_profile,2026-11-13
+TROW,Financial Services,yahoo_profile,2026-11-13
+TRV,Financial Services,yahoo_profile,2026-11-13
+TSCO,Consumer Cyclical,yahoo_profile,2026-11-13
+TSN,Consumer Defensive,yahoo_profile,2026-11-13
+TT,Industrials,yahoo_profile,2026-11-13
+TTWO,Communication Services,yahoo_profile,2026-11-13
+TXN,Technology,yahoo_profile,2026-11-13
+TXT,Industrials,yahoo_profile,2026-11-13
+TYL,Technology,yahoo_profile,2026-11-13
+UAL,Industrials,yahoo_profile,2026-11-13
+UBER,Technology,yahoo_profile,2026-11-13
+UDR,Real Estate,yahoo_profile,2026-11-13
+UHS,Healthcare,yahoo_profile,2026-11-13
+ULTA,Consumer Cyclical,yahoo_profile,2026-11-13
+UPS,Industrials,yahoo_profile,2026-11-13
+URI,Industrials,yahoo_profile,2026-11-13
+USB,Financial Services,yahoo_profile,2026-11-13
+VFC,Consumer Cyclical,yahoo_profile,2026-11-13
+VICI,Real Estate,yahoo_profile,2026-11-13
+VLO,Energy,yahoo_profile,2026-11-13
+VLTO,Industrials,yahoo_profile,2026-11-13
+VMC,Basic Materials,yahoo_profile,2026-11-13
+VMRK,Real Estate,yahoo_profile,2026-11-13
+VRSK,Industrials,yahoo_profile,2026-11-13
+VRSN,Technology,yahoo_profile,2026-11-13
+VRTX,Healthcare,yahoo_profile,2026-11-13
+VTR,Real Estate,yahoo_profile,2026-11-13
+VTRS,Healthcare,yahoo_profile,2026-11-13
+VZ,Communication Services,yahoo_profile,2026-11-13
+WAB,Industrials,yahoo_profile,2026-11-13
+WAT,Healthcare,yahoo_profile,2026-11-13
+WBA,,yahoo_profile,2026-11-13
+WBD,Communication Services,yahoo_profile,2026-11-13
+WDC,Technology,yahoo_profile,2026-11-13
+WEC,Utilities,yahoo_profile,2026-11-13
+WELL,Real Estate,yahoo_profile,2026-11-13
+WFC,Financial Services,yahoo_profile,2026-11-13
+WHR,Consumer Cyclical,yahoo_profile,2026-11-13
+WM,Industrials,yahoo_profile,2026-11-13
+WMB,Energy,yahoo_profile,2026-11-13
+WRB,Financial Services,yahoo_profile,2026-11-13
+WST,Healthcare,yahoo_profile,2026-11-13
+WTW,Financial Services,yahoo_profile,2026-11-13
+WY,Real Estate,yahoo_profile,2026-11-13
+WYNN,Consumer Cyclical,yahoo_profile,2026-11-13
+XEL,Utilities,yahoo_profile,2026-11-13
+XRAY,Healthcare,yahoo_profile,2026-11-13
+XYL,Industrials,yahoo_profile,2026-11-13
+YUM,Consumer Cyclical,yahoo_profile,2026-11-13
+ZBH,Healthcare,yahoo_profile,2026-11-13
+ZBRA,Technology,yahoo_profile,2026-11-13
+ZION,Financial Services,yahoo_profile,2026-11-13
+ZTS,Healthcare,yahoo_profile,2026-11-13
+DAY,,yahoo_profile,2026-11-13
+SMCI,Technology,yahoo_profile,2026-11-13
+DECK,Consumer Cyclical,yahoo_profile,2026-11-13
+SOLV,Healthcare,yahoo_profile,2026-11-13
+GEV,Industrials,yahoo_profile,2026-11-13
+VST,Utilities,yahoo_profile,2026-11-13
+KKR,Financial Services,yahoo_profile,2026-11-13
+CRWD,Technology,yahoo_profile,2026-11-13
+GDDY,Technology,yahoo_profile,2026-11-13
+PLTR,Technology,yahoo_profile,2026-11-13
+DELL,Technology,yahoo_profile,2026-11-13
+ERIE,Financial Services,yahoo_profile,2026-11-13
+AMTM,Industrials,yahoo_profile,2026-11-13
+TPL,Energy,yahoo_profile,2026-11-13
+APO,Financial Services,yahoo_profile,2026-11-13
+WDAY,Technology,yahoo_profile,2026-11-13
+LII,Industrials,yahoo_profile,2026-11-13
+DASH,Consumer Cyclical,yahoo_profile,2026-11-13
+TKO,Communication Services,yahoo_profile,2026-11-13
+WSM,Consumer Cyclical,yahoo_profile,2026-11-13
+EXE,Energy,yahoo_profile,2026-11-13
+COIN,Financial Services,yahoo_profile,2026-11-13
+DDOG,Technology,yahoo_profile,2026-11-13
+TTD,Communication Services,yahoo_profile,2026-11-13
+XYZ,Technology,yahoo_profile,2026-11-13
+IBKR,Financial Services,yahoo_profile,2026-11-13
+EME,Industrials,yahoo_profile,2026-11-13
+HOOD,Financial Services,yahoo_profile,2026-11-13
+APP,Communication Services,yahoo_profile,2026-11-13
+SOLS,Basic Materials,yahoo_profile,2026-11-13
+Q,Technology,yahoo_profile,2026-11-13
+SNDK,Technology,yahoo_profile,2026-11-13
+ARES,Financial Services,yahoo_profile,2026-11-13
+CRH,Basic Materials,yahoo_profile,2026-11-13
+CVNA,Consumer Cyclical,yahoo_profile,2026-11-13
+FIX,Industrials,yahoo_profile,2026-11-13
+CIEN,Technology,yahoo_profile,2026-11-13
+VRT,Industrials,yahoo_profile,2026-11-13
+LITE,Technology,yahoo_profile,2026-11-13
+COHR,Technology,yahoo_profile,2026-11-13
+ECHO,Communication Services,yahoo_profile,2026-11-13
+CASY,Consumer Cyclical,yahoo_profile,2026-11-13
+VEEV,Healthcare,yahoo_profile,2026-11-13
+FDXF,Industrials,yahoo_profile,2026-11-13
+MRVL,Technology,yahoo_profile,2026-11-13
+FLEX,Technology,yahoo_profile,2026-11-13
+HONA,Industrials,yahoo_profile,2026-11-13
+FERG,Industrials,yahoo_profile,2026-11-13
+RDDT,Communication Services,yahoo_profile,2026-11-13
+BE,Industrials,yahoo_profile,2026-11-13
+P,Technology,yahoo_profile,2026-11-13
+VYLR,Financial Services,yahoo_profile,2026-11-13
+TWLO,Technology,yahoo_profile,2026-11-13
+OKTA,Technology,yahoo_profile,2026-11-13

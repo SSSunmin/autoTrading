@@ -8,7 +8,8 @@ Quotations only — no order, balance or account call is made here. Paper (모�
 - The access token is cached in ``data/.kis_token.json`` (gitignored) until shortly before it expires: KIS sends a
   notice on every issuance and allows one per minute; a token lives a day.
 - Calls are spaced ``CALL_INTERVAL`` apart; a throttled answer (``EGW00201``) is retried after a pause. At the
-  official samples' 0.5 s a paper account was throttled on 388 of 962 calls (2026-11-13), so the spacing is 1 s.
+  official samples' 0.5 s a paper account was throttled on 388 of 962 calls, at 1.0 s on 14 of 29 (2026-11-13),
+  at 1.1 s on 0 of 15 — so the spacing is 1.1 s.
 - A call returns at most 50 rows (index) or 100 rows (stock), newest first, and silently drops the rest of a wider
   window. Windows are sized below the cap and a page that reaches the cap raises instead of leaving a gap.
 - Frames have ``yahoo.load_ohlcv``'s shape: Date (naive midnight), Open, High, Low, Close, Volume, ascending.
@@ -21,6 +22,12 @@ Endpoints (official samples, github.com/koreainvestment/open-trading-api, exampl
   index daily  GET /uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice  FHKUP03500100 (U, 0001 = KOSPI)
   stock daily  GET /uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice   FHKST03010100 (J, 100 rows/call)
   US daily     GET /uapi/overseas-price/v1/quotations/dailyprice                     HHDFS76240000 (EXCD NAS/NYS/AMS)
+  US index     GET /uapi/overseas-price/v1/quotations/inquire-daily-chartprice      FHKST03030100 (N, SPX, 100 rows/call)
+
+Daily use (``update_cache`` · ``load_ohlcv``, scripts/refresh_cache.py): a cache is brought up to the last bar whose
+day has passed (``last_final_day``) by fetching from its last date on, not five years again. The last date is fetched again and its
+close compared: KIS re-adjusts past prices after a split or rights issue, and a changed close means the whole
+history is taken again rather than joined onto rows on the old basis.
 """
 
 from __future__ import annotations
@@ -42,7 +49,7 @@ from agent_trading_core.files import replace_file
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN_FILE = ROOT / "data" / ".kis_token.json"
 BASE_URL = {"paper": "https://openapivts.koreainvestment.com:29443"}   # 실전(openapi…:9443) deliberately absent
-CALL_INTERVAL = 1.0            # seconds between calls on a paper account
+CALL_INTERVAL = 1.1            # seconds between calls on a paper account (1.0 was throttled half the time)
 TOKEN_MARGIN = 600             # re-issue this many seconds before the stated expiry
 # (calendar days per call, rows one call returns at most): 60 days ≤ 44 weekdays < 50, 130 days ≤ 94 < 100
 INDEX_WINDOW = (60, 50)
@@ -62,6 +69,15 @@ STOCK_FIELDS = {"stck_bsop_date": "Date", "stck_oprc": "Open", "stck_hgpr": "Hig
                 "stck_clpr": "Close", "acml_vol": "Volume"}
 US_FIELDS = {"xymd": "Date", "open": "Open", "high": "High", "low": "Low", "clos": "Close", "tvol": "Volume"}
 INDEX_CODES = {"^KS11": "0001"}
+US_INDEX_PATH = "/uapi/overseas-price/v1/quotations/inquire-daily-chartprice"
+US_INDEX_FIELDS = {"stck_bsop_date": "Date", "ovrs_nmix_oprc": "Open", "ovrs_nmix_hgpr": "High",
+                   "ovrs_nmix_lwpr": "Low", "ovrs_nmix_prpr": "Close", "acml_vol": "Volume"}
+US_INDEX_WINDOW = (130, 100)          # FHKST03030100 also stops at 100 rows (2026-01-01 ~ 11-13 came back as 100)
+US_INDEX_CODES = {"^GSPC": "SPX"}
+US_EXCHANGES = ("NAS", "NYS", "AMS")  # a symbol asked on the wrong exchange comes back with no rows, not an error
+EXCHANGE_FILE = "_kis_us_exchange.json"
+BACKFILL_DAYS = 5 * 365
+CLOSE_TOL = 1e-6                      # relative change of the overlap day's close that counts as a re-adjustment
 
 
 def credentials() -> dict[str, str]:
@@ -229,6 +245,20 @@ class KisClient:
         df = to_frame(rows, US_FIELDS, symbol)
         return df[df["Date"] >= pd.Timestamp(start)].reset_index(drop=True)
 
+    def us_index_daily(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        rows = self._windows(US_INDEX_PATH, "FHKST03030100", US_INDEX_WINDOW, start, end,
+                             {"FID_COND_MRKT_DIV_CODE": "N", "FID_INPUT_ISCD": US_INDEX_CODES[symbol]}, symbol)
+        return to_frame(rows, US_INDEX_FIELDS, symbol)
+
+    def us_exchange(self, symbol: str) -> str | None:
+        """The first of NAS · NYS · AMS that has rows for ``symbol`` (one call each until found)."""
+        for ex in US_EXCHANGES:
+            page = self.get(US_PATH, "HHDFS76240000", {"AUTH": "", "EXCD": ex, "SYMB": symbol, "GUBN": "0",
+                                                       "BYMD": "", "MODP": "1"}).get("output2") or []
+            if any(str(r.get("xymd", "")).isdigit() for r in page):
+                return ex
+        return None
+
 
 def _json(r) -> dict:
     try:
@@ -237,35 +267,132 @@ def _json(r) -> dict:
         return {}
 
 
-def load_kis_ohlcv(symbol: str, as_of_date: str, cache_dir: str, client: KisClient | None = None,
-                   start: str | None = None) -> pd.DataFrame:
-    """``yahoo.load_ohlcv`` for KRX symbols from KIS: cached as ``<symbol>-KIS-data.csv`` beside the Yahoo files
-    (never over them), reused under ``yahoo._cache_is_fresh`` (written today; for an as-of of today, 15 minutes)
-    and otherwise fetched in full (``start`` default: five years before today), rows after ``as_of_date`` dropped.
-    ``^KS11`` is the KOSPI index; other symbols must be ``.KS`` / ``.KQ`` stocks.
+def market_of(symbol: str) -> str:
+    return "KRX" if symbol in INDEX_CODES or symbol.endswith((".KS", ".KQ")) else "US"
 
-    ponytail: a refresh refetches all five years (~15 calls a stock at 1 s, ~10 minutes for 40) — fine for a
-    backtest with a past as-of, too slow for an intraday as-of every 15 minutes. Before live use, append only the
-    days after the cache's last date (docs/00 §7)."""
+
+def last_final_day(market: str, now: datetime | None = None) -> date:
+    """The latest day whose bar is final: the day before today in the market's time zone. KIS keeps moving today's
+    bar after the close — on 2026-11-13 005930's close read 207,000 at 17:47 and 207,500 at 19:19 (the same under
+    J · UN · NX: the alternative exchange's after-market runs to 20:00) — while past days hold the KRX close. A fetch
+    stops at the day before, so a moving bar never reaches a cache (and never trips the re-adjustment check)."""
+    from agent_trading_core.config import MARKETS
+
+    local = (now or datetime.now(KST)).astimezone(ZoneInfo(MARKETS[market]["timezone"]))
+    return local.date() - timedelta(days=1)
+
+
+def cache_path(symbol: str, cache_dir: str | Path) -> Path:
     from agent_trading_core.symbols import safe_ticker_component
-    from agent_trading_core.yahoo import _cache_is_fresh, assert_ohlcv_not_stale
 
-    path = Path(cache_dir) / f"{safe_ticker_component(symbol)}-KIS-data.csv"
-    today = datetime.now(KST).date()
-    # the Yahoo rule: written today, and for an as-of of today no older than 15 minutes (intraday bars move)
-    fresh = path.exists() and _cache_is_fresh(path, pd.Timestamp(as_of_date).normalize(), pd.Timestamp.today())
-    if not fresh:
-        client = client or KisClient()
-        first = date.fromisoformat(start) if start else today - timedelta(days=5 * 365)
-        if symbol in INDEX_CODES:
-            df = client.index_daily(symbol, first, today)
-        elif symbol.endswith((".KS", ".KQ")):
-            df = client.stock_daily(symbol, first, today)
-        else:
-            raise ValueError(f"{symbol}: KIS 로더는 국내 종목·지수만 캐시한다(미국은 KisClient.us_daily에 거래소 코드)")
+    return Path(cache_dir) / f"{safe_ticker_component(symbol)}-KIS-data.csv"
+
+
+def _us_exchange(client: KisClient, symbol: str, cache_dir: str | Path) -> str:
+    """The symbol's exchange, found once and kept in ``<cache_dir>/_kis_us_exchange.json``."""
+    path = Path(cache_dir) / EXCHANGE_FILE
+    known = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if symbol not in known:
+        ex = client.us_exchange(symbol)
+        if ex is None:
+            raise NoMarketDataError(symbol, symbol, f"KIS {'/'.join(US_EXCHANGES)} 어디에도 시세 없음")
+        known[symbol] = ex
         path.parent.mkdir(parents=True, exist_ok=True)
-        replace_file(path, lambda tmp: df.to_csv(tmp, index=False, encoding="utf-8"))
-    data = pd.read_csv(path, parse_dates=["Date"])
+        replace_file(path, lambda tmp: Path(tmp).write_text(json.dumps(known, indent=1, sort_keys=True),
+                                                            encoding="utf-8"))
+    return known[symbol]
+
+
+def fetch(client: KisClient, symbol: str, start: date, end: date, cache_dir: str | Path) -> pd.DataFrame:
+    """Daily bars of a Yahoo-style symbol from ``start`` to ``end``: ``^KS11`` · ``.KS``/``.KQ`` · ``^GSPC`` · a US
+    stock (its exchange looked up once)."""
+    if symbol in INDEX_CODES:
+        df = client.index_daily(symbol, start, end)
+    elif symbol.endswith((".KS", ".KQ")):
+        df = client.stock_daily(symbol, start, end)
+    elif symbol in US_INDEX_CODES:
+        df = client.us_index_daily(symbol, start, end)
+    elif symbol.startswith("^") or "." in symbol:
+        raise ValueError(f"{symbol}: KIS 로더가 모르는 심볼(지수는 {sorted(INDEX_CODES | US_INDEX_CODES)})")
+    else:
+        df = client.us_daily(symbol, _us_exchange(client, symbol, cache_dir), start, end)
+    return df[df["Date"] <= pd.Timestamp(end)].reset_index(drop=True)
+
+
+def read_cache(path: Path) -> pd.DataFrame:
+    return pd.read_csv(path, parse_dates=["Date"])
+
+
+def update_cache(symbol: str, cache_dir: str | Path, client: KisClient, *, since: str | None = None,
+                 start: str | None = None, now: datetime | None = None) -> dict:
+    """Bring ``<symbol>-KIS-data.csv`` up to ``last_final_day`` and say what changed.
+
+    No file: the full history from ``start`` (default five years back) — status ``full``. A file: its last date
+    (or ``since``) to the last final day, joined with a fetched date's new values winning — ``append``; nothing
+    to fetch — ``current``; a fetch that returns no row at all, though it asks for the last cached day again —
+    ``empty`` (halted, delisted or a wrong code, not a holiday). Rows dated after the last final day were not final
+    when written and are dropped (``trim`` when nothing else changed). ``since`` later than the last date starts at
+    the last date instead, so no gap opens. If the earliest refetched day's close moved (KIS re-adjusted its past
+    prices) the whole span of the file is taken again — ``refetch``. The file is replaced in one move after the new
+    frame is checked (dates unique and rising, every close present) and read back; a failure, or a file another
+    process holds open, raises and leaves the old file as it was."""
+    path = cache_path(symbol, cache_dir)
+    end = last_final_day(market_of(symbol), now)
+    old = read_cache(path) if path.exists() else None
+    written = 0 if old is None else len(old)
+    if old is not None:
+        old = old[old["Date"] <= pd.Timestamp(end)].reset_index(drop=True)
+    if old is None or old.empty:
+        first = date.fromisoformat(start) if start else end - timedelta(days=BACKFILL_DAYS)
+        new = fetch(client, symbol, first, end, cache_dir)
+        status, merged = "full", new
+    else:
+        last = old["Date"].iloc[-1].date()
+        new, quiet = old.iloc[0:0], "current"
+        if since is not None or last < end:
+            try:
+                new = fetch(client, symbol, min(date.fromisoformat(since), last) if since else last, end, cache_dir)
+            except NoMarketDataError:  # not even the last cached day came back
+                quiet = "empty"
+        if new.empty and len(old) == written:
+            return {"symbol": symbol, "status": quiet, "rows_added": 0, "last": str(last)}
+        both = new.merge(old[["Date", "Close"]], on="Date", suffixes=("", "_old"))
+        if not both.empty and abs(both["Close"].iloc[0] / both["Close_old"].iloc[0] - 1) > CLOSE_TOL:
+            new = fetch(client, symbol, old["Date"].iloc[0].date(), end, cache_dir)
+            status, merged = "refetch", new
+        else:
+            status = "append" if len(new) else "trim"
+            merged = (pd.concat([old, new], ignore_index=True).drop_duplicates("Date", keep="last")
+                      .sort_values("Date").reset_index(drop=True))
+    if not (merged["Date"].is_unique and merged["Date"].is_monotonic_increasing and merged["Close"].notna().all()):
+        raise ValueError(f"{symbol}: KIS 캐시 검사 실패(날짜 중복·역순 또는 종가 빈 칸) — 파일을 바꾸지 않는다")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    replace_file(path, lambda tmp: merged.to_csv(tmp, index=False, encoding="utf-8"))
+    back = read_cache(path)
+    if len(back) != len(merged) or back["Date"].iloc[-1] != merged["Date"].iloc[-1] or \
+            not (back["Close"].to_numpy() == merged["Close"].to_numpy()).all():   # a refetch keeps span and rows
+        # replace_file keeps the old file when another process holds it open (Windows) and only logs it
+        raise OSError(f"{symbol}: KIS 캐시를 바꾸지 못했다(다른 프로세스가 파일을 열고 있음?) — 이전 파일 그대로")
+    return {"symbol": symbol, "status": status, "rows_added": len(merged) - written,
+            "last": merged["Date"].iloc[-1].strftime("%Y-%m-%d")}
+
+
+def load_ohlcv(symbol: str, as_of_date: str, cache_dir: str, client: KisClient | None = None,
+               start: str | None = None) -> pd.DataFrame:
+    """``yahoo.load_ohlcv`` from KIS: cached as ``<symbol>-KIS-data.csv`` beside the Yahoo files (never over them).
+    Fresh means the file's last row reaches the as-of date or the last final bar, whichever is earlier — the file's
+    write time plays no part (``yahoo._cache_is_fresh`` is not used). Otherwise ``update_cache`` runs. Rows after
+    ``as_of_date`` are dropped.
+
+    ponytail: on a weekend or holiday the last final day has no bar, so each load makes one incremental call that
+    returns nothing; a trading calendar would skip it."""
+    from agent_trading_core.yahoo import assert_ohlcv_not_stale
+
+    path = cache_path(symbol, cache_dir)
+    want = min(pd.Timestamp(as_of_date).date(), last_final_day(market_of(symbol)))
+    if not path.exists() or read_cache(path)["Date"].iloc[-1].date() < want:
+        update_cache(symbol, cache_dir, client or KisClient(), start=start)
+    data = read_cache(path)
     data = data[data["Date"] <= pd.Timestamp(as_of_date)].reset_index(drop=True)
     if data.empty:
         raise NoMarketDataError(symbol, symbol, f"no KIS rows on or before {as_of_date}")
