@@ -3,8 +3,10 @@ import { AgentAlert, AgentKpiCard, AgentSectionPanel, AgentTabs, Grid } from '@b
 
 import { api, pct } from '../api/client'
 import { useApi } from '../hooks/useApi'
+import { useLabels } from '../hooks/useLabels'
+import { useMarket } from '../hooks/useMarket'
 import { AlphaBar, Loaded, Pct, RatingBadge, TickerCell } from '../components/common'
-import type { PaperSummary, RatingScore, SimMetrics } from '../api/types'
+import type { Market, PaperSummary, RatingScore, SimMetrics } from '../api/types'
 
 const ORDER = ['Buy', 'Overweight', 'Hold', 'Underweight', 'Sell']
 
@@ -35,21 +37,28 @@ export function RatingTable({ byRating }: { byRating: Record<string, RatingScore
   )
 }
 
-/** 6: tab 1 scores single decisions by alpha (1st measurement); tab 2 runs the whole book with the hard rules
- *  off / on / on + regime filter and reads the drawdown first (2nd measurement, docs/05). */
+const MEASURE: Record<Market, string> = { KRX: '2차', US: '3차 · 미국' }
+
+/** 6: the whole book with the hard rules off / on / on + regime filter, drawdown first (2nd measurement KRX docs/05,
+ *  3rd US docs/07), the two side by side (each in its own terms, never added up), and single decisions scored by
+ *  alpha (1st measurement, KRX only). */
 export default function Performance() {
+  const [market] = useMarket()
   const [tab, setTab] = useState('portfolio')
-  const perf = useApi(() => api.performance(), [])
-  const paper = useApi(() => api.paper(), [])
+  const bench = useLabels().data?.markets[market]?.benchmark_name_ko ?? '지수'
+  const perf = useApi(() => api.performance(market), [market])
+  const paper = useApi(() => api.paper(market), [market])
   return (
     <>
       <h1 className="page-title">성과·백테스트</h1>
       <AgentTabs value={tab} onChange={setTab} label="측정" items={[
-        { id: 'portfolio', label: '포트폴리오 실측 (2차 · 드로다운)' },
+        { id: 'portfolio', label: `포트폴리오 실측 (${MEASURE[market]} · 드로다운)` },
+        { id: 'compare', label: '국내 2차 ↔ 미국 3차' },
         { id: 'decisions', label: '결정 채점 (1차 · 알파)' },
       ]} />
       <div className="section">
-        {tab === 'portfolio' && <Loaded state={paper}>{(p) => <Portfolio p={p} />}</Loaded>}
+        {tab === 'portfolio' && <Loaded state={paper}>{(p) => <Portfolio p={p} bench={bench} />}</Loaded>}
+        {tab === 'compare' && <Compare />}
         {tab === 'decisions' && <Loaded state={perf}>{(p) => (
           <>
             <p className="page-sub">실행 <b className="num">{p.run_id}</b>: {p.universe.length}종목 × {p.dates.length}일 = {p.cells_run}셀. 규칙 전용 베이스라인이라 에이전트가 더하는 알파를 재는 기준선입니다.</p>
@@ -102,7 +111,7 @@ function DdCell({ m }: { m: SimMetrics }) {
   )
 }
 
-function Portfolio({ p }: { p: PaperSummary }) {
+function Portfolio({ p, bench }: { p: PaperSummary; bench: string }) {
   const on = p.variants.rules_on
   const off = p.variants.rules_off
   const b = p.benchmark.metrics
@@ -110,11 +119,11 @@ function Portfolio({ p }: { p: PaperSummary }) {
   return (
     <>
       <p className="page-sub">
-        KOSPI 대형주 {p.universe.length}종목, <span className="num">{p.start} ~ {p.end}</span>. 같은 선별·등급·목표 비중을 하드 룰 끔 / 켬 / 켬 + 200일선 국면 필터로 돌렸습니다.
+        {bench} 대형주 {p.universe.length}종목, <span className="num">{p.start} ~ {p.end}</span>. 같은 선별·등급·목표 비중을 하드 룰 끔 / 켬 / 켬 + 200일선 국면 필터로 돌렸습니다.
         1차 지표는 수익이 아니라 <b>최대 드로다운과 회복</b>입니다. 규칙 전용(LLM 없음).
       </p>
       <Grid columns={4} gap="1.4rem">
-        <AgentKpiCard label="KOSPI 최대 드로다운" value={pct(b.max_drawdown)} delta={`${b.dd_peak} → ${b.dd_trough}${b.dd_recovery ? '' : ' · 미회복'}`} direction="down" />
+        <AgentKpiCard label={`${bench} 최대 드로다운`} value={pct(b.max_drawdown)} delta={`${b.dd_peak} → ${b.dd_trough}${b.dd_recovery ? '' : ' · 미회복'}`} direction="down" />
         <AgentKpiCard label="하드 룰 끔" value={pct(off.metrics.max_drawdown)} delta={`수익 ${pct(off.metrics.total_return)} · 노출 ${(off.mean_exposure * 100).toFixed(0)}%`} direction="down" />
         <AgentKpiCard label="하드 룰 켬" value={pct(on.metrics.max_drawdown)} delta={`수익 ${pct(on.metrics.total_return)} · 노출 ${(on.mean_exposure * 100).toFixed(0)}%`} />
         <AgentKpiCard label="하드 룰 + 국면 필터" value={pct(p.variants.rules_on_regime.metrics.max_drawdown)}
@@ -122,14 +131,14 @@ function Portfolio({ p }: { p: PaperSummary }) {
       </Grid>
 
       <div className="section">
-        <AgentSectionPanel title="변형 비교" description="결정은 종가, 체결은 다음날 시가(갭은 손절을 그대로 뚫음). 수수료 0.015%·거래세 0.20%·슬리피지 0.05%">
+        <AgentSectionPanel title="변형 비교" description={`결정은 종가, 체결은 다음날 시가(갭은 손절을 그대로 뚫음). ${p.market === 'US' ? '수수료 0·매도 시 SEC fee·TAF·슬리피지' : '수수료 0.015%·거래세 0.20%·슬리피지 0.05%'}`}>
           <div className="matrix"><table>
             <thead><tr><th>변형</th><th className="r">수익</th><th className="r">CAGR</th><th className="r">최대 드로다운</th><th className="r">최악의 날</th><th className="r">변동성</th><th className="r">거래</th><th>청산 사유</th><th className="r">평균 노출</th></tr></thead>
             <tbody>
-              <tr><td><b>KOSPI</b> <span className="muted">매수 보유</span></td><td className="r"><Pct value={b.total_return} /></td><td className="r"><Pct value={b.cagr} /></td>
+              <tr><td><b>{bench}</b> <span className="muted">매수 보유</span></td><td className="r"><Pct value={b.total_return} /></td><td className="r"><Pct value={b.cagr} /></td>
                 <DdCell m={b} /><td className="r"><Pct value={b.worst_day} /><div className="muted num">{b.worst_day_date}</div></td><td className="r num">{pct(b.volatility, 0)}</td><td className="r">–</td><td>–</td><td className="r num">100%</td></tr>
               {VARIANTS.map((k) => { const v = p.variants[k]; if (!v) return null; const m = v.metrics; return (
-                <tr key={k}><td><b>{v.label_ko}</b><div className="muted">{v.risk ? `손절 ${pct(v.risk.stop_loss_pct, 0)} · 비중 ${pct(v.risk.max_position_pct, 0)} · DD ${pct(v.risk.dd_halve, 0)}/${pct(v.risk.dd_stop, 0)}` : '동일 비중 · 전액 투자 · 등급 하향 시만 매도'}{v.regime_filter ? ` · KOSPI ${v.risk?.regime_ma_days}일선` : ''}</div></td>
+                <tr key={k}><td><b>{v.label_ko}</b><div className="muted">{v.risk ? `손절 ${pct(v.risk.stop_loss_pct, 0)} · 비중 ${pct(v.risk.max_position_pct, 0)} · DD ${pct(v.risk.dd_halve, 0)}/${pct(v.risk.dd_stop, 0)}` : '동일 비중 · 전액 투자 · 등급 하향 시만 매도'}{v.regime_filter ? ` · ${bench} ${v.risk?.regime_ma_days}일선` : ''}</div></td>
                   <td className="r"><Pct value={m.total_return} /></td><td className="r"><Pct value={m.cagr} /></td><DdCell m={m} />
                   <td className="r"><Pct value={m.worst_day} /><div className="muted num">{m.worst_day_date}</div></td>
                   <td className="r num">{pct(m.volatility, 0)}</td><td className="r num">{v.trades}{v.win_rate != null ? <div className="muted">승률 {(v.win_rate * 100).toFixed(0)}%</div> : null}</td>
@@ -144,7 +153,7 @@ function Portfolio({ p }: { p: PaperSummary }) {
       <div className="section">
         <AgentSectionPanel title="급락 구간별" description="각 구간은 그 구간 시작일부터 측정. 수익 / 구간 내 최대 드로다운">
           <div className="matrix"><table>
-            <thead><tr><th>구간</th><th>기간</th><th className="r">KOSPI</th>{VARIANTS.map((k) => <th key={k} className="r">{p.variants[k]?.label_ko}</th>)}</tr></thead>
+            <thead><tr><th>구간</th><th>기간</th><th className="r">{bench}</th>{VARIANTS.map((k) => <th key={k} className="r">{p.variants[k]?.label_ko}</th>)}</tr></thead>
             <tbody>{windows.map((w) => (
               <tr key={w}><td><b>{w}</b></td><td className="num muted">{p.windows[w][0]} ~ {p.windows[w][1]}</td>
                 <td className="r"><Pct value={p.benchmark.windows[w]?.return} /> <span className="muted">/</span> <Pct value={p.benchmark.windows[w]?.max_drawdown} /></td>
@@ -185,4 +194,40 @@ function Portfolio({ p }: { p: PaperSummary }) {
       <div className="section"><AgentAlert tone="warning" title="해석 주의"><ul className="effects">{p.caveats.map((c, i) => <li key={i}>{c}</li>)}</ul></AgentAlert></div>
     </>
   )
+}
+
+/** KRX 2nd vs US 3rd, variant by variant: drawdown, return, trades and exit reasons. Percentages only — the books are
+ *  in different currencies and are never converted or summed (docs/08 §2). */
+function Compare() {
+  const krx = useApi(() => api.paper('KRX'), [])
+  const us = useApi(() => api.paper('US'), [])
+  return (
+    <Loaded state={krx}>{(k) => (
+      <Loaded state={us}>{(u) => (
+        <AgentSectionPanel title="국내 2차 ↔ 미국 3차" description={`같은 규칙·변형. 국내 ${k.start} ~ ${k.end} · ${k.universe.length}종목, 미국 ${u.start} ~ ${u.end} · ${u.universe.length}종목. 기간과 통화가 달라 비율만 나란히 놓습니다`}>
+          <div className="matrix"><table>
+            <thead><tr><th>변형</th><th className="r">최대 드로다운 국내</th><th className="r">미국</th><th className="r">수익 국내</th><th className="r">미국</th>
+              <th className="r">거래 국내</th><th className="r">미국</th><th>청산 사유 국내</th><th>미국</th></tr></thead>
+            <tbody>
+              <tr><td><b>지수</b> <span className="muted">매수 보유</span></td>
+                <td className="r"><Pct value={k.benchmark.metrics.max_drawdown} /></td><td className="r"><Pct value={u.benchmark.metrics.max_drawdown} /></td>
+                <td className="r"><Pct value={k.benchmark.metrics.total_return} /></td><td className="r"><Pct value={u.benchmark.metrics.total_return} /></td>
+                <td className="r">–</td><td className="r">–</td><td>–</td><td>–</td></tr>
+              {VARIANTS.map((key) => { const a = k.variants[key]; const b = u.variants[key]; if (!a || !b) return null; return (
+                <tr key={key}><td><b>{a.label_ko}</b></td>
+                  <td className="r"><Pct value={a.metrics.max_drawdown} /></td><td className="r"><Pct value={b.metrics.max_drawdown} /></td>
+                  <td className="r"><Pct value={a.metrics.total_return} /></td><td className="r"><Pct value={b.metrics.total_return} /></td>
+                  <td className="r num">{a.trades}</td><td className="r num">{b.trades}</td>
+                  <td className="wrap muted">{exits(a.exits_by_reason_ko)}</td><td className="wrap muted">{exits(b.exits_by_reason_ko)}</td></tr>
+              ) })}
+            </tbody>
+          </table></div>
+        </AgentSectionPanel>
+      )}</Loaded>
+    )}</Loaded>
+  )
+}
+
+function exits(by: Record<string, number>): string {
+  return Object.entries(by).map(([r, n]) => `${r} ${n}`).join(' · ') || '–'
 }

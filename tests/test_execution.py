@@ -8,7 +8,14 @@ import time
 import pandas as pd
 import pytest
 
-from agent_trading_core.audit import AuditLog, DecisionRecord, OperationRecord, latest_orders, trading_state
+from agent_trading_core.audit import (
+    AuditLog,
+    DecisionRecord,
+    OperationRecord,
+    latest_orders,
+    market_audit,
+    trading_state,
+)
 from agent_trading_core.execution import (
     ExecutionRefused,
     PaperConfig,
@@ -609,6 +616,6 @@ def test_the_cli_all_runs_a_holiday_dated_decision_on_its_own_date(tmp_path, mon
     audit = AuditLog(tmp_path / "audit")
     _decide(audit, "A.KS", "2026-06-03")                                    # a holiday: not in DAYS
     assert paper_execute.main(["--all", "--data-dir", str(tmp_path)]) == 0
-    (o,) = _orders(audit).values()
+    (o,) = _orders(market_audit(tmp_path / "audit", "KRX")).values()        # new KRX lines: audit/KRX/
     assert (o.order_id, o.status, o.fill_date) == ("paper-2026-06-03-A.KS", "filled", "2026-06-04")
     assert "2026-06-03: 1건 기록" in capsys.readouterr().out

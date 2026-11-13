@@ -1,11 +1,42 @@
-import type { ReactNode } from 'react'
-import { AgentAlert, AgentChip, AgentEmptyState, AgentSpinner } from '@bv-ds/ui'
+import { useEffect, useState, type ReactNode } from 'react'
+import { AgentAlert, AgentChip, AgentEmptyState, AgentSegmentedControl, AgentSpinner } from '@bv-ds/ui'
 
 import { pct } from '../api/client'
+import { kst, marketClock } from '../api/marketTime'
 import type { ApiState } from '../hooks/useApi'
-import type { FilterResult, OrderStatus, Rating, TradingState } from '../api/types'
+import { MARKETS, useMarket } from '../hooks/useMarket'
+import type { FilterResult, Market, MarketInfo, OrderStatus, Rating, TradingState } from '../api/types'
 
-/** Rating chip: values stay English in data, the label is the server's *_ko. KRX colors in app.css. */
+const MARKET_LABEL: Record<Market, string> = { KRX: '국내', US: '미국' }
+
+/** Status-bar market switch (docs/08 §1): every screen shows the one market chosen here; kept in the URL. */
+export function MarketToggle() {
+  const [market, setMarket] = useMarket()
+  return (
+    <AgentSegmentedControl size="sm" label="시장" value={market} onChange={(v) => setMarket(v as Market)}
+      options={MARKETS.map((m) => ({ value: m, label: MARKET_LABEL[m] }))} />
+  )
+}
+
+/** "장 중 / 장 마감 · 다음 실행 hh:mm KST" for the market, from its own time zone (marketTime.ts), refreshed each minute. */
+export function SessionChip({ info }: { info: MarketInfo | undefined }) {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
+  if (!info) return <AgentChip variant="neutral">장 시간 확인 중</AgentChip>
+  const c = marketClock(info, now)
+  return (
+    <AgentChip variant={c.open ? 'live' : 'neutral'}
+      title={`${info.label_ko} 정규장 ${info.session} 현지(${info.timezone}) = ${c.sessionKst} KST · 실행은 장 마감 5분 뒤`}>
+      {c.open ? '장 중' : '장 마감'} · 다음 실행 {kst(c.nextRun)} KST
+    </AgentChip>
+  )
+}
+
+/** Rating chip: values stay English in data, the label is the server's *_ko. One colour convention for both markets
+ *  (docs/08 §4 Q1: the KRX one, red = up) in app.css. */
 export function RatingBadge({ rating, label }: { rating: Rating | 'pending'; label?: string }) {
   return <span className={`rating ${rating}`}>{label ?? rating}</span>
 }
