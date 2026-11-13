@@ -22,7 +22,7 @@ import logging
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,18 @@ def invoke_structured(structured_llm: Any | None, prompt: Any, agent_name: str) 
             agent_name, exc,
         )
         return None
+
+
+def validate_text(schema: type[T], text: str) -> tuple[T | None, str | None]:
+    """``text`` (a model's JSON answer) as ``schema``, or None and why not: the first validation error, its field
+    path included. The schema's own checks (e.g. ``InvestmentMemo``'s reward/risk for a Buy) count like a type
+    error, so the caller quarantines the answer instead of trading it."""
+    try:
+        return schema.model_validate_json(text), None
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        where = ".".join(str(p) for p in err.get("loc", ())) or schema.__name__
+        return None, f"{where}: {err.get('msg', 'invalid')} ({exc.error_count()} error(s))"
 
 
 def invoke_structured_or_freetext(

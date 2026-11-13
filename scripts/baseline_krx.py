@@ -24,20 +24,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from agent_trading_core import agent
 from agent_trading_core.audit import (
     BASELINE_DECIDER,
     DecisionRecord,
     EvidenceItem,
     ScreenRun,
     baseline_summary_path,
+    decision_source,
     market_audit,
     stage_counts,
 )
 from agent_trading_core.backtest import Decision, iter_grid, run_backtest, summarize
-from agent_trading_core.config import MARKETS, default_config
+from agent_trading_core.config import LLM, MARKETS, default_config
 from agent_trading_core.identity import resolve_instrument_identity
 from agent_trading_core.krx_names import RULE_KO, korean_name
 from agent_trading_core.screening import ScreenConfig, screen, sector_lookup, us_preset
+from agent_trading_core.yahoo import load_ohlcv
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from paper_backtest import US_UNIVERSE  # the US book of the 2nd-3rd measurements, one list
@@ -144,6 +147,42 @@ def decide_from_screen(market: str, run: ScreenRun, ticker: str, date: str) -> t
     return Decision(text, rating), record
 
 
+def screen_section(run: ScreenRun, ticker: str) -> agent.Section | None:
+    """The ticker's screen results as the model reads them (rule, value, threshold, pass), None when not screened."""
+    cand = next((c for c in run.candidates if c.ticker == ticker), None)
+    if cand is None:
+        return None
+    ranked = sum(c.rank is not None for c in run.candidates)
+    lines = [f"- 종목명: {cand.name or '-'} · 섹터: {sector_of(ticker) or '-'}",
+             f"- 선별 {run.run_id} ({run.universe}, {run.universe_size}종목): "
+             + (f"모멘텀 순위 {cand.rank}/{ranked}" if cand.rank else "순위 없음") + (" · 선별 통과" if cand.selected else ""),
+             "", "| 규칙 | 값 | 기준 | 통과 | 비고 |", "|---|---:|---:|---|---|"]
+    lines += [f"| {f.rule} | {f.value} | {f.threshold} | {'예' if f.passed else '아니오'} | {f.note} |" for f in cand.filters]
+    summary = (f"선별 {'통과' if cand.selected else '탈락'}, 모멘텀 순위 {cand.rank or '-'}/{ranked}, "
+               f"섹터 {sector_of(ticker) or '-'}")
+    return agent.Section("other", "선별 규칙 결과", "\n".join(lines), summary)
+
+
+def memory_text(ticker: str, day: str, decisions: list[DecisionRecord], closed=(), n: int = 5) -> str:
+    """The ticker's last decisions before ``day`` and its closed trades (``execution.ClosedTrade``): what was decided
+    and how it ended."""
+    past = [d for d in decisions if d.ticker == ticker and d.trade_date < day][-n:]
+    lines = [f"- {d.trade_date} {d.rating} ({'규칙' if decision_source(d) != 'agent' else '매니저'}): "
+             + " ".join(d.thesis.split())[:200] for d in past]
+    lines += [f"- 청산 {c.entry_date}→{c.exit_date} {c.pnl_pct:+.1%} ({c.reason})" for c in closed if c.ticker == ticker]
+    return "\n".join(lines) or "지난 결정 없음."
+
+
+def llm_decision(market: str, run: ScreenRun, ticker: str, date: str, *, cache_dir: str, client, decisions,
+                 raw_dir: Path) -> DecisionRecord:
+    """The model's memo on a screened survivor over the Yahoo cache (``--decider llm``), as its decision record."""
+    frame = load_ohlcv(ticker, date, cache_dir=cache_dir, fill_gaps=False)
+    snap = agent.Snapshot(ticker, date, MARKETS[market]["currency"],
+                          [agent.market_section(frame, date), *[s for s in [screen_section(run, ticker)] if s]])
+    out = agent.decide_candidate(ticker, snap, memory_text(ticker, date, decisions), client=client, raw_dir=raw_dir)
+    return agent.to_record(out, market=market, day=date, screen_run_id=run.run_id, evidence=snap.evidence(run.run_id))
+
+
 def rating_table(by_rating: dict) -> str:
     """docs/03 §2 · §6 table from the summary's by_rating, in tier order."""
     rows = ["| 등급 | n | 방향 적중률 | 평균 알파 |", "|---|---:|---:|---:|"]
@@ -161,11 +200,14 @@ def main(argv: list[str] | None = None, data: Path = DATA) -> int:
     parser.add_argument("--start", default="2026-06-05")
     parser.add_argument("--dates", type=int, default=8)
     parser.add_argument("--every", type=int, default=7)
-    parser.add_argument("--run-id", help="default: the market's run id (SETUPS)")
+    parser.add_argument("--run-id", help="default: the market's run id (SETUPS), + _llm with --decider llm")
+    parser.add_argument("--decider", choices=("rule", "llm"), default="rule",
+                        help=f"llm: {LLM['model']} writes the memo of each screened survivor (the rest stay rule), "
+                             f"at most LLM max_calls_per_run calls in the whole grid, then rule")
     args = parser.parse_args(argv)
     setup, market = SETUPS[args.market], MARKETS[args.market]
     universe = setup["universe"]
-    run_id = args.run_id or setup["run_id"]
+    run_id = args.run_id or setup["run_id"] + ("_llm" if args.decider == "llm" else "")
 
     cfg = default_config()
     cfg["data_cache_dir"] = str(data / "cache")
@@ -189,8 +231,30 @@ def main(argv: list[str] | None = None, data: Path = DATA) -> int:
             print(f"  screen {date}: {run.universe_size} -> {stage_counts(run)}")
         return screens[date]
 
+    llm: dict = {"client": None, "calls": 0, "why": None}
+    if args.decider == "llm":
+        try:
+            llm["client"] = agent.make_client()
+        except Exception as e:      # no key: every survivor gets the rule decision, said so in its record
+            llm["why"] = f"client: {type(e).__name__}: {e}"[:200]
+
     def decide(ticker: str, date: str) -> Decision:
-        decision, record = decide_from_screen(args.market, screen_for(date), ticker, date)
+        run = screen_for(date)
+        decision, record = decide_from_screen(args.market, run, ticker, date)
+        if args.decider == "llm" and any(c.ticker == ticker and c.selected for c in run.candidates):
+            why = llm["why"] or (f"max_calls_per_run({LLM['max_calls_per_run']})"
+                                 if llm["calls"] >= LLM["max_calls_per_run"] else None)
+            if why is None:
+                llm["calls"] += 1
+                record = llm_decision(args.market, run, ticker, date, cache_dir=cfg["data_cache_dir"],
+                                      client=llm["client"], decisions=audit.decisions(),
+                                      raw_dir=audit.directory / "agent_raw" / date)
+                decision = Decision(record.thesis, record.rating)
+            else:
+                record = record or DecisionRecord(market=args.market, ticker=ticker, trade_date=date,
+                                                  screen_run_id=run.run_id, rating="Hold", action="Hold",
+                                                  thesis=decision.text, settings={"decider": BASELINE_DECIDER})
+                record.settings |= {"fallback": "rule", "fallback_reason": why}
         if record is not None:
             audit.record_decision(record)
         return decision

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 from agent_trading_core.audit import CandidateRecord, DecisionRecord, ScreenRun, baseline_summary_path
@@ -116,3 +117,36 @@ def test_build_mockup_reads_the_markets_book(tmp_path, monkeypatch):
     assert {d["market"] for d in payload["decisions"]} == {"US"} and len(payload["decisions"]) == 4
     with pytest.raises(FileNotFoundError):                 # no KRX summary here: KRX does not fall back to the US one
         mock.build_payload(tmp_path, "KRX")
+
+
+@pytest.mark.unit
+def test_the_llm_decider_asks_only_about_survivors_up_to_the_cap_then_falls_back_to_rule(tmp_path, monkeypatch):
+    from anthropic.types import Message
+
+    _fake_run(monkeypatch, {})
+    days = pd.bdate_range("2026-01-02", "2026-12-31")
+    monkeypatch.setattr(bk, "load_ohlcv", lambda t, d, cache_dir, fill_gaps: pd.DataFrame(
+        {"Date": days, "Open": 100.0, "High": 101.0, "Low": 99.0, "Close": 100.0, "Volume": 1e6}))
+    asked = []
+    memo = {"business_summary": "b", "thesis": "t", "bull_case": "u", "bear_case": "d", "valuation_basis": "v",
+            "current_price": 100, "price_target": 130, "downside_price": 90, "catalysts": [{"event": "e"}],
+            "invalidation": ["i"], "rating": "Overweight", "conviction": 0.5, "exit_plan": "x", "time_horizon": "1y"}
+
+    def create(**kw):
+        asked.append(kw["messages"][0]["content"])
+        return Message.model_validate({"id": "m", "type": "message", "role": "assistant", "model": kw["model"],
+                                       "content": [{"type": "text", "text": json.dumps(memo)}], "stop_reason": "end_turn",
+                                       "stop_sequence": None, "usage": {"input_tokens": 1, "output_tokens": 1}})
+
+    monkeypatch.setattr(bk.agent, "make_client", lambda: SimpleNamespace(messages=SimpleNamespace(create=create)))
+    monkeypatch.setitem(bk.LLM, "max_calls_per_run", 5)
+    assert bk.main(["--market", "US", "--dates", "2", "--decider", "llm"], data=tmp_path) == 0
+    decisions = [DecisionRecord.model_validate_json(line) for line in
+                 (tmp_path / "audit" / "US" / "decisions.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert all(d.screen_run_id.startswith("baseline_us_v1_llm_") for d in decisions)    # apart from the rule run
+    agent_made = [d for d in decisions if d.settings["decider"] == "claude-opus-5-5"]
+    fallback = [d for d in decisions if d.settings.get("fallback") == "rule"]
+    # 4 survivors x 2 dates: 5 asked, 3 by rule; the unranked rest stay rule Holds (not recorded)
+    assert len(asked) == len(agent_made) == 5 and len(fallback) == 3 and len(decisions) == 8
+    assert all(d.rating == "Overweight" and d.source == "agent" for d in agent_made)
+    assert all(d.settings["fallback_reason"] == "max_calls_per_run(5)" for d in fallback)

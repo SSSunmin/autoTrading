@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from agent_trading_core.files import locked
 from agent_trading_core.rating import RATING_REVIEW, RATINGS_5_TIER
+from agent_trading_core.schemas import SellReason
 
 
 def _now() -> str:
@@ -103,6 +104,13 @@ class DecisionRecord(BaseModel):
         description="Deterministic rules that changed or blocked the agent's call, e.g. 'max_position_pct'",
     )
     settings: dict = Field(default_factory=dict, description="Model/provider/debate depth that produced it")
+    usage: dict[str, int] = Field(default_factory=dict,
+                                  description="The model call's token counts (input_tokens, output_tokens, "
+                                              "cache_read_input_tokens, cache_creation_input_tokens); empty for a "
+                                              "decision no model made")
+    sell_reason: SellReason | None = Field(default=None,
+                                           description="A sell review's first reason (schemas.SellReason, docs/01 "
+                                                       "§12-2), when its action is Trim or Exit")
     source: Literal["agent", "rule", "baseline"] = Field(
         default="agent",
         description="agent: the manager's call; rule: a hard-rule exit the executor recorded before its sell order "
