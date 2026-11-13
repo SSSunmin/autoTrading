@@ -85,6 +85,8 @@ def test_a_daily_loss_halt_is_lifted_by_system_on_the_next_trading_day_once(audi
     (resume,) = _resumes(audit)
     assert (resume.operator, resume.role, resume.target) == ("system", "auto", "daily_loss")
     assert resume.reason == "일일 손실 정지 자동 해제(정지일 2026-06-04)"
+    # written when the run came, effective from the next trading day's 00:00 (the replay reads the same day)
+    assert resume.effective_from == "2026-06-05"
     assert trading_state(audit.operations())["running"] is True
     assert b.ticker == "B.KS" and b.side == "Buy" and b.status == "filled"   # the loop ordered again
 

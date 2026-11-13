@@ -40,6 +40,13 @@
   --app-fail-strong: var(--bv-color-red-30);    /* 5.88 on white, 4.89 on red-95 */
   --app-pass-strong: var(--bv-color-green-20);  /* 4.86 on green-95 */
   --app-down-strong: var(--bv-color-blue-40);   /* 6.61 on blue-95 */
+  /* screen 8 (mockup Paper · PaperGo, v0.7) */
+  --app-fail-tint: var(--bv-color-red-99);      /* mockup 전환 불가 banner #FDF3F2 (Δ 3) */
+  --app-fail-line: #e8b4ae;                     /* mockup banner border; nearest red-80 #ffabaf Δ 23 */
+  --app-warn-tint: var(--bv-color-orange-99);   /* mockup 진행 중 banner #FFF8EA (Δ 8) */
+  --app-pass-tint: var(--bv-color-green-99);    /* 전환 가능 banner: the mockup has none, the pass family */
+  --app-chart-line: #1d5bb6;                    /* mockup drawdown line; nearest blue-40 #1c2fd7 Δ 41 (violet) */
+  --app-chart-area: var(--bv-color-blue-99);    /* mockup #E5EDF9 (Δ 7) */
 }
 
 body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: var(--bv-font-family); }
@@ -190,3 +197,53 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .prot-chip.on { background: var(--app-fail-strong); color: var(--bv-color-common-100); }
 .prot-chip.ok { background: var(--app-pass-bg); color: var(--app-pass-strong); border-color: var(--app-pass-strong); }
 .prot-chip.unknown { background: var(--app-surface-2); color: var(--app-fg-2); border-color: var(--app-line); }
+
+/* --- screen 8 · 모의투자 검증 (docs/02 v0.7 §11-1, mockup Paper · PaperUS · PaperGo · PaperGoUS) --- */
+.nav-count { font-size: var(--bv-font-size-caption-2); color: var(--app-fg-2); font-weight: var(--bv-font-weight-semibold); }
+.pill { display: inline-block; padding: 0.1rem 0.9rem; border-radius: var(--bv-radius-500); font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); line-height: 1.7; border: 1px solid transparent; white-space: nowrap; }
+.pill.met { background: var(--app-pass-bg); color: var(--app-pass-strong); }
+.pill.wait { background: var(--app-warn-bg); color: var(--app-warn); border-color: var(--app-warn-line); }
+.pill.unmet { background: var(--app-fail-strong); color: var(--bv-color-common-100); }
+.verdict { display: flex; flex-wrap: wrap; gap: 1rem 2rem; align-items: center; border: 1px solid; border-radius: var(--bv-radius-200); padding: 1.4rem 1.8rem; font-size: var(--bv-font-size-body-2-normal); }
+.verdict-t { font-size: var(--bv-font-size-title-3); font-weight: 700; }
+.verdict-r { margin-left: auto; font-size: var(--bv-font-size-body-3-normal); color: var(--app-fg-2); }
+.verdict.no { background: var(--app-fail-tint); border-color: var(--app-fail-line); }
+.verdict.no .verdict-t { color: var(--app-fail-strong); }
+.verdict.wait { background: var(--app-warn-tint); border-color: var(--app-warn-line); }
+.verdict.wait .verdict-t { color: var(--app-warn); }
+.verdict.ok { background: var(--app-pass-tint); border-color: var(--app-pass-strong); }
+.verdict.ok .verdict-t { color: var(--app-pass-strong); }
+.paper-t td.memo { color: var(--app-fg-2); min-width: 26rem; }
+.paper-t tr.row-unmet td { background: var(--app-fail-tint); }
+.paper-2 { display: grid; gap: 1.4rem; grid-template-columns: repeat(auto-fit, minmax(46rem, 1fr)); }
+.dd-svg { display: block; width: 100%; height: auto; }
+/* font sizes below are viewBox units (the svg scales with its card), as the mockup draws them */
+.dd-svg text { font-size: 11px; fill: var(--app-fg-2); }
+.dd-svg .rule line { stroke: var(--app-line); }
+.dd-svg .rule.limit line { stroke: var(--app-fg); stroke-dasharray: 5 3; }
+.dd-svg .rule.limit text { fill: var(--app-fg); }
+.dd-svg .rule.stop line { stroke: var(--app-fail-strong); stroke-dasharray: 5 3; }
+.dd-svg .rule.stop text { fill: var(--app-fail-strong); }
+.dd-svg .dd-area { fill: var(--app-chart-area); }
+.dd-svg .dd-line { fill: none; stroke: var(--app-chart-line); stroke-width: 2; }
+.dd-svg .dd-low circle { fill: var(--app-chart-line); }
+.dd-svg .dd-low text { fill: var(--app-fg); }
+.vrow { display: grid; grid-template-columns: 11rem 13rem minmax(0, 1fr) auto; gap: 1rem; align-items: center; padding: 0.8rem 0; border-bottom: 1px solid var(--app-line); font-size: var(--bv-font-size-body-3-normal); }
+.muted-2 { color: var(--app-fg-2); }
+.xr.review { background: var(--app-surface); color: var(--app-fg-2); border: 1px dashed var(--app-fg-3); }
+.xr.daily_loss { background: var(--app-warn-bg); color: var(--app-warn); }
+.xr.dd_stop, .xr.unexplained_order { background: var(--app-up-bg); color: var(--app-fail-strong); }
+.xr.order_exception { background: var(--app-surface); color: var(--app-fail-strong); border: 1px dashed var(--app-fail); }
+.v-empty { padding: 1.4rem; font-size: var(--bv-font-size-body-3-normal); text-align: center; color: var(--app-pass-strong); font-weight: var(--bv-font-weight-semibold); border: 1px dashed var(--app-pass-strong); border-radius: var(--bv-radius-200); margin: 0.6rem 0; }
+.v-foot { margin: 0.8rem 0 0; }
+.v-sub { margin: 1.2rem 0 0.4rem; }
+.ref-badge { display: inline-block; font-size: var(--bv-font-size-caption-2); font-weight: 700; color: var(--app-fg-2); border: 1px solid var(--app-fg-3); border-radius: var(--bv-radius-100); padding: 0 0.6rem; line-height: 1.6; white-space: nowrap; }
+.cross-card { display: flex; flex-wrap: wrap; gap: 0.8rem 1.6rem; align-items: center; border: 1px solid var(--app-line); border-radius: var(--bv-radius-200); background: var(--app-surface); padding: 1.4rem 1.8rem; font-size: var(--bv-font-size-body-3-normal); }
+.cross-card > div { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; flex: 1 1 40rem; }
+.cross-card.lead { border-left: 4px solid var(--app-fg); }
+.cross-act { margin-left: auto; display: inline-flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; }
+.go-sum { border-radius: var(--bv-radius-150); padding: 1rem 1.2rem; font-size: var(--bv-font-size-body-3-normal); }
+.go-sum.ok { background: var(--app-pass-bg); color: var(--app-pass-strong); }
+.go-sum.no { background: var(--app-warn-bg); color: var(--app-warn); }
+.go-h { font-size: var(--bv-font-size-body-3-normal); }
+.go-warn { margin: 0; font-size: var(--bv-font-size-body-3-normal); color: var(--app-fg-2); }

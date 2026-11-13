@@ -170,3 +170,14 @@ def display_name(ticker: str) -> str | None:
     if _history_names is None:
         _history_names = load_history_names()
     return _history_names.get(ticker.upper())
+
+# Operating mode on two axes (docs/10 D4): the stored ``mode`` stays auto | manual | paper; these name its account
+# (paper / live) and execution (auto / manual approval) sides.
+ACCOUNT_MODE_KO: dict[str, str] = {"paper": "모의투자", "live": "실거래"}
+EXECUTION_MODE_KO: dict[str, str] = {"auto": "자동 실행", "manual": "수동 승인"}
+
+# Paper-trading gate (screen 8, docs/05 §4): a criterion's verdict, and what a violation is.
+PAPER_STATUS_KO: dict[str, str] = {"met": "충족", "unmet": "미충족", "in_progress": "진행 중"}
+PAPER_VIOLATION_KO: dict[str, str] = {"review": "REVIEW", "daily_loss": "일일 손실 한도", "dd_stop": "−20% 정지",
+                                      "unexplained_order": "결정 없는 주문"}
+PAPER_NOTE_KO: dict[str, str] = {"order_exception": "주문 예외", "stop_loss": "손절"}
