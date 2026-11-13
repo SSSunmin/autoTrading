@@ -272,6 +272,13 @@ def market_audit(root: str | Path, market: str) -> AuditLog:
     return AuditLog(root / market, market=market, legacy=root if market == "KRX" else None)
 
 
+def baseline_summary_path(data: str | Path, market: str) -> Path:
+    """The rule-only decision baseline's summary (scripts/baseline_krx.py) under ``data``: KRX keeps the file from
+    before the market axis, ``data/baseline_summary.json``; any other market writes ``data/audit/<market>/``."""
+    data = Path(data)
+    return data / "baseline_summary.json" if market == "KRX" else data / "audit" / market / "baseline_summary.json"
+
+
 def stage_counts(run: ScreenRun) -> list[int]:
     """Survivors after each rule, in rule order, for the dashboard funnel.
 
