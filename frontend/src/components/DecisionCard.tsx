@@ -1,14 +1,17 @@
 import { Link } from 'react-router-dom'
 import { AgentChip } from '@bv-ds/ui'
 
-import { utc, won } from '../api/client'
+import { money, utc } from '../api/client'
 import type { Decision } from '../api/types'
+import { useMarketPath } from '../hooks/useMarket'
 import { ExecStatus, Pct, RatingBadge, TickerCell } from './common'
 
 /** One decision as the plan's card (docs/02 v0.3 화면 3): rating, action, confidence, the thesis as the manager wrote it,
  *  evidence with source and as-of, the execution strip (filled / blocked / exception) joined from the orders log,
  *  the settled outcome, and any hard-rule overrides. */
 export function DecisionCard({ d }: { d: Decision }) {
+  const to = useMarketPath()
+  const amt = (v: number | null | undefined) => money(v, d.market)    // the record's own market, not the toggle
   return (
     <article className="card">
       <div className="hd">
@@ -28,13 +31,13 @@ export function DecisionCard({ d }: { d: Decision }) {
       {d.orders.length > 0 ? d.orders.map((o) => (
         <div key={o.order_id} className={`exec ${o.status}`}>
           <ExecStatus status={o.status} label={o.status_ko} />
-          <span>{o.side_ko} {o.filled_quantity || o.quantity}주{o.filled_price != null ? ` · ${won(o.filled_price)}원 · ${won(o.amount)}원` : ''}</span>
+          <span>{o.side_ko} {o.filled_quantity || o.quantity}주{o.filled_price != null ? ` · ${amt(o.filled_price)} · ${amt(o.amount)}` : ''}</span>
           {o.reason && <span className="muted">{o.reason}</span>}
           {o.rules_applied.map((r) => <AgentChip key={r} variant="hot">{r}</AgentChip>)}
           <span className="muted num" style={{ marginLeft: 'auto' }}>{utc(o.placed_at)}</span>
         </div>
       )) : d.tradeable && (
-        <div className="exec none muted">주문 기록 없음 · 아직 모의 실행 전 (결정은 다음 거래일 09:00 시가에 주문됩니다)</div>
+        <div className="exec none muted">주문 기록 없음 · 아직 모의 실행 전 (결정은 다음 거래일 시가에 주문됩니다)</div>
       )}
 
       <div className="memo">{d.thesis.replace(/\*\*/g, '')}</div>
@@ -48,8 +51,8 @@ export function DecisionCard({ d }: { d: Decision }) {
       )}
 
       <div className="meta">
-        {d.entry_price != null && <span>진입가 <b className="num">{won(d.entry_price)}</b></span>}
-        {d.stop_loss != null && <span>손절가 <b className="num">{won(d.stop_loss)}</b></span>}
+        {d.entry_price != null && <span>진입가 <b className="num">{amt(d.entry_price)}</b></span>}
+        {d.stop_loss != null && <span>손절가 <b className="num">{amt(d.stop_loss)}</b></span>}
         {d.position_sizing && <span>비중 <b>{d.position_sizing}</b></span>}
         <span>
           결과{' '}
@@ -60,7 +63,7 @@ export function DecisionCard({ d }: { d: Decision }) {
         {d.hard_rule_overrides.length > 0 && (
           <span>개입 {d.hard_rule_overrides.map((o) => <AgentChip key={o} variant="hot">{o}</AgentChip>)}</span>
         )}
-        <Link to={`/tickers/${encodeURIComponent(d.ticker)}`} style={{ marginLeft: 'auto' }}>종목 상세 →</Link>
+        <Link to={to(`/tickers/${encodeURIComponent(d.ticker)}`)} style={{ marginLeft: 'auto' }}>종목 상세 →</Link>
       </div>
     </article>
   )

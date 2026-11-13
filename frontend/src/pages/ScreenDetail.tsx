@@ -4,6 +4,8 @@ import { AgentBreadcrumb, AgentSectionPanel, AgentSegmentedControl, SearchField 
 
 import { api } from '../api/client'
 import { useApi } from '../hooks/useApi'
+import { useLabels } from '../hooks/useLabels'
+import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded, RuleCell, TickerCell } from '../components/common'
 import type { Candidate, ScreenDetail as ScreenDetailT } from '../api/types'
 
@@ -11,18 +13,20 @@ import type { Candidate, ScreenDetail as ScreenDetailT } from '../api/types'
 export default function ScreenDetail() {
   const { runId = '' } = useParams()
   const navigate = useNavigate()
-  const state = useApi(() => api.screen(runId), [runId])
-  const labels = useApi(() => api.labels(), [])
+  const [market] = useMarket()
+  const to = useMarketPath()
+  const state = useApi(() => api.screen(market, runId), [market, runId])
+  const labels = useLabels()
   const [stage, setStage] = useState<number | null>(null)
   const [filter, setFilter] = useState('all')
   const [q, setQ] = useState('')
 
   return (
     <>
-      <AgentBreadcrumb items={[{ label: '종목 선별', href: '/screens' }, { label: runId }]} />
+      <AgentBreadcrumb items={[{ label: '종목 선별', href: to('/screens') }, { label: runId }]} />
       <Loaded state={state}>
         {(s) => <Detail s={s} stage={stage} setStage={setStage} filter={filter} setFilter={setFilter} q={q} setQ={setQ}
-                        ruleDesc={labels.data?.rule_desc_ko ?? {}} onTicker={(t) => navigate(`/tickers/${encodeURIComponent(t)}`)} />}
+                        ruleDesc={labels.data?.rule_desc_ko ?? {}} onTicker={(t) => navigate(to(`/tickers/${encodeURIComponent(t)}`))} />}
       </Loaded>
     </>
   )

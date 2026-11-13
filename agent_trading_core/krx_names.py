@@ -106,3 +106,7 @@ def korean_name(ticker: str) -> str | None:
 DECISION_SOURCE_KO: dict[str, str] = {"agent": "에이전트 결정", "rule": "규칙 청산"}
 
 HALTED_BY_KO: dict[str, str] = {"system": "시스템 자동 정지"}
+
+MARKET_KO: dict[str, str] = {"KRX": "국내", "US": "미국"}
+
+HALT_SCOPE_KO: dict[str, str] = {"all": "전체 시장", "KRX": "국내만", "US": "미국만"}

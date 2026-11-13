@@ -4,6 +4,7 @@ import { AgentAlert, AgentButton, AgentEmptyState, AgentSectionPanel, AgentSelec
 
 import { api } from '../api/client'
 import { useApi } from '../hooks/useApi'
+import { useMarket } from '../hooks/useMarket'
 import { useTradingState } from '../hooks/useTradingState'
 import { Loaded, TickerCell } from '../components/common'
 import { DecisionCard } from '../components/DecisionCard'
@@ -12,14 +13,21 @@ import { DecisionCard } from '../components/DecisionCard'
  *  (REVIEW + cap exceeded + vendor failure), and hard-rule overrides (original vs final). No approval step in auto mode. */
 export default function Decisions() {
   const [params, setParams] = useSearchParams()
-  const dates = useApi(() => api.decisionDates(), [])
-  const [date, setDate] = useState<string | null>(null)
-  const day = date ?? dates.data?.[0] ?? null
-  const all = useApi(() => (day ? api.decisions({ date: day }) : Promise.resolve([])), [day])
-  const exceptions = useApi(() => (day ? api.exceptions({ date: day }) : Promise.resolve([])), [day])
-  const mode = useTradingState()
+  const [market] = useMarket()
+  const dates = useApi(() => api.decisionDates(market), [market])
+  // a date picked on one market's list is that market's trading day; it does not carry over to the other market
+  const [picked, setPicked] = useState<{ market: string; date: string } | null>(null)
+  const day = (picked?.market === market ? picked.date : null) ?? dates.data?.[0] ?? null
+  const all = useApi(() => (day ? api.decisions(market, { date: day }) : Promise.resolve([])), [market, day])
+  const exceptions = useApi(() => (day ? api.exceptions(market, { date: day }) : Promise.resolve([])), [market, day])
+  const mode = useTradingState(market)
   const tab = params.get('tab') ?? 'all'
-  const setTab = (t: string) => setParams(t === 'all' ? {} : { tab: t })
+  const setTab = (t: string) => setParams((p) => {
+    const q = new URLSearchParams(p)                       // keep ?market=
+    if (t === 'all') q.delete('tab')
+    else q.set('tab', t)
+    return q
+  })
 
   const rows = all.data ?? []
   const overrides = rows.filter((d) => d.hard_rule_overrides.length > 0)
@@ -33,7 +41,7 @@ export default function Decisions() {
         {mode.data?.mode === 'manual' ? ' 수동 승인 모드라 주문 전에 승인 단계가 있습니다.' : ' 자동 모드라 승인 단계는 없고, 사람이 봐야 할 것은 예외 큐에만 올라옵니다.'}
       </p>
       <div className="toolbar">
-        <AgentSelect label="결정일" size="sm" value={day ?? ''} onChange={(e) => setDate(e.target.value)}
+        <AgentSelect label={`결정일 (${market === 'US' ? '미국 거래일, 뉴욕 날짜' : '국내 거래일'})`} size="sm" value={day ?? ''} onChange={(e) => setPicked({ market, date: e.target.value })}
           options={(dates.data ?? []).map((d) => ({ value: d, label: d }))} />
         {mode.data && <span className="muted">{mode.data.label_ko}</span>}
       </div>

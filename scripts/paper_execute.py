@@ -2,9 +2,12 @@
 
 Run:  .venv/Scripts/python scripts/paper_execute.py --date 2026-07-24
       .venv/Scripts/python scripts/paper_execute.py --all        # every trading day not executed yet, in order
-Reads data/audit/decisions.jsonl and operations.jsonl and the OHLCV cache (data/cache, never downloads);
-appends to data/audit/orders.jsonl, and rule-exit decisions / an automatic halt to decisions / operations.
-TRADING_DATA_DIR overrides data/.
+      .venv/Scripts/python scripts/paper_execute.py --market US --all
+One market per run (``--market``, default KRX): its own book under data/audit/<market>/ (decisions, orders,
+operations), its own index calendar (MARKETS[market]["benchmark"]: KRX ^KS11, US ^GSPC), currency and caps.
+KRX also reads the files written straight under data/audit/ before the market axis (never moved or rewritten).
+Reads the OHLCV cache (data/cache, never downloads); appends orders, and rule-exit decisions / an automatic halt
+to decisions / operations. TRADING_DATA_DIR overrides data/.
 
 ``--all`` runs every trading day from the first decision (or the last executed day) to the end of the price
 data, not only decision days: the rule exits are judged at each day's close. It ends with the audit count of
@@ -25,14 +28,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from agent_trading_core.audit import AuditLog, latest_orders, trading_state
+from agent_trading_core.audit import latest_orders, market_audit, trading_state
+from agent_trading_core.config import MARKETS
 from agent_trading_core.execution import (
     EXIT_SUFFIX,
     ExecutionRefused,
-    PaperConfig,
     Prices,
     check_date,
     execute_date,
+    paper_config,
     unexplained_orders,
 )
 
@@ -47,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--date", help="trading day YYYY-MM-DD")
     which.add_argument("--all", action="store_true", help="every trading day from the last executed one on")
+    parser.add_argument("--market", default="KRX", choices=sorted(MARKETS), help="which book (default KRX)")
     parser.add_argument("--data-dir", default=os.environ.get("TRADING_DATA_DIR") or str(ROOT / "data"))
     args = parser.parse_args(argv)
     if args.date:
@@ -56,14 +61,15 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--date는 YYYY-MM-DD 형식이어야 합니다: {args.date!r}")
 
     data = Path(args.data_dir)
-    audit = AuditLog(data / "audit")
+    audit = market_audit(data / "audit", args.market)
     prices = Prices(data / "cache")
+    cfg = paper_config(args.market)
     try:
         if args.all:
             done = [o.trade_date for o in latest_orders(audit.orders()).values()]
             agent_days = [d.trade_date for d in audit.decisions() if d.source == "agent"]
             start = max(done) if done else min(agent_days, default=None)
-            calendar = prices.calendar(PaperConfig().index)
+            calendar = prices.calendar(cfg.index)
             # a decision dated on a holiday still runs on its own date (it fills at the next session's open)
             dates = sorted({d for d in calendar + agent_days if start and d >= start})
         else:
@@ -74,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     for date in dates:
         try:
             before = trading_state(audit.operations())["running"]
-            written = execute_date(audit, date, prices)
+            written = execute_date(audit, date, prices, cfg=cfg)
             after = trading_state(audit.operations())
         except ExecutionRefused as exc:
             print(f"{date}: 거부 — {exc}", file=sys.stderr)
@@ -96,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     missing = unexplained_orders(orders, decisions)
     current = latest_orders(orders).values()
     state = trading_state(audit.operations())
-    print(f"주문 {len(current)}건 · 규칙 청산 {sum(o.order_id.endswith(EXIT_SUFFIX) for o in current)}건 · "
+    print(f"{args.market} · 주문 {len(current)}건 · 규칙 청산 {sum(o.order_id.endswith(EXIT_SUFFIX) for o in current)}건 · "
           f"자동 정지 {halts}회 · 미설명 주문 {len(missing)}건 · 상태 "
           + ("실행 중" if state["running"] else f"정지({state['halted_by']}: {state['halt_reason']})"))
     for o in missing:

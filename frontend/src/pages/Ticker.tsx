@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AgentEmptyState, AgentSectionPanel, AgentSelect, AgentTabs } from '@bv-ds/ui'
 
-import { api } from '../api/client'
+import { api, stockName } from '../api/client'
 import { useApi } from '../hooks/useApi'
+import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded, Pct, RatingBadge, RuleCell, TickerCell } from '../components/common'
 import { DecisionCard } from '../components/DecisionCard'
 import type { TickerDetail } from '../api/types'
@@ -12,17 +13,19 @@ import type { TickerDetail } from '../api/types'
 export default function Ticker() {
   const { ticker } = useParams()
   const navigate = useNavigate()
-  const tickers = useApi(() => api.tickers(), [])
+  const [market] = useMarket()
+  const to = useMarketPath()
+  const tickers = useApi(() => api.tickers(market), [market])
   const current = ticker ?? tickers.data?.[0]?.ticker ?? null
-  const detail = useApi(() => (current ? api.ticker(current) : Promise.reject(new Error('종목을 선택하세요'))), [current])
+  const detail = useApi(() => (current ? api.ticker(market, current) : Promise.reject(new Error('종목을 선택하세요'))), [market, current])
   const [tab, setTab] = useState('decisions')
 
   return (
     <>
       <h1 className="page-title">종목 상세</h1>
       <div className="toolbar">
-        <AgentSelect label="종목" size="sm" value={current ?? ''} onChange={(e) => navigate(`/tickers/${encodeURIComponent(e.target.value)}`)}
-          options={(tickers.data ?? []).map((t) => ({ value: t.ticker, label: `${t.ticker} ${t.name ?? ''}` }))} />
+        <AgentSelect label="종목" size="sm" value={current ?? ''} onChange={(e) => navigate(to(`/tickers/${encodeURIComponent(e.target.value)}`))}
+          options={(tickers.data ?? []).map((t) => ({ value: t.ticker, label: market === 'US' ? stockName(t.ticker, t.name, market) : `${t.ticker} ${t.name ?? ''}` }))} />
       </div>
       <Loaded state={detail}>{(d) => <Body d={d} tab={tab} setTab={setTab} />}</Loaded>
     </>

@@ -1,6 +1,8 @@
 // Mirrors backend/main.py responses (docs/04). Values stay English (rating, rule id, status); *_ko is for display.
 
 export type Rating = 'Buy' | 'Overweight' | 'Hold' | 'Underweight' | 'Sell' | 'REVIEW'
+/** config.MARKETS key: a separate book with its own currency, calendar and trading state (docs/08) */
+export type Market = 'KRX' | 'US'
 export type Mode = 'auto' | 'manual' | 'paper'
 export type OrderStatus = 'filled' | 'partial' | 'open' | 'blocked' | 'rejected' | 'exception' | 'cancelled'
 export type ExceptionKind = 'review' | 'cap_exceeded' | 'order_rejected' | 'vendor_unavailable'
@@ -77,6 +79,7 @@ export interface Order {
   exception_kind: ExceptionKind | null
   reason: string
   rules_applied: string[]
+  market: Market
 }
 
 export interface Decision {
@@ -100,6 +103,7 @@ export interface Decision {
   /** agent: the manager's call; rule: a hard-rule exit (stop-loss, trailing, expiry, drawdown stop) the executor recorded */
   source: 'agent' | 'rule'
   source_ko: string
+  market: Market
   outcome: Outcome | null
   orders: Order[]
 }
@@ -129,11 +133,27 @@ export interface TradingState {
   mode_changed_at: string | null
   label_ko: string
   admin_token_required: boolean
+  market: Market
+  market_ko: string
 }
 
+export interface HaltEffects { new_orders: string; open_orders_cancelled: number | null; positions: string; exits_active: boolean; note: string }
+
+/** scope all: one result per market that was running (same at, same reason); markets already halted are skipped. */
 export interface HaltResult {
-  state: TradingState
-  effects: { new_orders: string; open_orders_cancelled: number | null; positions: string; exits_active: boolean; note: string }
+  scope: 'all' | Market
+  scope_ko: string
+  results: { market: Market; state: TradingState; effects: HaltEffects; error: string | null }[]
+  /** already halted, left as is; ``keep_exits`` true means that market's exits keep running */
+  skipped: { market: Market; reason: string; keep_exits: boolean }[]
+}
+
+export interface ResumeResult {
+  scope: 'all' | Market
+  scope_ko: string
+  resumed: Market[]
+  skipped: { market: Market; reason: string }[]
+  states: Partial<Record<Market, TradingState>>
 }
 
 export interface TickerRow {
@@ -201,6 +221,9 @@ export interface Performance {
 export interface Health {
   ok: boolean
   core_version: string
+  market: Market
+  market_ko: string
+  markets: Market[]
   screens: number
   decisions: number
   orders: number
@@ -217,6 +240,39 @@ export interface Labels {
   mode_ko: Record<string, string>
   order_status_ko: Record<string, string>
   exception_kind_ko: Record<string, string>
+  market_ko: Record<Market, string>
+  halt_scope_ko: Record<string, string>
+  markets: Record<Market, MarketInfo>
+  color_convention: { up: string; down: string; note: string }
+}
+
+/** /api/labels markets[m]: what a screen needs to show a market (currency, index, session; KST converted on screen). */
+export interface MarketInfo {
+  market: Market
+  label_ko: string
+  currency: 'KRW' | 'USD'
+  currency_symbol: string
+  benchmark: string
+  benchmark_name_ko: string
+  timezone: string
+  session: string
+  session_kst: string
+  name_style: 'name' | 'name_ticker'
+}
+
+/** /api/markets: one card per book on the home screen. Each in its own currency; no total. */
+/** One home card. A broken book of that market gives ``error`` and nulls; the other card still loads. */
+export interface MarketSummary extends MarketInfo {
+  as_of: string | null
+  equity: number | null
+  initial_cash: number | null
+  day_return: number | null
+  drawdown: number | null
+  positions: number | null
+  state: TradingState | null
+  error: string | null
+  next_run_kst: string
+  next_run_label_ko: string
 }
 
 export interface RuleRow {
@@ -226,6 +282,8 @@ export interface RuleRow {
   value?: number | string
   layer: 'screen' | 'auto_execution'
   layer_ko: string
+  /** auto-execution amounts: the market's currency; null for fractions and settings */
+  currency?: 'KRW' | 'USD' | null
 }
 
 export interface OperationRow {
@@ -238,6 +296,9 @@ export interface OperationRow {
   target: string
   before: Record<string, unknown>
   after: Record<string, unknown>
+  market: Market
+  market_ko: string
+  scope: string | null
 }
 
 export interface Criterion {
@@ -251,10 +312,14 @@ export interface RulesSettings {
   screen_params: Record<string, number | string>
   risk_rules: RuleRow[]
   auto_rules: RuleRow[]
+  auto_by_market: Record<Market, Record<string, number | string>>
   paper_criteria: Criterion[]
-  market: Record<string, number | string>
+  market: Record<string, number | string | boolean | null>
+  market_code: Market
+  markets: Record<Market, Record<string, number | string | boolean | null>>
   mode: TradingState
   change_history: OperationRow[]
+  history_errors: string[]
 }
 
 /** 2nd measurement (docs/05): the same book with the hard rules off / on / on + regime filter. */
@@ -311,6 +376,8 @@ export interface PaperSummary {
   variants: Record<string, PaperVariant>
   caveats: string[]
   criteria: Criterion[]
+  market?: Market
+  currency?: string
 }
 
 /** 5 and the home KPIs: the paper book replayed from the orders log (agent_trading_core/execution.positions_view). */
@@ -357,7 +424,11 @@ export interface ClosedTrade {
 }
 
 export interface Positions {
+  market: Market
+  currency: 'KRW' | 'USD'
   as_of: string
+  /** vs the previous close; null off a trading day or before the first fill */
+  day_return: number | null
   initial_cash: number
   cash: number
   holdings_value: number

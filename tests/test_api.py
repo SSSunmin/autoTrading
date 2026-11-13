@@ -16,6 +16,7 @@ from agent_trading_core.audit import (
     EvidenceItem,
     FilterResult,
     ScreenRun,
+    market_audit,
 )
 from agent_trading_core.memory import TradingMemoryLog
 
@@ -97,7 +98,9 @@ def test_performance_and_rules_and_stubs(client):
     # no orders yet: an empty paper book at the initial cash, not 501 and not invented numbers
     pos = client.get("/api/positions").json()
     assert pos["positions"] == [] and pos["equity"] == pos["cash"] == pos["initial_cash"] and pos["drawdown"] == 0.0
-    assert [r["id"] for r in rules["auto_rules"]][:2] == ["auto_daily_order_cap", "auto_daily_loss_limit"]
+    auto = {r["id"]: r for r in rules["auto_rules"]}
+    assert (auto["auto_daily_order_cap"]["value"], auto["auto_daily_order_cap"]["currency"]) == (100_000_000, "KRW")
+    assert auto["auto_daily_loss_limit"]["currency"] is None and rules["auto_by_market"]["US"]["auto_order_max"] == 20_000
     assert rules["mode"]["mode"] == "paper" and rules["change_history"] == []
 
 
@@ -132,7 +135,7 @@ def test_approve_exists_only_in_manual_mode(client):
     # v0.3: auto/paper modes have no approval step; the endpoint says so instead of pretending.
     r = client.post("/api/decisions/005930.KS/2026-06-05/approve", json={"approver": "tester"})
     assert r.status_code == 409
-    client.post("/api/trading/mode", json={"operator": "admin", "mode": "manual", "reason": "LLM 연결 전 수동 승인"})
+    client.post("/api/trading/mode", json={"operator": "admin", "mode": "manual", "reason": "LLM 연결 전 수동 승인", "market": "KRX"})
     r = client.post("/api/decisions/005930.KS/2026-06-05/approve", json={"approver": "tester"})
     assert r.status_code == 501 and r.json()["implemented"] is False
     assert client.post("/api/decisions/XXX/2026-06-05/approve", json={"approver": "tester"}).status_code == 404
@@ -151,26 +154,35 @@ def test_exception_queue_lists_review_decisions_for_the_latest_date(client):
 def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client):
     assert client.get("/api/trading/mode").json() == {
         "mode": "paper", "mode_ko": "모의투자", "running": True, "halted_at": None, "halted_by": None, "halted_by_ko": None, "halt_reason": None,
-        "keep_exits": True, "mode_changed_at": None, "label_ko": "모의투자 모드", "admin_token_required": False}
+        "keep_exits": True, "mode_changed_at": None, "label_ko": "국내 모의투자 모드", "admin_token_required": False,
+        "market": "KRX", "market_ko": "국내"}
 
-    r = client.post("/api/trading/halt", json={"operator": "운영자A", "reason": "벤더 지연", "keep_exits": False})
+    r = client.post("/api/trading/halt", json={"operator": "운영자A", "reason": "벤더 지연", "keep_exits": False, "scope": "KRX"})
     assert r.status_code == 200
-    assert r.json()["state"]["running"] is False and r.json()["state"]["keep_exits"] is False
-    assert r.json()["effects"]["open_orders_cancelled"] == 0 and r.json()["state"]["label_ko"].startswith("정지됨 · ")
-    assert client.post("/api/trading/halt", json={"operator": "x", "reason": "y"}).status_code == 409
+    (res,) = r.json()["results"]
+    assert res["market"] == "KRX" and res["state"]["running"] is False and res["state"]["keep_exits"] is False
+    assert res["effects"]["open_orders_cancelled"] == 0 and res["state"]["label_ko"].startswith("국내 정지됨 · ")
+    assert client.get("/api/trading/mode", params={"market": "US"}).json()["running"] is True   # this market only
+    assert client.post("/api/trading/halt", json={"operator": "x", "reason": "y", "scope": "KRX"}).status_code == 409
     assert client.post("/api/trading/halt", json={"operator": "x", "reason": ""}).status_code == 422
 
-    assert client.post("/api/trading/resume", json={"operator": "관리자", "reason": "복구 확인"}).json()["state"]["running"] is True
+    r = client.post("/api/trading/resume", json={"operator": "관리자", "reason": "복구 확인", "scope": "KRX"}).json()
+    assert r["resumed"] == ["KRX"] and r["states"]["KRX"]["running"] is True
     assert client.post("/api/trading/resume", json={"operator": "관리자", "reason": "again"}).status_code == 409
 
-    r = client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "모의투자 4주 통과"})
-    assert r.json()["state"]["mode"] == "auto" and r.json()["state"]["label_ko"] == "자동 매매 실행 중"
-    assert client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "dup"}).status_code == 409
+    r = client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "모의투자 4주 통과", "market": "KRX"})
+    assert r.json()["state"]["mode"] == "auto" and r.json()["state"]["label_ko"] == "국내 자동 매매 실행 중"
+    assert client.get("/api/trading/mode", params={"market": "US"}).json()["mode"] == "paper"  # modes are per market
+    assert client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "dup", "market": "KRX"}).status_code == 409
+    # no default market for a mode change: a missing one is refused, not read as KRX
+    assert client.post("/api/trading/mode", json={"operator": "관리자", "mode": "manual", "reason": "r"}).status_code == 422
+    assert client.post("/api/trading/mode", json={"operator": "관리자", "mode": "manual", "reason": "r", "market": "JP"}).status_code == 400
 
     history = client.get("/api/settings/rules").json()["change_history"]
     assert [h["kind"] for h in history] == ["mode_change", "resume", "halt"]  # newest first
     assert history[0]["before"] == {"mode": "paper"} and history[0]["after"] == {"mode": "auto"}
     assert history[2]["role"] == "operator" and history[1]["role"] == "admin(dev, no token)"
+    assert {(h["market"], h["market_ko"]) for h in history} == {("KRX", "국내")}
 
 
 @pytest.mark.unit
@@ -180,7 +192,7 @@ def test_admin_token_guards_resume_and_mode_when_configured(tmp_path, monkeypatc
     from backend import main
     importlib.reload(main)
     c = TestClient(main.app)
-    body = {"operator": "관리자", "mode": "auto", "reason": "r"}
+    body = {"operator": "관리자", "mode": "auto", "reason": "r", "market": "KRX"}
     assert c.post("/api/trading/mode", json=body).status_code == 403
     assert c.post("/api/trading/mode", json=body, headers={"X-Admin-Token": "wrong"}).status_code == 403
     assert c.post("/api/trading/mode", json=body, headers={"X-Admin-Token": "s3cret"}).status_code == 200
@@ -254,7 +266,8 @@ def test_bad_query_parameters_are_400(executed):
 @pytest.mark.unit
 def test_halt_cancels_the_open_orders_in_the_orders_log(executed):
     r = executed.post("/api/trading/halt", json={"operator": "운영자A", "reason": "점검"}).json()
-    assert r["effects"]["open_orders_cancelled"] == 1 and "취소 기록" in r["effects"]["note"]
+    krx = next(x for x in r["results"] if x["market"] == "KRX")
+    assert krx["effects"]["open_orders_cancelled"] == 1 and "취소 기록" in krx["effects"]["note"]
     rows = {o["ticker"]: o for o in executed.get("/api/orders").json()}
     assert rows["005380.KS"]["status"] == "cancelled" and rows["005380.KS"]["status_ko"] == "취소"
     assert rows["005930.KS"]["status"] == "filled"                             # fills are not touched
@@ -265,26 +278,28 @@ def test_halt_cancels_the_open_orders_in_the_orders_log(executed):
 @pytest.mark.unit
 def test_halt_with_keep_exits_leaves_open_sells_and_a_broken_orders_log_still_halts(executed, tmp_path):
     from agent_trading_core.audit import OrderRecord
-    audit = AuditLog(tmp_path / "data" / "audit")
+    audit = market_audit(tmp_path / "data" / "audit", "KRX")
     audit.record_order(OrderRecord(order_id="s1", ticker="005930.KS", trade_date="2026-06-05", side="Sell",
                                    quantity=1, status="open"))
-    r = executed.post("/api/trading/halt", json={"operator": "운영자A", "reason": "점검", "keep_exits": True}).json()
-    assert r["effects"]["open_orders_cancelled"] == 1                          # the buy, not the exit
+    r = executed.post("/api/trading/halt", json={"operator": "운영자A", "reason": "점검", "keep_exits": True,
+                                                 "scope": "KRX"}).json()
+    assert r["results"][0]["effects"]["open_orders_cancelled"] == 1          # the buy, not the exit
     status = {o["order_id"]: o["status"] for o in executed.get("/api/orders").json()}
     assert status["s1"] == "open" and status["paper-2026-06-05-005380.KS"] == "cancelled"
 
     executed.post("/api/trading/resume", json={"operator": "관리자", "reason": "r"})
     with open(audit.directory / "orders.jsonl", "a", encoding="utf-8") as f:
         f.write('{"order_id": "cut')                                            # a write cut short
-    r = executed.post("/api/trading/halt", json={"operator": "운영자B", "reason": "파손 중 정지"})
-    assert r.status_code == 200 and r.json()["state"]["running"] is False
-    assert r.json()["effects"]["open_orders_cancelled"] is None and "건너뜀" in r.json()["effects"]["note"]
+    r = executed.post("/api/trading/halt", json={"operator": "운영자B", "reason": "파손 중 정지", "scope": "KRX"})
+    (res,) = r.json()["results"]
+    assert r.status_code == 200 and res["state"]["running"] is False
+    assert res["effects"]["open_orders_cancelled"] is None and "건너뜀" in res["effects"]["note"]
     assert audit.operations()[-1].kind == "halt"
 
 
 @pytest.mark.unit
 def test_leaving_paper_mode_cancels_the_open_paper_orders(executed):
-    r = executed.post("/api/trading/mode", json={"operator": "관리자", "mode": "manual", "reason": "수동 전환"})
+    r = executed.post("/api/trading/mode", json={"operator": "관리자", "mode": "manual", "reason": "수동 전환", "market": "KRX"})
     assert r.status_code == 200
     rows = {o["ticker"]: o["status"] for o in executed.get("/api/orders").json()}
     assert rows["005380.KS"] == "cancelled"
@@ -297,9 +312,10 @@ def test_resume_cancels_open_orders_a_broken_log_kept_through_the_halt(executed,
     path = tmp_path / "data" / "audit" / "orders.jsonl"
     good = path.read_text(encoding="utf-8")
     path.write_text(good + '{"order_id": "cut', encoding="utf-8")
-    assert executed.post("/api/trading/halt", json={"operator": "운영자", "reason": "파손"}).json()["effects"]["open_orders_cancelled"] is None
+    r = executed.post("/api/trading/halt", json={"operator": "운영자", "reason": "파손", "scope": "KRX"}).json()
+    assert r["results"][0]["effects"]["open_orders_cancelled"] is None
     path.write_text(good, encoding="utf-8")                                    # the admin repairs the log
-    assert executed.post("/api/trading/resume", json={"operator": "관리자", "reason": "복구"}).status_code == 200
+    assert executed.post("/api/trading/resume", json={"operator": "관리자", "reason": "복구", "scope": "KRX"}).status_code == 200
     rows = {o["ticker"]: o["status"] for o in executed.get("/api/orders").json()}
     assert rows["005380.KS"] == "cancelled"
 

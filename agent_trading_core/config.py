@@ -96,17 +96,29 @@ MARKETS["US"] = {
 }
 
 
-# Auto-execution guard rails (docs/02 v0.3, 화면 7). Amounts in KRW, limits as fractions.
+# Auto-execution guard rails (docs/02 v0.3, 화면 7). Amounts per market in its own currency (``by_market``),
+# limits as fractions shared by both books. Read the amounts through ``auto_execution(market)``.
 # The default mode is paper trading: the plan (§8-1) runs the same auto loop on paper before
 # real orders, and nothing real happens until an admin switches the mode.
+# US amounts: docs/08 §4 Q3 (user decision 2026-11-13), about 1/1,400 of the KRX ones; defaults, not FX.
 # ponytail: constants until the settings screen edits them; the operations log then holds changes.
 AUTO_EXECUTION = {
-    "auto_daily_order_cap": 100_000_000,   # 일일 주문 금액 상한
-    "auto_daily_loss_limit": -0.02,        # 일일 손실이 이 아래면 자동 정지
-    "auto_order_max": 30_000_000,          # 주문당 금액 상한
+    "auto_daily_loss_limit": -0.02,        # 일일 손실이 이 아래면 자동 정지 (시장마다 따로 판정)
     "kill_switch_reset": "admin",          # 재가동 권한
     "default_mode": "paper",               # auto | manual | paper
+    "by_market": {
+        "KRX": {"auto_daily_order_cap": 100_000_000,   # 일일 주문 금액 상한 (원)
+                "auto_order_max": 30_000_000},         # 주문당 금액 상한 (원)
+        "US": {"auto_daily_order_cap": 70_000,         # $
+               "auto_order_max": 20_000},              # $
+    },
 }
+
+
+def auto_execution(market: str) -> dict:
+    """The shared keys plus ``market``'s amounts, flat (KeyError for a market without its own amounts)."""
+    shared = {k: v for k, v in AUTO_EXECUTION.items() if k != "by_market"}
+    return shared | AUTO_EXECUTION["by_market"][market]
 
 
 # Paper-trading gate (docs/02 §8-1, docs/05): the same auto loop runs on paper and goes live only when every

@@ -1,6 +1,6 @@
 import type {
-  Decision, ExceptionItem, HaltResult, Health, Labels, Mode, Order, PaperSummary, Performance, Positions, RulesSettings, ScreenDetail,
-  ScreenSummary, TickerDetail, TickerRow, TradingState,
+  Decision, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperSummary, Performance, Positions,
+  ResumeResult, RulesSettings, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
 } from './types'
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
@@ -38,27 +38,32 @@ async function post<T>(path: string, body: unknown, adminToken?: string): Promis
   return parse<T>(await fetch(new URL(BASE + path, window.location.origin).toString(), { method: 'POST', headers, body: JSON.stringify(body) }))
 }
 
+/** Every read names its market (docs/08: separate books); a caller lists `market` in its useApi deps, so a response
+ *  for the market just left is dropped (useApi's alive flag) instead of painting over the new one. */
 export const api = {
-  health: () => get<Health>('/api/health'),
+  health: (market: Market) => get<Health>('/api/health', { market }),
   labels: () => get<Labels>('/api/labels'),
-  screens: (params?: { from?: string; to?: string; universe?: string }) => get<ScreenSummary[]>('/api/screens', params),
-  screen: (runId: string) => get<ScreenDetail>(`/api/screens/${encodeURIComponent(runId)}`),
-  decisionDates: () => get<string[]>('/api/decisions/dates'),
-  decisions: (params?: { date?: string; rating?: string; review_only?: boolean; overrides_only?: boolean; ticker?: string }) =>
-    get<Decision[]>('/api/decisions', params),
-  orders: (params?: { date?: string; status?: string; ticker?: string }) => get<Order[]>('/api/orders', params),
-  exceptions: (params?: { date?: string; all_dates?: boolean }) => get<ExceptionItem[]>('/api/exceptions', params),
-  tickers: () => get<TickerRow[]>('/api/tickers'),
-  ticker: (ticker: string) => get<TickerDetail>(`/api/tickers/${encodeURIComponent(ticker)}`),
-  performance: () => get<Performance>('/api/performance'),
-  paper: () => get<PaperSummary>('/api/paper'),
-  positions: (params?: { as_of?: string }) => get<Positions>('/api/positions', params),
-  rules: () => get<RulesSettings>('/api/settings/rules'),
-  mode: () => get<TradingState>('/api/trading/mode'),
-  halt: (body: { operator: string; reason: string; keep_exits: boolean }) => post<HaltResult>('/api/trading/halt', body),
-  resume: (body: { operator: string; reason: string }, adminToken?: string) =>
-    post<{ state: TradingState }>('/api/trading/resume', body, adminToken),
-  setMode: (body: { operator: string; mode: Mode; reason: string }, adminToken?: string) =>
+  markets: () => get<MarketSummary[]>('/api/markets'),
+  screens: (market: Market, params?: { from?: string; to?: string; universe?: string }) =>
+    get<ScreenSummary[]>('/api/screens', { ...params, market }),
+  screen: (market: Market, runId: string) => get<ScreenDetail>(`/api/screens/${encodeURIComponent(runId)}`, { market }),
+  decisionDates: (market: Market) => get<string[]>('/api/decisions/dates', { market }),
+  decisions: (market: Market, params?: { date?: string; rating?: string; review_only?: boolean; overrides_only?: boolean; ticker?: string }) =>
+    get<Decision[]>('/api/decisions', { ...params, market }),
+  orders: (market: Market, params?: { date?: string; status?: string; ticker?: string }) => get<Order[]>('/api/orders', { ...params, market }),
+  exceptions: (market: Market, params?: { date?: string; all_dates?: boolean }) =>
+    get<ExceptionItem[]>('/api/exceptions', { ...params, market }),
+  tickers: (market: Market) => get<TickerRow[]>('/api/tickers', { market }),
+  ticker: (market: Market, ticker: string) => get<TickerDetail>(`/api/tickers/${encodeURIComponent(ticker)}`, { market }),
+  performance: (market: Market) => get<Performance>('/api/performance', { market }),
+  paper: (market: Market) => get<PaperSummary>('/api/paper', { market }),
+  positions: (market: Market, params?: { as_of?: string }) => get<Positions>('/api/positions', { ...params, market }),
+  rules: (market: Market) => get<RulesSettings>('/api/settings/rules', { market }),
+  mode: (market: Market) => get<TradingState>('/api/trading/mode', { market }),
+  halt: (body: { operator: string; reason: string; keep_exits: boolean; scope: 'all' | Market }) => post<HaltResult>('/api/trading/halt', body),
+  resume: (body: { operator: string; reason: string; scope: 'all' | Market }, adminToken?: string) =>
+    post<ResumeResult>('/api/trading/resume', body, adminToken),
+  setMode: (body: { operator: string; mode: Mode; reason: string; market: Market }, adminToken?: string) =>
     post<{ state: TradingState }>('/api/trading/mode', body, adminToken),
 }
 
@@ -72,9 +77,23 @@ export function pct(v: number | null | undefined, digits = 1): string {
   return `${v > 0 ? '+' : ''}${(v * 100).toFixed(digits)}%`
 }
 
-export function won(v: number | null | undefined): string {
-  if (v == null) return '–'
-  return v.toLocaleString('ko-KR', { maximumFractionDigits: Math.abs(v) < 1000 ? 2 : 0 })
+/** config.MARKETS[market].currency — a book's amounts are in its own currency, never converted (docs/08 §0). */
+export const CURRENCY: Record<Market, 'KRW' | 'USD'> = { KRX: 'KRW', US: 'USD' }
+const MONEY = {
+  KRW: new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW', maximumFractionDigits: 0 }),
+  USD: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+}
+
+/** An amount of `market`'s book: ₩1,234,567 (whole won) / $1,234.56. null → "–". Every amount on screen goes through here. */
+export function money(v: number | null | undefined, market: Market): string {
+  if (v == null || Number.isNaN(v)) return '–'
+  return MONEY[CURRENCY[market]].format(v)
+}
+
+/** Instrument in running text (docs/08 §4 Q4): US "애플 AAPL", KRX the Korean name only. */
+export function stockName(ticker: string, name: string | null | undefined, market: Market): string {
+  if (market === 'US') return name ? `${name} ${ticker}` : ticker
+  return name ?? ticker
 }
 
 export function utc(iso: string | null | undefined): string {

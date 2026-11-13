@@ -107,6 +107,8 @@ class DecisionRecord(BaseModel):
         description="agent: the manager's (or the baseline's) call; rule: a hard-rule exit the executor recorded "
                     "before its sell order (stop-loss, trailing, expiry, drawdown stop)",
     )
+    market: str = Field(default="KRX", description="config.MARKETS key of the book this belongs to; lines written "
+                                                    "before the market axis have none and are KRX")
 
     @property
     def tradeable(self) -> bool:
@@ -138,6 +140,7 @@ class OrderRecord(BaseModel):
     reason: str = Field(default="", description="Fill note, or why it was blocked / rejected / exceptional")
     rules_applied: list[str] = Field(default_factory=list,
                                      description="Hard-rule and auto-execution rule ids that touched this order")
+    market: str = Field(default="KRX", description="config.MARKETS key; amounts are in that market's currency")
 
     @property
     def amount(self) -> float | None:
@@ -168,6 +171,9 @@ class OperationRecord(BaseModel):
     target: str = Field(default="", description="What changed, e.g. 'mode', 'sector_quota.sector_max'")
     before: dict = Field(default_factory=dict)
     after: dict = Field(default_factory=dict)
+    market: str = Field(default="KRX", description="The market whose loop this operated on")
+    scope: str | None = Field(default=None, description="halt / resume: 'all' when one request wrote a line to every "
+                                                         "market's log (same at, same reason), else the market")
 
 
 def trading_state(operations: list[OperationRecord], default_mode: str = "paper") -> dict:
@@ -189,23 +195,41 @@ def trading_state(operations: list[OperationRecord], default_mode: str = "paper"
 
 
 class AuditLog:
-    """Append-only JSON-lines files, one per record type, under ``directory``."""
+    """Append-only JSON-lines files, one per record type, under ``directory``.
 
-    def __init__(self, directory: str | Path):
+    With ``market`` set it is one market's book: a record of another market is refused on write and on read
+    (ValueError, like a broken line), so a default "KRX" never slips a line into the wrong book. ``legacy``: a
+    directory read before ``directory`` and never written — the KRX files from before the market axis
+    (``market_audit``)."""
+
+    def __init__(self, directory: str | Path, market: str | None = None, legacy: str | Path | None = None):
         self.directory = Path(directory)
+        self.market = market
+        self.legacy = Path(legacy) if legacy else None
         self.directory.mkdir(parents=True, exist_ok=True)
 
+    def _check(self, record: BaseModel, where: str) -> None:
+        got = getattr(record, "market", None)
+        if self.market is not None and got is not None and got != self.market:
+            raise ValueError(f"{where}: {got} 기록이 {self.market} 장부에 들어올 수 없습니다")
+
     def _append(self, name: str, record: BaseModel) -> None:
+        self._check(record, f"{name}.jsonl 쓰기")
         path = self.directory / f"{name}.jsonl"
         with locked(path), open(path, "a", encoding="utf-8") as f:
             f.write(record.model_dump_json() + "\n")
 
     def _read(self, name: str, model):
-        path = self.directory / f"{name}.jsonl"
-        if not path.exists():
-            return []
-        with open(path, encoding="utf-8") as f:
-            return [model.model_validate(json.loads(line)) for line in f if line.strip()]
+        rows = []
+        for d in ([self.legacy] if self.legacy else []) + [self.directory]:
+            path = d / f"{name}.jsonl"
+            if not path.exists():
+                continue
+            with open(path, encoding="utf-8") as f:
+                rows += [model.model_validate(json.loads(line)) for line in f if line.strip()]
+        for r in rows:
+            self._check(r, f"{name}.jsonl 읽기")
+        return rows
 
     def record_screen(self, run: ScreenRun) -> None:
         self._append("screens", run)
@@ -231,6 +255,13 @@ class AuditLog:
 
     def operations(self) -> list[OperationRecord]:
         return self._read("operations", OperationRecord)
+
+
+def market_audit(root: str | Path, market: str) -> AuditLog:
+    """One market's log under ``root`` (data/audit): ``root/<market>/``. KRX also reads the files written straight
+    under ``root`` before the market axis, first, without moving them; new KRX lines go to ``root/KRX/``."""
+    root = Path(root)
+    return AuditLog(root / market, market=market, legacy=root if market == "KRX" else None)
 
 
 def stage_counts(run: ScreenRun) -> list[int]:
