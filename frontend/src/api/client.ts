@@ -1,5 +1,5 @@
 import type {
-  Decision, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperSummary, Performance, Positions,
+  Decision, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
   ResumeResult, RulesSettings, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
 } from './types'
 
@@ -57,6 +57,7 @@ export const api = {
   ticker: (market: Market, ticker: string) => get<TickerDetail>(`/api/tickers/${encodeURIComponent(ticker)}`, { market }),
   performance: (market: Market) => get<Performance>('/api/performance', { market }),
   paper: (market: Market) => get<PaperSummary>('/api/paper', { market }),
+  paperProgress: (market: Market) => get<PaperProgress>('/api/paper/progress', { market }),
   positions: (market: Market, params?: { as_of?: string }) => get<Positions>('/api/positions', { ...params, market }),
   rules: (market: Market) => get<RulesSettings>('/api/settings/rules', { market }),
   mode: (market: Market) => get<TradingState>('/api/trading/mode', { market }),
@@ -64,7 +65,10 @@ export const api = {
   resume: (body: { operator: string; reason: string; scope: 'all' | Market; reset_peak?: boolean }, adminToken?: string) =>
     post<ResumeResult>('/api/trading/resume', body, adminToken),
   setMode: (body: { operator: string; mode: Mode; reason: string; market: Market }, adminToken?: string) =>
-    post<{ state: TradingState }>('/api/trading/mode', body, adminToken),
+    post<{ state: TradingState; note: string | null }>('/api/trading/mode', body, adminToken),
+  /** The account axis only (docs/10 D4). Paper → live is taken only when the server's gate is eligible, with `confirmed`. */
+  setAccount: (body: { operator: string; account_mode: 'paper' | 'live'; reason: string; market: Market; confirmed: boolean }, adminToken?: string) =>
+    post<{ state: TradingState; note: string | null }>('/api/trading/mode', body, adminToken),
 }
 
 /** Fired after a write so the status bar and settings reload the trading state without a page refresh. */

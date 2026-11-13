@@ -29,18 +29,21 @@ calendar, currency, sell costs and caps (``paper_config``). Amounts in reasons a
 The drawdown peak is the highest close-of-day equity since the last peak reset (the initial cash before any):
 the −10% halving, the −20% stop and the sizing scale all read that one peak (``_peak``).
 
-ponytail: no sector cap (sector lookup is a network call). After a −20% stop simulate.run_simulation waits
-``dd_stop_lock_days`` on its own, resets the peak, and buys at half weight until it is back near the old peak; here
-the reset waits for an admin resume (no fixed lock, no half-weight phase). Upgrade: the same recovery phase here.
+ponytail: no sector cap (sector lookup is a network call). After a −20% stop the backtest (simulate.py) also resets
+the peak after ``dd_stop_lock_days`` (20) trading days and goes back to normal weight (RiskConfig.dd_stop_recovery=
+reset_peak); the executor resets it when an admin resumes. Upgrade: the same fixed lock here.
 """
 
 from __future__ import annotations
 
 import bisect
+import re
 from collections import Counter
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import date as Date
+from datetime import datetime, time, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -53,7 +56,7 @@ from agent_trading_core.audit import (
     latest_orders,
     trading_state,
 )
-from agent_trading_core.config import AUTO_EXECUTION, KRX_MARKET, MARKETS, auto_execution
+from agent_trading_core.config import AUTO_EXECUTION, KRX_MARKET, MARKETS, PAPER_TRADING, auto_execution
 from agent_trading_core.files import locked
 from agent_trading_core.krx_names import EXIT_REASON_KO
 from agent_trading_core.rating import RATING_REVIEW
@@ -241,6 +244,7 @@ class Book:
     holdings: dict[str, Holding]
     closed: list[ClosedTrade]
     equity: list[tuple[str, float]]          # close-of-day equity, each trading day from the first fill to ``until``
+    exposure: list[tuple[str, float]] = field(default_factory=list)   # holdings value / equity, the same days
 
 
 def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: str) -> Book:
@@ -280,6 +284,7 @@ def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: s
                 i += 1
             value = sum(h.quantity * (prices.close_asof(h.ticker, day) or h.avg_price) for h in book.holdings.values())
             book.equity.append((day, book.cash + value))
+            book.exposure.append((day, value / (book.cash + value) if book.cash + value > 0 else 0.0))
     for o in fills[i:]:                      # fills on days the index calendar does not have
         apply(o)
     return book
@@ -435,6 +440,40 @@ def dd_stop_standing(operations: list[OperationRecord]) -> bool:
     return any(op.target == "dd_stop" for op in standing_halts(operations))
 
 
+def next_trading_day(calendar: list[str], date: str) -> str:
+    """The trading day after ``date``: from the index calendar, or past its end the next weekday.
+    ponytail: exchange holidays ahead are not in the price cache; upgrade with an exchange calendar."""
+    if (day := next_session(calendar, date)) is not None:
+        return day
+    d = Date.fromisoformat(date) + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d.isoformat()
+
+
+def effective_state(operations: list[OperationRecord], calendar: list[str], market: str, now: datetime) -> dict:
+    """``audit.trading_state`` read at ``now``: a daily-loss halt is judged on the close and ends when the next trading
+    day opens — from 00:00 of that day in the market's time zone — though the executor writes its resume line only on
+    its next run (``_auto_resume``, the same day in ``effective_from``). Only when every standing halt is that one: a
+    person's halt and the −20% stop wait for an admin. ``auto_resume_at``: when the standing daily-loss halt ends (ISO,
+    market time); ``auto_resumed``: it has, with no resume line yet."""
+    state = trading_state(operations, default_mode=AUTO_EXECUTION["default_mode"]) | {"auto_resume_at": None,
+                                                                                    "auto_resumed": False}
+    halts = standing_halts(operations)
+    if state["running"] or not halts or any(h.operator != "system" or h.target != "daily_loss" for h in halts):
+        return state
+    halted_on = halts[-1].after.get("date")
+    if not halted_on:
+        return state
+    tz = ZoneInfo(MARKETS[market]["timezone"])
+    at = datetime.combine(Date.fromisoformat(next_trading_day(calendar, halted_on)), time(0), tz)
+    state["auto_resume_at"] = at.isoformat()
+    if now < at:
+        return state
+    return state | {"running": True, "halted_at": None, "halted_by": None, "halt_reason": None, "halt_target": None,
+                    "auto_resumed": True}
+
+
 def _auto_resume(audit: AuditLog, date: str, calendar: list[str], cfg: PaperConfig) -> bool:
     """A daily-loss halt lasts its session: the first run on a later trading day appends a resume by ``system``
     (once — the loop is running after it). Only a halt by ``system`` for ``daily_loss`` qualifies: a person's halt
@@ -450,7 +489,8 @@ def _auto_resume(audit: AuditLog, date: str, calendar: list[str], cfg: PaperConf
     audit.record_operation(OperationRecord(
         kind="resume", operator="system", role="auto", reason=f"일일 손실 정지 자동 해제(정지일 {halted_on})",
         target="daily_loss", market=cfg.market, scope=cfg.market, before={"running": False},
-        after={"running": True, "date": date, "halted_on": halted_on}))
+        after={"running": True, "date": date, "halted_on": halted_on},
+        effective_from=next_trading_day(calendar, halted_on)))
     return True
 
 
@@ -831,3 +871,214 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
                 "평가 금액·드로다운은 수수료·세금 포함. 룰 판정(손절·트레일링·만료·DD 정지)은 실행기가 그날 종가로 "
                 "규칙 청산 결정을 기록하고 다음 거래일 시가에 매도합니다.",
     }
+
+
+# --- the paper-trading gate (screen 8, docs/05 §4) ---------------------------------------------------------
+
+def paper_start(orders: list[OrderRecord], operations: list[OperationRecord], market: str) -> str | None:
+    """The first day of the market's paper run: its first order's decision date, or — no order yet — the day of the
+    first switch to paper mode (market time). None: not started.
+    ponytail: a run that went live and came back to paper counts from the first start; upgrade by restarting the
+    period at the last switch to paper when live mode gets an order path (stage 5)."""
+    days = [o.trade_date for o in orders]
+    if days:
+        return min(days)
+    tz = ZoneInfo(MARKETS[market]["timezone"])
+    for op in operations:
+        if op.kind == "mode_change" and op.after.get("mode") == "paper":
+            return datetime.fromisoformat(op.at).astimezone(tz).date().isoformat()
+    return None
+
+
+def _status(ok: bool) -> str:
+    return "met" if ok else "unmet"
+
+
+def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], operations: list[OperationRecord],
+                   prices: Prices, cfg: PaperConfig, *, as_of: str | None = None,
+                   criteria: dict | None = None) -> dict:
+    """The six ``PAPER_TRADING`` criteria over the market's paper run, from its first day to ``as_of`` (default: the
+    last trading day in the data), as docs/05 §4 defines them:
+
+    - ``min_weeks``: calendar days since the start // 7; met from ``min_weeks`` × 7 days on, in progress before.
+    - ``max_drawdown``: the lowest close-of-day equity against its running high (the initial cash included). A peak
+      reset after a −20% stop does not reset this: the fall happened. ``≤ limit`` fails (``risk.EPS``, as the rules).
+    - ``max_daily_loss_breaches``: closes ``≤ AUTO_EXECUTION.auto_daily_loss_limit`` against the previous close (the
+      first against the initial cash) — the same test as the executor's automatic halt.
+    - ``max_stop_outs``: the executor's −20% halts (``target="dd_stop"``) dated in the period.
+    - ``max_review_rate``: REVIEW / agent decisions dated in the period (rule exits are not agent judgments); no
+      decision yet is in progress.
+    - ``max_unexplained_orders``: ``unexplained_orders`` among the period's orders.
+
+    ``eligible`` only when all six are met. ``violations`` lists what breaks a criterion, ``notes`` what a person
+    looked at that breaks none (order exceptions, stop-loss exits). ``series`` is the equity and drawdown each
+    trading day; ``paper`` the period's figures the reference table compares (``paper_expected``)."""
+    criteria = criteria or PAPER_TRADING
+    calendar = prices.calendar(cfg.index)
+    latest = latest_orders(orders)
+    start = paper_start(list(latest.values()), operations, cfg.market)
+    as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else None)
+    limit = AUTO_EXECUTION["auto_daily_loss_limit"]
+    out: dict = {"market": cfg.market, "started": False, "start": start, "as_of": as_of, "initial_cash": cfg.initial_cash,
+                 "min_weeks": criteria["min_weeks"], "days": None, "weeks": None, "judge_date": None,
+                 "eligible": False, "counts": {"met": 0, "unmet": 0, "in_progress": 0}, "criteria": [],
+                 "violations": [], "notes": [], "series": [], "drawdown": None, "paper": None}
+    if start is None or as_of is None or as_of < start:
+        out["start"] = None
+        out["criteria"] = [{"id": k, "threshold": v, "value": None, "status": "in_progress", "value_ko": "–",
+                            "note_ko": "모의 운용 기록 없음"} for k, v in criteria.items()]
+        out["counts"]["in_progress"] = len(criteria)
+        return out
+
+    book = replay(list(latest.values()), prices, cfg, until=as_of)
+    eq_by_day, ex_by_day = dict(book.equity), dict(book.exposure)
+    series, peak, prev, breaches = [], cfg.initial_cash, cfg.initial_cash, []
+    for d in (d for d in calendar if start <= d <= as_of):
+        eq = eq_by_day.get(d, cfg.initial_cash)              # before the first fill the book is its cash
+        ret, peak = eq / prev - 1, max(peak, eq)
+        series.append({"date": d, "equity": eq, "drawdown": eq / peak - 1, "day_return": ret,
+                       "exposure": ex_by_day.get(d, 0.0)})
+        if ret <= limit + EPS:
+            breaches.append((d, ret))
+        prev = eq
+    worst = min(series, key=lambda r: r["drawdown"]) if series else None
+    worst_day = min(series, key=lambda r: r["day_return"]) if series else None
+    days = (Date.fromisoformat(as_of) - Date.fromisoformat(start)).days
+    need = 7 * criteria["min_weeks"]
+    judge = (Date.fromisoformat(start) + timedelta(days=need)).isoformat()
+    stop_outs = [op for op in operations if op.kind == "halt" and op.target == "dd_stop"
+                 and start <= (op.after.get("date") or "") <= as_of]
+    agent = [d for d in decisions if d.source == "agent" and start <= d.trade_date <= as_of]
+    review = [d for d in agent if d.rating == RATING_REVIEW]
+    period_orders = [o for o in latest.values() if start <= o.trade_date <= as_of]
+    unexplained = unexplained_orders(period_orders, decisions)
+    rate = len(review) / len(agent) if agent else None
+    dd_min = worst["drawdown"] if worst else 0.0
+    n_loss, max_loss = len(breaches), criteria["max_daily_loss_breaches"]
+    loss_note = f"{max_loss - n_loss}회 더 남음" if n_loss <= max_loss else "허용 횟수 초과"
+    if worst_day and not breaches and worst_day["day_return"] < 0:
+        loss_note += f" · 가장 큰 하루 손실 {worst_day['day_return']:+.2%} ({worst_day['date']})"
+
+    rows = [
+        {"id": "min_weeks", "value": days // 7, "status": "met" if days >= need else "in_progress",
+         "value_ko": f"{days // 7}주 ({start} 시작)",
+         "note_ko": "기간 충족" if days >= need else f"{need - days}일 남음 · {judge} 장 마감 후 판정"},
+        {"id": "max_drawdown", "value": dd_min, "status": _status(dd_min > criteria["max_drawdown"] + EPS),
+         "value_ko": f"{dd_min:+.1%}" + (f" ({worst['date']})" if worst and dd_min < 0 else ""),
+         "note_ko": f"현재 {series[-1]['drawdown']:+.1%}" if series else ""},
+        {"id": "max_daily_loss_breaches", "value": n_loss, "status": _status(n_loss <= max_loss),
+         "value_ko": f"{n_loss}회" + (f" ({breaches[-1][0]} {breaches[-1][1]:+.2%})" if breaches else ""),
+         "note_ko": loss_note},
+        {"id": "max_stop_outs", "value": len(stop_outs), "status": _status(len(stop_outs) <= criteria["max_stop_outs"]),
+         "value_ko": f"{len(stop_outs)}회", "note_ko": ""},
+        {"id": "max_review_rate", "value": rate, "numerator": len(review), "denominator": len(agent),
+         "status": "in_progress" if rate is None else _status(rate <= criteria["max_review_rate"] + EPS),
+         "value_ko": "결정 없음" if rate is None else f"{rate:.1%} ({len(review)} / {len(agent)})",
+         "note_ko": "에이전트 결정이 아직 없음" if rate is None else
+         "등급 읽기 실패 없음" if not review else f"REVIEW {len(review)}건 / 에이전트 결정 {len(agent)}건"},
+        {"id": "max_unexplained_orders", "value": len(unexplained),
+         "status": _status(len(unexplained) <= criteria["max_unexplained_orders"]),
+         "value_ko": f"{len(unexplained)}건",
+         "note_ko": f"주문 {len(period_orders)}건 중 {len(period_orders) - len(unexplained)}건이 결정 기록과 연결"},
+    ]
+    for r in rows:
+        r["threshold"] = criteria[r["id"]]
+    counts = Counter(r["status"] for r in rows)
+
+    violations = [{"date": d.trade_date, "kind": "review", "ticker": d.ticker, "value": None,
+                   "text": f"등급 읽기 실패 · 주문 안 함 · {d.thesis}".strip(" ·"),
+                   "ref": {"type": "decision", "date": d.trade_date, "ticker": d.ticker}} for d in review]
+    violations += [{"date": d, "kind": "daily_loss", "ticker": None, "value": r,
+                    "text": f"{r:+.2%} ≤ {limit:+.0%} → 다음 세션 신규 매수 중단", "ref": {"type": "positions", "date": d}}
+                   for d, r in breaches]
+    violations += [{"date": op.after.get("date"), "kind": "dd_stop", "ticker": None,
+                    "value": (op.after["equity"] / op.after["peak"] - 1) if op.after.get("peak") else None,
+                    "text": op.reason, "ref": {"type": "positions", "date": op.after.get("date")}} for op in stop_outs]
+    violations += [{"date": o.trade_date, "kind": "unexplained_order", "ticker": o.ticker, "value": None,
+                    "text": f"{o.side} {o.quantity}주 · 결정 기록 없음 ({o.status})",
+                    "ref": {"type": "order", "order_id": o.order_id, "date": o.trade_date}} for o in unexplained]
+    notes = [{"date": o.trade_date, "kind": "order_exception", "ticker": o.ticker, "text": o.reason,
+              "ref": {"type": "order", "order_id": o.order_id, "date": o.trade_date}}
+             for o in period_orders if o.status in ("exception", "rejected")]
+    notes += [{"date": t.exit_date, "kind": "stop_loss", "ticker": t.ticker,
+               "text": f"{t.entry_date} 진입 → {t.exit_date} 시가 청산 {t.pnl_pct:+.1%}",
+               "ref": {"type": "positions", "date": t.exit_date}}
+              for t in book.closed if t.reason == "stop_loss" and start <= t.exit_date <= as_of]
+
+    index = prices.frame(cfg.index)["Close"].dropna()
+    before, inside = index[index.index < start], index[(index.index >= start) & (index.index <= as_of)]
+    base = before.iloc[-1] if len(before) else (inside.iloc[0] if len(inside) else None)
+    buys = [o for o in period_orders if o.side == "Buy"]
+    out.update(
+        started=True, days=days, weeks=days // 7, judge_date=judge, eligible=counts["met"] == len(rows),
+        counts={k: counts.get(k, 0) for k in ("met", "unmet", "in_progress")}, criteria=rows,
+        violations=sorted(violations, key=lambda v: (v["date"] or "", v["kind"]), reverse=True),
+        notes=sorted(notes, key=lambda v: (v["date"], v["kind"]), reverse=True),
+        series=[{k: r[k] for k in ("date", "equity", "drawdown")} for r in series],
+        drawdown={"current": series[-1]["drawdown"] if series else 0.0, "min": dd_min,
+                  "min_date": worst["date"] if worst and dd_min < 0 else None},
+        paper={"mean_exposure": sum(r["exposure"] for r in series) / len(series) if series else None,
+               "new_buys": sum(o.status in ("filled", "partial") for o in buys),
+               "new_buys_open": sum(o.status == "open" for o in buys),
+               "exits_by_reason": dict(Counter(t.reason for t in book.closed if start <= t.exit_date <= as_of)),
+               "period_return": series[-1]["equity"] / cfg.initial_cash - 1 if series else None,
+               "max_drawdown": dd_min, "daily_loss_dates": [d for d, _ in breaches],
+               "index_return": float(inside.iloc[-1]) / float(base) - 1 if base is not None and len(inside) else None})
+    return out
+
+
+_NEW_BUYS = re.compile(r"신규 매수 (\d+)")
+
+
+def paper_expected(paper: dict, start: str, end: str, equity: pd.DataFrame, events: list[dict],
+                   index_name_ko: str) -> dict:
+    """The reference table of screen 8 (docs/10 D6: never part of the verdict): the measured reproduction (a
+    scripts/paper_backtest.py variant's equity CSV ``Date, equity, <index>, exposure`` and its events) over the paper
+    period against ``paper`` (``paper_progress``'s figures). ``diff`` = paper − reproduction."""
+    f = equity.sort_index()
+    idx_col = next(c for c in f.columns if c not in ("equity", "exposure"))
+    prior, window = f[f.index < start], f[(f.index >= start) & (f.index <= end)]
+    last = f.index[-1] if len(f) else None
+    if not len(window):
+        return {"reference_only": True, "start": start, "end": end, "covered_until": last, "rows": [],
+                "error": f"재현 기록이 {last or '–'}까지라 모의 기간과 겹치지 않음"}
+    base = prior.iloc[-1] if len(prior) else window.iloc[0]
+    eq = window["equity"]
+    peaks = pd.concat([pd.Series([base["equity"]]), eq.reset_index(drop=True)]).cummax().iloc[1:].to_numpy()
+    ev = [e for e in events if start <= e["date"] <= end]
+    ref = {"mean_exposure": float(window["exposure"].mean()),
+           "new_buys": sum(int(m.group(1)) for e in ev if e["kind"] == "rebalance" and (m := _NEW_BUYS.search(e["text"]))),
+           "exits_by_reason": dict(Counter(e["text"].split()[1] for e in ev
+                                           if e["kind"] == "exit" and len(e["text"].split()) > 1)),
+           "period_return": float(eq.iloc[-1] / base["equity"] - 1),
+           "max_drawdown": min(float((eq.to_numpy() / peaks - 1).min()), 0.0),
+           "daily_loss_dates": [e["date"] for e in ev if e["kind"] == "guard" and e["text"].startswith("일일 손실")],
+           "index_return": float(window[idx_col].iloc[-1] / base[idx_col] - 1)}
+
+    def diff(a, b):
+        return None if a is None or b is None else a - b
+
+    n_ref, n_paper = sum(ref["exits_by_reason"].values()), sum(paper["exits_by_reason"].values())
+    rows = [
+        {"id": "mean_exposure", "unit": "pct", "reference": ref["mean_exposure"], "paper": paper["mean_exposure"],
+         "diff": diff(paper["mean_exposure"], ref["mean_exposure"])},
+        {"id": "new_buys", "unit": "count", "reference": ref["new_buys"], "paper": paper["new_buys"],
+         "paper_open": paper["new_buys_open"], "diff": paper["new_buys"] - ref["new_buys"]},
+        {"id": "exits", "unit": "count", "reference": n_ref, "paper": n_paper, "diff": n_paper - n_ref,
+         "reference_by_reason": ref["exits_by_reason"], "paper_by_reason": paper["exits_by_reason"]},
+        {"id": "period_return", "unit": "pct", "reference": ref["period_return"], "paper": paper["period_return"],
+         "diff": diff(paper["period_return"], ref["period_return"])},
+        {"id": "max_drawdown", "unit": "pct", "reference": ref["max_drawdown"], "paper": paper["max_drawdown"],
+         "diff": diff(paper["max_drawdown"], ref["max_drawdown"])},
+        {"id": "daily_loss_guard", "unit": "count", "reference": len(ref["daily_loss_dates"]),
+         "paper": len(paper["daily_loss_dates"]), "diff": len(paper["daily_loss_dates"]) - len(ref["daily_loss_dates"]),
+         "reference_dates": ref["daily_loss_dates"], "paper_dates": paper["daily_loss_dates"]},
+        {"id": "index_return", "unit": "pct", "reference": ref["index_return"], "paper": paper["index_return"],
+         "diff": None},
+    ]
+    labels = {"mean_exposure": "평균 노출", "new_buys": "신규 매수", "exits": "청산", "period_return": "기간 수익",
+              "max_drawdown": "기간 최대 DD", "daily_loss_guard": "일일 손실 가드", "index_return": f"같은 기간 {index_name_ko}"}
+    for r in rows:
+        r["label_ko"] = labels[r["id"]]
+    return {"reference_only": True, "start": start, "end": end, "covered_until": last if last < end else None,
+            "rows": rows, "error": None}

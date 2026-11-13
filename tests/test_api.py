@@ -5,6 +5,8 @@ Runs against a small fixture data dir built here, so it does not depend on a bas
 
 import importlib
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +21,8 @@ from agent_trading_core.audit import (
     market_audit,
 )
 from agent_trading_core.memory import TradingMemoryLog
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 @pytest.fixture
@@ -51,6 +55,14 @@ def client(tmp_path, monkeypatch):
     from backend import main
     importlib.reload(main)
     return TestClient(main.app)
+
+
+def _open_gate(monkeypatch):
+    """The live-switch gate as if every paper criterion held: for tests about what a mode change does, not the gate
+    (its own tests build a book that passes)."""
+    from backend import main
+    monkeypatch.setattr(main, "_progress", lambda st, expected=True: {"eligible": True, "as_of": "2026-06-05", "start": "2026-04-01",
+                                                       "weeks": 9, "summary_ko": "충족 6", "criteria": []})
 
 
 @pytest.mark.unit
@@ -131,11 +143,13 @@ def test_paper_summary_is_served_with_korean_variant_labels(client, tmp_path, mo
 
 
 @pytest.mark.unit
-def test_approve_exists_only_in_manual_mode(client):
+def test_approve_exists_only_in_manual_mode(client, monkeypatch):
     # v0.3: auto/paper modes have no approval step; the endpoint says so instead of pretending.
     r = client.post("/api/decisions/005930.KS/2026-06-05/approve", json={"approver": "tester"})
     assert r.status_code == 409
-    client.post("/api/trading/mode", json={"operator": "admin", "mode": "manual", "reason": "LLM 연결 전 수동 승인", "market": "KRX"})
+    _open_gate(monkeypatch)
+    client.post("/api/trading/mode", json={"operator": "admin", "mode": "manual", "reason": "LLM 연결 전 수동 승인", "market": "KRX",
+                                           "confirmed": True})
     r = client.post("/api/decisions/005930.KS/2026-06-05/approve", json={"approver": "tester"})
     assert r.status_code == 501 and r.json()["implemented"] is False
     assert client.post("/api/decisions/XXX/2026-06-05/approve", json={"approver": "tester"}).status_code == 404
@@ -151,11 +165,13 @@ def test_exception_queue_lists_review_decisions_for_the_latest_date(client):
 
 
 @pytest.mark.unit
-def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client):
+def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client, monkeypatch):
     assert client.get("/api/trading/mode").json() == {
         "mode": "paper", "mode_ko": "모의투자", "running": True, "halted_at": None, "halted_by": None, "halted_by_ko": None, "halt_reason": None,
         "keep_exits": True, "mode_changed_at": None, "label_ko": "국내 모의투자 모드", "admin_token_required": False,
-        "market": "KRX", "market_ko": "국내", "halt_target": None, "halt_target_ko": None, "dd_stop": False}
+        "market": "KRX", "market_ko": "국내", "halt_target": None, "halt_target_ko": None, "dd_stop": False,
+        "auto_resume_at": None, "auto_resumed": False, "account_mode": "paper", "account_mode_ko": "모의투자",
+        "execution_mode": "auto", "execution_mode_ko": "자동 실행"}
 
     r = client.post("/api/trading/halt", json={"operator": "운영자A", "reason": "벤더 지연", "keep_exits": False, "scope": "KRX"})
     assert r.status_code == 200
@@ -170,8 +186,11 @@ def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client
     assert r["resumed"] == ["KRX"] and r["states"]["KRX"]["running"] is True
     assert client.post("/api/trading/resume", json={"operator": "관리자", "reason": "again"}).status_code == 409
 
-    r = client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "모의투자 4주 통과", "market": "KRX"})
+    _open_gate(monkeypatch)
+    r = client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "모의투자 4주 통과", "market": "KRX",
+                                               "confirmed": True})
     assert r.json()["state"]["mode"] == "auto" and r.json()["state"]["label_ko"] == "국내 자동 매매 실행 중"
+    assert (r.json()["state"]["account_mode"], r.json()["state"]["execution_mode"]) == ("live", "auto")
     assert client.get("/api/trading/mode", params={"market": "US"}).json()["mode"] == "paper"  # modes are per market
     assert client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "dup", "market": "KRX"}).status_code == 409
     # no default market for a mode change: a missing one is refused, not read as KRX
@@ -180,7 +199,9 @@ def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client
 
     history = client.get("/api/settings/rules").json()["change_history"]
     assert [h["kind"] for h in history] == ["mode_change", "resume", "halt"]  # newest first
-    assert history[0]["before"] == {"mode": "paper"} and history[0]["after"] == {"mode": "auto"}
+    assert history[0]["before"] == {"mode": "paper", "account_mode": "paper", "paper_gate": {
+        "as_of": "2026-06-05", "start": "2026-04-01", "weeks": 9, "eligible": True, "summary_ko": "충족 6", "criteria": {}}}
+    assert history[0]["after"] == {"mode": "auto", "account_mode": "live"}
     assert history[2]["role"] == "operator" and history[1]["role"] == "admin(dev, no token)"
     assert {(h["market"], h["market_ko"]) for h in history} == {("KRX", "국내")}
 
@@ -192,7 +213,8 @@ def test_admin_token_guards_resume_and_mode_when_configured(tmp_path, monkeypatc
     from backend import main
     importlib.reload(main)
     c = TestClient(main.app)
-    body = {"operator": "관리자", "mode": "auto", "reason": "r", "market": "KRX"}
+    body = {"operator": "관리자", "mode": "auto", "reason": "r", "market": "KRX", "confirmed": True}
+    _open_gate(monkeypatch)
     assert c.post("/api/trading/mode", json=body).status_code == 403
     assert c.post("/api/trading/mode", json=body, headers={"X-Admin-Token": "wrong"}).status_code == 403
     assert c.post("/api/trading/mode", json=body, headers={"X-Admin-Token": "s3cret"}).status_code == 200
@@ -298,8 +320,10 @@ def test_halt_with_keep_exits_leaves_open_sells_and_a_broken_orders_log_still_ha
 
 
 @pytest.mark.unit
-def test_leaving_paper_mode_cancels_the_open_paper_orders(executed):
-    r = executed.post("/api/trading/mode", json={"operator": "관리자", "mode": "manual", "reason": "수동 전환", "market": "KRX"})
+def test_leaving_paper_mode_cancels_the_open_paper_orders(executed, monkeypatch):
+    _open_gate(monkeypatch)
+    r = executed.post("/api/trading/mode", json={"operator": "관리자", "mode": "manual", "reason": "수동 전환", "market": "KRX",
+                                                 "confirmed": True})
     assert r.status_code == 200
     rows = {o["ticker"]: o["status"] for o in executed.get("/api/orders").json()}
     assert rows["005380.KS"] == "cancelled"
@@ -351,6 +375,8 @@ def test_a_rule_exit_is_served_as_its_own_decision_with_its_own_order(tmp_path, 
     sells = c.get("/api/orders", params={"date": "2026-06-04", "ticker": "005930.KS"}).json()
     assert [o["side"] for o in sells] == ["Sell"]
 
+    # read on the evening of the halt day: a daily-loss halt ends when the next trading day opens (06-05 00:00 KST)
+    monkeypatch.setattr(main, "_clock", lambda: datetime(2026, 6, 4, 20, 0, tzinfo=KST))
     st = c.get("/api/trading/mode").json()
     assert st["running"] is False and st["halted_by"] == "system" and st["halted_by_ko"] == "시스템 자동 정지"
     assert st["label_ko"].endswith("· 시스템 · 일일 손실 정지") and "일일 손실 한도 초과" in st["halt_reason"]

@@ -31,9 +31,10 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agent_trading_core import __version__ as core_version
 from agent_trading_core.audit import (
@@ -46,7 +47,6 @@ from agent_trading_core.audit import (
     latest_orders,
     market_audit,
     stage_counts,
-    trading_state,
 )
 from agent_trading_core.config import AUTO_EXECUTION, MARKETS, PAPER_TRADING, auto_execution
 from agent_trading_core.execution import (
@@ -55,15 +55,20 @@ from agent_trading_core.execution import (
     cancel_orders,
     check_date,
     dd_stop_standing,
+    effective_state,
     execution_lock,
     open_orders,
     paper_config,
+    paper_expected,
+    paper_progress,
     positions_view,
 )
 from agent_trading_core.krx_names import (
+    ACCOUNT_MODE_KO,
     AUTO_RULE_KO,
     DECISION_SOURCE_KO,
     EXCEPTION_KIND_KO,
+    EXECUTION_MODE_KO,
     EXIT_REASON_KO,
     HALT_SCOPE_KO,
     HALT_TARGET_KO,
@@ -73,6 +78,9 @@ from agent_trading_core.krx_names import (
     OPERATION_KO,
     ORDER_STATUS_KO,
     PAPER_CRITERIA_KO,
+    PAPER_NOTE_KO,
+    PAPER_STATUS_KO,
+    PAPER_VIOLATION_KO,
     RATING_KO,
     RISK_RULE_KO,
     RULE_DESC_KO,
@@ -92,6 +100,10 @@ KST = ZoneInfo("Asia/Seoul")
 RUN_AFTER_CLOSE = timedelta(minutes=5)
 # where scripts/paper_backtest.py --market M writes its summary
 PAPER_SUMMARY = {"KRX": Path("results") / "paper" / "summary.json", "US": Path("results") / "paper_us" / "summary.json"}
+# the measurement each summary is, and the variant screen 8 compares with the paper run (the executor's own rules:
+# hard rules on, regime filter on — PaperConfig.regime_filter)
+PAPER_MEASUREMENT_KO = {"KRX": "2차 실측", "US": "3차 실측"}
+PAPER_REFERENCE_VARIANT = "rules_on_regime"
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.environ.get("TRADING_DATA_DIR") or ROOT / "data")
@@ -172,7 +184,7 @@ class _Store:
         return self
 
     def state(self) -> dict:
-        return trading_state(self.operations, default_mode=AUTO_EXECUTION["default_mode"])
+        return _effective(self.market, self.operations)
 
 
 STORES = {m: _Store(m) for m in MARKETS}
@@ -190,6 +202,17 @@ def _market(value: str | None) -> str:
 
 def _store(market: str | None) -> _Store:
     return STORES[_market(market)].refresh()
+
+
+def _clock() -> datetime:
+    """Now (UTC); tests set it."""
+    return datetime.now(UTC)
+
+
+def _effective(market: str, operations: list[OperationRecord]) -> dict:
+    """The market's trading state now: a daily-loss halt has ended once the next trading day opened
+    (execution.effective_state), whether or not the executor has written its resume line yet."""
+    return effective_state(operations, PRICES.calendar(MARKETS[market]["benchmark"]), market, _clock())
 
 
 MarketQuery = Query(None, description="KRX(기본) | US. 그 외 값은 400")
@@ -269,7 +292,12 @@ def _state_out(market: str, st: dict | None = None) -> dict:
     who = target_ko if st["halted_by"] == "system" and target_ko else by_ko
     label = f"{market_ko} 정지됨 · {st['halted_at'][:16].replace('T', ' ')} UTC · {who}" if not st["running"] else (
         f"{market_ko} 자동 매매 실행 중" if st["mode"] == "auto" else f"{market_ko} {mode_ko} 모드")
+    # two axes on the stored mode (docs/10 D4): account paper | live, execution auto | manual approval
+    account = "paper" if st["mode"] == "paper" else "live"
+    execution = "manual" if st["mode"] == "manual" else "auto"
     return st | {"market": market, "market_ko": market_ko, "mode_ko": mode_ko, "label_ko": label, "halted_by_ko": by_ko,
+                 "account_mode": account, "account_mode_ko": ACCOUNT_MODE_KO[account],
+                 "execution_mode": execution, "execution_mode_ko": EXECUTION_MODE_KO[execution],
                  "halt_target_ko": target_ko, "admin_token_required": ADMIN_TOKEN is not None,
                  # a −20% stop stands (perhaps under a person's halt): the admin resume offers the peak reset
                  "dd_stop": not st["running"] and _dd_stop(market)}
@@ -620,6 +648,74 @@ def paper(market: str | None = MarketQuery) -> dict:
     return s
 
 
+def _threshold_ko(key: str, v: float) -> str:
+    return {"min_weeks": f"≥ {v}주", "max_drawdown": f"> {v:+.0%}".replace("-", "−"), "max_daily_loss_breaches": f"≤ {v}회",
+            "max_stop_outs": f"≤ {v}회" if v else "0회", "max_review_rate": f"≤ {v:.0%}",
+            "max_unexplained_orders": f"≤ {v}건" if v else "0건"}[key]
+
+
+def _progress(st: _Store, expected: bool = True) -> dict:
+    """The market's paper-trading gate (execution.paper_progress) with its labels, and the reference table
+    (``expected=False`` for the mode gate: the reference never reaches the verdict, not even by failing)."""
+    m = st.market
+    p = paper_progress(st.orders, st.decisions, st.operations, PRICES, paper_config(m))
+    for c in p["criteria"]:
+        c |= {"label_ko": PAPER_CRITERIA_KO.get(c["id"], c["id"]), "threshold_ko": _threshold_ko(c["id"], c["threshold"]),
+              "status_ko": PAPER_STATUS_KO[c["status"]]}
+    for v in p["violations"]:
+        v |= {"kind_ko": PAPER_VIOLATION_KO[v["kind"]], "name": _name(v["ticker"], st.screens) if v["ticker"] else None}
+    for n in p["notes"]:
+        n |= {"kind_ko": PAPER_NOTE_KO[n["kind"]], "name": _name(n["ticker"], st.screens) if n["ticker"] else None}
+    c = p["counts"]
+    named = {s: ", ".join(PAPER_CRITERIA_KO[x["id"]] for x in p["criteria"] if x["status"] == s) for s in ("unmet", "in_progress")}
+    p["summary_ko"] = " · ".join([f"충족 {c['met']}"] + [f"{PAPER_STATUS_KO[s]} {c[s]}" + (f" ({named[s]})" if c[s] else "")
+                                                        for s in ("unmet", "in_progress")])
+    p["verdict_ko"] = "전환 가능" if p["eligible"] else "전환 불가"
+    p["weeks_badge_ko"] = f"{min(p['weeks'] or 0, p['min_weeks'])}/{p['min_weeks']}주"
+    p |= {"market_ko": MARKET_KO.get(m, m), "currency": MARKETS[m]["currency"], "timezone": MARKETS[m]["timezone"],
+          "benchmark_name_ko": MARKETS[m]["benchmark_name_ko"],
+          "limits": {"max_drawdown": PAPER_TRADING["max_drawdown"], "dd_halve": RiskConfig().dd_halve,
+                     "dd_stop": RiskConfig().dd_stop}}
+    caps = auto_execution(m)
+    # the live-switch modal's "rules at this capital" (docs/10 D5: the live capital input is stage 5; until then the
+    # paper capital and the configured caps)
+    p["go_live"] = {"capital": p["initial_cash"], "capital_source_ko": "모의 자본(실거래 자본 입력은 단계 5)",
+                    "auto_order_max": caps["auto_order_max"], "auto_daily_order_cap": caps["auto_daily_order_cap"],
+                    "daily_loss_limit": caps["auto_daily_loss_limit"],
+                    "daily_loss_amount": p["initial_cash"] * caps["auto_daily_loss_limit"],
+                    "other_markets_ko": [MARKET_KO[x] for x in MARKETS if x != m],
+                    "note_ko": "실주문 경로는 아직 없습니다: 전환해도 실행기는 모의투자 모드에서만 주문하므로 이 시장은 주문을 내지 "
+                               "않습니다(ExecutionRefused). 증권사 연동은 이후 단계입니다."}
+    p["expected"] = _expected(m, p) if expected else None
+    return p
+
+
+def _expected(m: str, p: dict) -> dict | None:
+    """Screen 8 기대 대비 (docs/10 D6): reference only — never read by ``eligible`` or the mode gate."""
+    if not p["started"]:
+        return None
+    head = {"reference_only": True, "measurement_ko": PAPER_MEASUREMENT_KO[m],
+            "variant_ko": VARIANT_KO[PAPER_REFERENCE_VARIANT]}
+    path = DATA_DIR / PAPER_SUMMARY[m]
+    try:
+        variant = json.loads(path.read_text(encoding="utf-8"))["variants"][PAPER_REFERENCE_VARIANT]
+        equity = pd.read_csv(path.parent / variant["equity_csv"], dtype={"Date": str}).set_index("Date")
+        return head | paper_expected(p["paper"], p["start"], p["as_of"], equity, variant.get("events", []),
+                                     MARKETS[m]["benchmark_name_ko"])
+    except (OSError, KeyError, ValueError, TypeError, StopIteration) as exc:   # a malformed result is the table's error
+        return head | {"start": p["start"], "end": p["as_of"], "rows": [], "covered_until": None,
+                       "error": f"{PAPER_MEASUREMENT_KO[m]} 결과를 읽지 못함({type(exc).__name__}): "
+                                f"scripts/paper_backtest.py{'' if m == 'KRX' else ' --market US'}"}
+
+
+@app.get("/api/paper/progress", tags=["performance"])
+def paper_gate(market: str | None = MarketQuery) -> dict:
+    """화면 8 모의투자 검증: 그 시장 모의 운용의 시작일 · 경과 주 · 통과 기준 6개(PAPER_TRADING) 현재값과 판정 · 위반 목록 ·
+    참고 목록 · 드로다운 시계열 · 기대 대비(참고, 판정에 안 씀). 판정은 서버만 한다(실거래 전환 API가 같은 함수로 검사).
+    기록이 없으면 started=false(404 아님)."""
+    return _progress(_store(market))
+
+
 @app.get("/api/settings/rules", tags=["settings"])
 def rules(market: str | None = MarketQuery) -> dict:
     """규칙 레지스트리(선별 + 하드 룰 + 자동 실행), 시장 상수(두 시장), 운용 모드, 모의투자 기준, 변경 이력(두 시장 운영 기록)."""
@@ -720,7 +816,7 @@ def halt(body: HaltRequest) -> dict:
         states: dict[str, dict | None] = {}
         for m in markets:
             try:
-                states[m] = trading_state(audits[m].operations(), default_mode=AUTO_EXECUTION["default_mode"])
+                states[m] = _effective(m, audits[m].operations())
             except ValueError:                       # a cut-short line, or another market's record, in operations.jsonl
                 states[m] = None
         todo = []
@@ -754,9 +850,9 @@ def halt(body: HaltRequest) -> dict:
             audit.record_operation(op)
             cancelled = cancel_orders(audit, pending or [], f"긴급 정지 ({body.operator}: {body.reason})")
             try:
-                st = trading_state(audit.operations(), default_mode=AUTO_EXECUTION["default_mode"])
+                st = _effective(m, audit.operations())
             except ValueError:
-                st = trading_state([op], default_mode=AUTO_EXECUTION["default_mode"])  # mode unknown: the log is unreadable
+                st = _effective(m, [op])             # mode unknown: the log is unreadable
             kept = "" if not body.keep_exits else " 청산(매도) 미체결은 유지합니다."
             results.append({"market": m, "state": _state_out(m, st), "error": error,
                             "effects": {"new_orders": "stopped", "open_orders_cancelled": None if pending is None else len(cancelled),
@@ -809,29 +905,70 @@ def resume(body: ResumeRequest, x_admin_token: str | None = Header(default=None)
 
 class ModeRequest(BaseModel):
     operator: str = Field(min_length=1)
-    mode: Literal["auto", "manual", "paper"]
-    reason: str = Field(min_length=1)
+    reason: str = Field(min_length=1, description="감사 로그에 남는다")
     market: str = Field(description="KRX | US — 모드는 시장마다 따로(기본값 없음: 다른 시장 모드를 실수로 바꾸지 않게)")
+    mode: Literal["auto", "manual", "paper"] | None = Field(default=None, description="저장 형식 그대로의 모드(호환)")
+    account_mode: Literal["paper", "live"] | None = Field(
+        default=None, description="계좌 축만 바꾼다: live = 실거래(실행 축 자동/수동 유지), paper = 모의투자")
+    confirmed: bool = Field(default=False, description="모의 → 실거래 전환에는 true 필수(실계좌 주문 확인)")
+
+    @model_validator(mode="after")
+    def _one_axis(self) -> ModeRequest:
+        if (self.mode is None) == (self.account_mode is None):
+            raise ValueError("mode와 account_mode 중 하나만 보냅니다")
+        return self
+
+
+def _target_mode(current: str, body: ModeRequest) -> str:
+    """The stored mode a request asks for. ``account_mode`` changes the account axis only: live keeps a live mode's
+    execution side, and paper runs automatic, so paper → live is auto."""
+    if body.mode is not None:
+        return body.mode
+    if body.account_mode == "paper":
+        return "paper"
+    return current if current != "paper" else "auto"
+
+
+def _gate_snapshot(p: dict) -> dict:
+    return {"as_of": p["as_of"], "start": p["start"], "weeks": p["weeks"], "eligible": p["eligible"],
+            "summary_ko": p["summary_ko"],
+            "criteria": {c["id"]: {"value": c["value"], "status": c["status"]} for c in p["criteria"]}}
 
 
 @app.post("/api/trading/mode", tags=["trading"])
 def set_mode(body: ModeRequest, x_admin_token: str | None = Header(default=None)) -> dict:
-    """그 시장의 운용 모드 전환(관리자). 자동 / 수동 승인 / 모의투자."""
+    """그 시장의 운용 모드 전환(관리자). 계좌 축(`account_mode`: 모의투자 ↔ 실거래) 또는 저장 형식 그대로의 `mode`
+    (자동 / 수동 승인 / 모의투자). **모의 → 실거래**는 어느 쪽으로 요청하든 `confirmed: true`(없으면 422)와 서버의 통과 기준
+    판정(`/api/paper/progress`의 eligible, 아니면 409 · 미충족 기준 목록)이 있어야 받는다. 운영 기록 before에 기준 스냅샷.
+    실주문 경로는 아직 없다: 실거래 모드에서 실행기는 주문하지 않는다(ExecutionRefused)."""
     role = _require_admin(x_admin_token)
     m = _market(body.market)
     with _locks([m]):                                # the executor checks the mode under the same lock
         st = STORES[m].refresh()
         state = st.state()
-        if state["mode"] == body.mode:
-            raise HTTPException(409, f"{MARKET_KO[m]}은 이미 {MODE_KO[body.mode]} 모드입니다")
+        target = _target_mode(state["mode"], body)
+        if state["mode"] == target:
+            raise HTTPException(409, f"{MARKET_KO[m]} 시장은 이미 {MODE_KO[target]} 모드입니다")
+        before: dict = {"mode": state["mode"]}
+        live = state["mode"] == "paper" and target != "paper"
+        if live:
+            if not body.confirmed:
+                raise HTTPException(422, "실거래 전환은 confirmed: true(실계좌로 주문이 나간다는 확인)가 필요합니다")
+            gate = _progress(st, expected=False)
+            if not gate["eligible"]:
+                open_ = [f"{c['label_ko']}({c['status_ko']} · {c['value_ko']})" for c in gate["criteria"] if c["status"] != "met"]
+                raise HTTPException(409, f"{MARKET_KO[m]} 모의투자 통과 기준 미충족 — 실거래로 전환할 수 없습니다: " + "; ".join(open_))
+            before |= {"account_mode": "paper", "paper_gate": _gate_snapshot(gate)}
         # paper orders do not outlive paper mode: left open they would fill at an old open when paper comes back
         pending = open_orders(st.audit) if state["mode"] == "paper" else []
+        after = {"mode": target} | ({"account_mode": "live"} if live else {})
         st.audit.record_operation(OperationRecord(
             kind="mode_change", operator=body.operator, role=role, reason=body.reason, market=m, target="mode",
-            before={"mode": state["mode"]},
-            after={"mode": body.mode} | ({"open_orders_cancelled": [o.order_id for o in pending]} if pending else {})))
-        cancel_orders(st.audit, pending, f"운용 모드 변경 paper → {body.mode} ({body.operator})")
-    return {"state": _state_out(m)}
+            before=before, after=after | ({"open_orders_cancelled": [o.order_id for o in pending]} if pending else {})))
+        cancel_orders(st.audit, pending, f"운용 모드 변경 paper → {target} ({body.operator})")
+    note = (f"{MARKET_KO[m]} 실거래 모드로 바뀌었지만 실주문 경로는 아직 없습니다: 실행기는 모의투자 모드에서만 주문하므로 "
+            "이 시장은 주문을 내지 않습니다(ExecutionRefused)") if target != "paper" else None
+    return {"state": _state_out(m), "note": note}
 
 
 class ApproveRequest(BaseModel):

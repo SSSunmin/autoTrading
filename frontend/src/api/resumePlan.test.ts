@@ -7,7 +7,8 @@ const halted = (over: Partial<TradingState>): TradingState => ({
   mode: 'paper', mode_ko: '모의투자', running: false, halted_at: '2026-11-13T05:00:00Z', halted_by: 'system',
   halted_by_ko: '시스템 자동 정지', halt_reason: '드로다운 정지', keep_exits: true, mode_changed_at: null,
   label_ko: '국내 정지됨', admin_token_required: true, market: 'KRX', market_ko: '국내',
-  halt_target: 'dd_stop', halt_target_ko: '시스템 · 드로다운 정지', dd_stop: true, ...over,
+  halt_target: 'dd_stop', halt_target_ko: '시스템 · 드로다운 정지', dd_stop: true, auto_resume_at: null, auto_resumed: false,
+  account_mode: 'paper', account_mode_ko: '모의투자', execution_mode: 'auto', execution_mode_ko: '자동 실행', ...over,
 })
 // a book that fell from 25,000,000 to 12,486,000 (−50.1%)
 const BOOK = { equity: 12_486_000, peak: 25_000_000, drawdown: 12_486_000 / 25_000_000 - 1, as_of: '2026-06-08' }

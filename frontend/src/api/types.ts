@@ -141,6 +141,15 @@ export interface TradingState {
   halt_target_ko: string | null
   /** a −20% stop stands (perhaps under a person's halt): the admin resume offers the peak reset */
   dd_stop: boolean
+  /** a daily-loss halt ends at the next trading day's 00:00, market time (ISO); null when none stands */
+  auto_resume_at: string | null
+  /** that time has come and the executor has not written its resume line yet */
+  auto_resumed: boolean
+  /** the stored mode on two axes (docs/10 D4): account paper | live, execution auto | manual approval */
+  account_mode: 'paper' | 'live'
+  account_mode_ko: string
+  execution_mode: 'auto' | 'manual'
+  execution_mode_ko: string
 }
 
 export interface HaltEffects { new_orders: string; open_orders_cancelled: number | null; positions: string; exits_active: boolean; note: string }
@@ -489,4 +498,103 @@ export interface Positions {
             daily_loss_limit: number; auto_daily_order_cap: number; near_stop_pct: number; regime_ma_days: number }
   note: string
   mode: TradingState
+}
+
+/** GET /api/paper/progress — screen 8, judged by the server (docs/05 §4). */
+export type PaperStatus = 'met' | 'unmet' | 'in_progress'
+
+export interface PaperCriterion {
+  id: string
+  label_ko: string
+  threshold: number
+  threshold_ko: string
+  value: number | null
+  value_ko: string
+  status: PaperStatus
+  status_ko: string
+  note_ko: string
+  numerator?: number
+  denominator?: number
+}
+
+export interface PaperRef { type: 'decision' | 'positions' | 'order'; date: string | null; ticker?: string; order_id?: string }
+
+export interface PaperViolation {
+  date: string | null
+  kind: 'review' | 'daily_loss' | 'dd_stop' | 'unexplained_order'
+  kind_ko: string
+  ticker: string | null
+  name: string | null
+  value: number | null
+  text: string
+  ref: PaperRef
+}
+
+export interface PaperNote {
+  date: string
+  kind: 'order_exception' | 'stop_loss'
+  kind_ko: string
+  ticker: string
+  name: string | null
+  text: string
+  ref: PaperRef
+}
+
+export interface PaperExpectedRow {
+  id: 'mean_exposure' | 'new_buys' | 'exits' | 'period_return' | 'max_drawdown' | 'daily_loss_guard' | 'index_return'
+  label_ko: string
+  unit: 'pct' | 'count'
+  reference: number | null
+  paper: number | null
+  /** paper − reproduction; null where a difference means nothing (the index row) */
+  diff: number | null
+  paper_open?: number
+  reference_by_reason?: Record<string, number>
+  paper_by_reason?: Record<string, number>
+  reference_dates?: string[]
+  paper_dates?: string[]
+}
+
+export interface PaperExpected {
+  /** never part of the verdict (docs/10 D6) */
+  reference_only: true
+  measurement_ko: string
+  variant_ko: string
+  start: string
+  end: string
+  covered_until: string | null
+  rows: PaperExpectedRow[]
+  error: string | null
+}
+
+export interface PaperProgress {
+  market: Market
+  market_ko: string
+  currency: 'KRW' | 'USD'
+  timezone: string
+  benchmark_name_ko: string
+  started: boolean
+  start: string | null
+  as_of: string | null
+  days: number | null
+  weeks: number | null
+  min_weeks: number
+  judge_date: string | null
+  initial_cash: number
+  eligible: boolean
+  counts: Record<PaperStatus, number>
+  summary_ko: string
+  verdict_ko: string
+  weeks_badge_ko: string
+  criteria: PaperCriterion[]
+  violations: PaperViolation[]
+  notes: PaperNote[]
+  series: { date: string; equity: number; drawdown: number }[]
+  drawdown: { current: number; min: number; min_date: string | null } | null
+  limits: { max_drawdown: number; dd_halve: number; dd_stop: number }
+  go_live: {
+    capital: number; capital_source_ko: string; auto_order_max: number; auto_daily_order_cap: number
+    daily_loss_limit: number; daily_loss_amount: number; other_markets_ko: string[]; note_ko: string
+  }
+  expected: PaperExpected | null
 }

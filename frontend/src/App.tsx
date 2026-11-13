@@ -17,6 +17,7 @@ import Ticker from './pages/Ticker'
 import Performance from './pages/Performance'
 import Positions from './pages/Positions'
 import Settings from './pages/Settings'
+import Paper from './pages/Paper'
 
 // Screen plan docs/02 v0.3 §1.
 const NAV = [
@@ -26,6 +27,7 @@ const NAV = [
   { to: '/tickers', label: '종목 상세' },
   { to: '/positions', label: '포지션·리스크' },
   { to: '/performance', label: '성과·백테스트' },
+  { to: '/paper', label: '모의투자 검증', badge: 'paper' },
   { to: '/settings', label: '설정·감사 로그' },
 ]
 
@@ -39,6 +41,7 @@ export default function App() {
   const dates = useApi(() => api.decisionDates(market), [market])
   const exceptions = useApi(() => api.exceptions(market), [market])
   const book = useApi(() => api.positions(market), [market])
+  const gate = useApi(() => api.paperProgress(market), [market])
   const mode = useTradingState(market)
   const latest = screens.data?.[0]
   const nException = exceptions.data?.length ?? 0
@@ -56,6 +59,7 @@ export default function App() {
               <NavLink to={to(n.to)} end={n.to === '/'} className={({ isActive }) => (isActive ? 'active' : '')}>
                 <span>{n.label}</span>
                 {n.badge === 'exceptions' && nException > 0 && <span className="nav-badge num" aria-label={`예외 ${nException}건`}>예외 {nException}</span>}
+                {n.badge === 'paper' && gate.data && <span className="nav-count num" aria-label={`모의 운용 ${gate.data.weeks_badge_ko}`}>{gate.data.weeks_badge_ko}</span>}
               </NavLink>
             </li>
           ))}
@@ -87,6 +91,7 @@ export default function App() {
           <Route path="/tickers/:ticker" element={<Ticker />} />
           <Route path="/performance" element={<Performance />} />
           <Route path="/positions" element={<Positions />} />
+          <Route path="/paper" element={<Paper />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

@@ -176,6 +176,9 @@ class OperationRecord(BaseModel):
     market: str = Field(default="KRX", description="The market whose loop this operated on")
     scope: str | None = Field(default=None, description="halt / resume: 'all' when one request wrote a line to every "
                                                          "market's log (same at, same reason), else the market")
+    effective_from: str | None = Field(default=None, description="A system resume of a daily-loss halt: the trading day "
+                                                                 "(YYYY-MM-DD, market time, from 00:00) the halt ended — "
+                                                                 "``at`` is when the line was written, later")
 
 
 # what a halt stops for: a person (records before halt-semantics wrote target="running"), or the executor itself
