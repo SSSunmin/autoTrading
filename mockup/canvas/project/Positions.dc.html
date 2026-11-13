@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>포지션·리스크</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Pretendard";src:url(/_blob/6c64cc769316fb936a503ff9895798ec) format("woff2");font-weight:45 920;font-style:normal;font-display:swap}
+body{margin:0;background:#F5F6F8;color:#141B26;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.5;font-feature-settings:"tnum"}
+a{color:#1F5F8B}a:hover{color:#174A6C}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:6px;color:#4A5567;text-decoration:none;font-weight:500}
+.nav:hover{background:#EEF0F4;color:#141B26}
+.t{border-collapse:collapse;width:100%;font-size:13px}
+.t th{text-align:left;font-size:12px;font-weight:600;color:#6B7686;padding:8px 10px;border-bottom:1px solid #DDE1E8;white-space:nowrap;background:#FFFFFF}
+.t td{padding:10px;border-bottom:1px solid #EEF0F4;white-space:nowrap;vertical-align:middle}
+.t .r{text-align:right}
+.ex{display:inline-block;font-size:11px;font-weight:700;color:#8A5A00;border:1px solid #C99A2E;border-radius:4px;padding:0 6px;line-height:1.6}
+.tag{display:inline-block;font-size:11px;font-weight:600;color:#4A5567;background:#EEF0F4;border:1px solid #DDE1E8;border-radius:4px;padding:0 6px;line-height:1.6}
+.tk{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;color:#141B26;text-decoration:none}.tk:hover .tk-n{color:#1F5F8B}.tk-n{font-weight:600}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; align-items: stretch; min-height: 100vh">
+<nav aria-label="화면" style="flex: 1 1 216px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #DDE1E8; padding: 20px 14px; display: flex; flex-direction: column; gap: 2px">
+<div style="padding: 0 10px 18px"><div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">에이전트 운용 데스크</div><div style="font-size: 12px; color: #6B7686">시안 v0.4 · KRX · 자동 모드</div></div>
+<a class="nav" href="Main.dc.html">오늘 요약</a>
+<a class="nav" href="Screens.dc.html">종목 선별<span style="font-size: 12px; color: #6B7686">8</span></a>
+<a class="nav" href="Decisions.dc.html">결정·실행<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">예외 1</span></a>
+<a class="nav" href="Ticker.dc.html">종목 상세</a>
+<a class="nav" href="Positions.dc.html" style="background: #E6EEF5; color: #1F5F8B; font-weight: 600">포지션·리스크<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">1</span></a>
+<a class="nav" href="Performance.dc.html">성과·백테스트<span style="font-size: 12px; color: #6B7686">160</span></a>
+<a class="nav" href="Config.dc.html">설정·감사 로그</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 18px 32px 56px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; font-size: 13px; color: #4A5567; padding-bottom: 12px; border-bottom: 1px solid #DDE1E8">
+<span>기준일 <b style="color: #141B26">2026-07-24</b></span>
+<span>마지막 갱신 <b style="color: #141B26">10초 전</b></span>
+<a href="Positions.dc.html" style="background: #C6352C; color: #FFFFFF; padding: 3px 10px; border-radius: 999px; font-weight: 600; text-decoration: none">Protections 1건 발동</a>
+<span style="margin-left: auto; display: inline-flex; gap: 8px; align-items: center"><span style="background: #E7F3EB; color: #1E6A3A; padding: 3px 10px; border-radius: 999px; font-weight: 600">● 자동 매매 실행 중</span><a href="KillSwitch.dc.html" style="border: 1px solid #C6352C; color: #B32F27; background: #FFFFFF; padding: 3px 12px; border-radius: 6px; font-weight: 700; text-decoration: none">긴급 정지</a></span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; gap: 8px; align-items: center"><h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em">포지션·리스크</h1><span class="ex">예시</span></div>
+<p style="margin: 0; color: #4A5567; max-width: 72ch">보유 종목의 손절·트레일링 상태, 포트폴리오 한도, Protections 잠금. 장중 10초마다 갱신됩니다. 지금은 자본 10억원 기준 가상 데이터이고, 07-25 09:00 자동 주문(SK hynix 매수, LG Chem 매도)이 반영된 상태입니다.</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px">
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">평가 금액</div><div style="font-size: 26px; font-weight: 700">2억 5,976만</div><div style="font-size: 12px; color: #6B7686">4종목 · 현금 74.0%</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">미실현 손익</div><div style="font-size: 26px; font-weight: 700; color: #C6352C">+10,722,000</div><div style="font-size: 12px; color: #6B7686">+4.3% · 매입 2억 4,904만</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">손절 근접</div><div style="font-size: 26px; font-weight: 700">0</div><div style="font-size: 12px; color: #6B7686">손절선까지 2% 미만 · 오늘 LG Chem 매도</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">거래 잠금</div><div style="font-size: 26px; font-weight: 700; color: #B32F27">1종목</div><div style="font-size: 12px; color: #6B7686">005380.KS · 07-25 09:00 해제</div></div>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px"><h2 style="margin: 0; font-size: 16px; font-weight: 700">보유</h2><span style="font-size: 12px; color: #6B7686">2026-07-25 장중</span></div>
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>종목</th><th class="r">수량</th><th class="r">평단</th><th class="r">현재가</th><th class="r">미실현</th><th class="r">손절선</th><th class="r">손절까지</th><th class="r">트레일링 고점</th><th class="r">보유일</th><th>만료일</th><th></th></tr></thead><tbody>
+<sc-for list="{{rows}}" as="p" hint-placeholder-count="4">
+<tr style="{{p.rowStyle}}"><td><a class="tk" href="Ticker.dc.html"><span class="tk-n">{{p.n}}</span><span class="tag">{{p.t}}</span></a></td><td class="r">{{p.q}}</td><td class="r">{{p.avg}}</td><td class="r">{{p.cur}}</td><td class="r" style="font-weight: 600; {{p.uStyle}}">{{p.u}}</td><td class="r">{{p.stop}}</td><td class="r" style="{{p.gapStyle}}">{{p.gap}}</td><td class="r">{{p.peak}}</td><td class="r">{{p.days}}일</td><td>{{p.exp}}</td><td style="font-size: 12px; color: #B32F27; font-weight: 600">{{p.flag}}</td></tr>
+</sc-for>
+</tbody></table></div>
+</section>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 14px">
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 700">리스크 게이지</h2>
+<sc-for list="{{gauges}}" as="g" hint-placeholder-count="6">
+<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr) 120px; gap: 12px; align-items: center; font-size: 13px">
+<span style="{{g.labelStyle}}">{{g.label}}</span>
+<div role="img" aria-label="{{g.aria}}" style="position: relative; height: 12px; background: #EEF0F4; border-radius: 3px">
+<div style="position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; {{g.fill}}"></div>
+<div style="position: absolute; top: 0; bottom: 0; {{g.pend}}"></div>
+<div style="position: absolute; top: -4px; bottom: -4px; width: 2px; background: #141B26; {{g.lim}}"></div>
+</div>
+<span style="text-align: right; font-weight: 600">{{g.val}} <span style="font-weight: 400; color: #6B7686">/ {{g.limText}}</span></span>
+</div>
+</sc-for>
+<p style="margin: 0; font-size: 12px; color: #6B7686">검은 세로선이 한도. 반도체는 07-25 SK hynix <span class="tag">000660.KS</span> 22주 체결로 한도 20%에 닿아 신규 매수가 자동 차단됩니다.</p>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: baseline"><h2 style="margin: 0; font-size: 16px; font-weight: 700">청산 사유 분포</h2><span style="font-size: 12px; color: #6B7686">최근 23건</span></div>
+<div role="img" aria-label="청산 사유 분포: roi 7, exit_signal 7, stop_loss 4, trailing 3, expired 2, force 0" style="display: flex; height: 24px; gap: 2px; border-radius: 4px; overflow: hidden">
+<sc-for list="{{exits}}" as="x" hint-placeholder-count="5"><div style="{{x.bar}}"></div></sc-for>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 20px">
+<sc-for list="{{exitsAll}}" as="x" hint-placeholder-count="6"><div style="display: flex; align-items: center; gap: 8px; font-size: 13px"><span style="width: 12px; height: 12px; border-radius: 2px; flex: none; {{x.sw}}"></span><span style="flex: 1">{{x.k}} <span style="color: #6B7686; font-size: 12px">{{x.ko}}</span></span><b>{{x.n}}</b><span style="color: #6B7686; width: 38px; text-align: right">{{x.pct}}</span></div></sc-for>
+</div>
+</section>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px">
+<h2 style="margin: 0 0 10px; font-size: 16px; font-weight: 700">Protections</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px">
+<sc-for list="{{prots}}" as="p" hint-placeholder-count="4">
+<div style="border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; {{p.box}}">
+<div style="display: flex; justify-content: space-between; gap: 8px"><b>{{p.k}}</b><span style="font-size: 12px; font-weight: 700; {{p.stStyle}}">{{p.st}}</span></div>
+<span style="color: #4A5567">{{p.why}}</span>
+<span style="font-size: 12px; color: #6B7686">해제 {{p.until}} · lookback 내 트리거 {{p.n}}건</span>
+</div>
+</sc-for>
+</div>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1400}}'>
+const f = n => n.toLocaleString('ko-KR');
+const P = [
+  ['005930.KS', 'Samsung Electronics', 660, 232000, 245200, 218000, 251000, 12, '2026-09-11'],
+  ['105560.KS', 'KB Financial', 180, 162000, 169000, 152000, 171500, 19, '2026-09-04'],
+  ['012330.KS', 'Hyundai Mobis', 60, 468000, 480500, 440000, 489000, 8, '2026-09-15'],
+  ['000660.KS', 'SK hynix', 22, 1758000, 1758000, 1630000, 1758000, 0, '2026-10-23']
+];
+class Component extends DCLogic {
+  renderVals() {
+    const rows = P.map(([t, n, q, avg, cur, stop, peak, days, exp]) => {
+      const u = cur / avg - 1, gap = cur / stop - 1, near = gap < 0.02;
+      return { t, n, q: f(q), avg: f(avg), cur: f(cur), stop: f(stop), peak: f(peak), days, exp,
+        u: (u > 0 ? '+' : u < 0 ? '−' : '') + Math.abs(u * 100).toFixed(1) + '%', uStyle: u > 0 ? 'color:#C6352C' : u < 0 ? 'color:#1D5BB6' : '',
+        gap: (near ? '⚠ ' : '') + (gap * 100).toFixed(1) + '%', gapStyle: near ? 'color:#B32F27;font-weight:700' : 'color:#4A5567',
+        rowStyle: near ? 'background:#FDF3F2' : '', flag: t === '000660.KS' ? '07-25 자동 체결' : '' };
+    });
+    const g = (label, v, lim, max, pend, unit) => {
+      const over = v >= lim;
+      return { label, val: v.toFixed(1) + '%', limText: lim + '%', aria: label + ' ' + v.toFixed(1) + '%, 한도 ' + lim + '%',
+        labelStyle: over ? 'color:#B32F27;font-weight:600' : '',
+        fill: 'width:' + (v / max * 100) + '%;background:' + (over ? '#C6352C' : '#1F5F8B'),
+        pend: pend ? 'left:' + (v / max * 100) + '%;width:' + (pend / max * 100) + '%;background:repeating-linear-gradient(45deg,#1F5F8B 0 3px,#FFFFFF 3px 6px);opacity:.6' : 'display:none',
+        lim: 'left:calc(' + (lim / max * 100) + '% - 1px)' };
+    };
+    const gauges = [g('드로다운', 3.4, 10, 12.5), g('일일 손실', 0.17, 2, 2.5), g('그로스 노출', 26.0, 100, 100), g('반도체', 20.0, 20, 25), g('금융', 3.0, 20, 25), g('자동차·부품', 2.9, 20, 25)];
+    const E = [['roi', '목표 수익', 7, '#1F5F8B'], ['exit_signal', '청산 신호', 7, '#7FA6C6'], ['stop_loss', '손절', 4, '#C6352C'], ['trailing', '트레일링', 3, '#E08A2E'], ['expired', '기간 만료', 2, '#B9C0CB'], ['force', '강제', 0, '#3B4656']];
+    const exitsAll = E.map(([k, ko, n, c]) => ({ k, ko, n, pct: Math.round(n / 23 * 100) + '%', sw: 'background:' + c }));
+    const exits = E.filter(e => e[2]).map(([k, ko, n, c]) => ({ bar: 'flex:' + n + ' 1 0;background:' + c }));
+    const prots = [
+      ['StoplossGuard', false, 'lookback 24시간 손절 1건 / 한도 3건', '–', 1],
+      ['MaxDrawdown', false, '피크 대비 −3.4% / 한도 −10%', '–', 0],
+      ['CooldownPeriod', true, '005380.KS 손절 후 2거래일 재진입 금지', '07-25 09:00', 1],
+      ['LowProfitPairs', false, '최근 6건 중 손실 종목 없음', '–', 0]
+    ].map(([k, on, why, until, n]) => ({ k, why, until, n, st: on ? '● 발동' : '○ 정상', stStyle: on ? 'color:#B32F27' : 'color:#1E6A3A',
+      box: on ? 'border:1px solid #C6352C;background:#FDF3F2' : 'border:1px solid #DDE1E8' }));
+    return { rows, gauges, exits, exitsAll, prots };
+  }
+}
+</script>
+</body>
+</html>

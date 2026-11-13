@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>선별 실행 상세</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Pretendard";src:url(/_blob/6c64cc769316fb936a503ff9895798ec) format("woff2");font-weight:45 920;font-style:normal;font-display:swap}
+body{margin:0;background:#F5F6F8;color:#141B26;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.5;font-feature-settings:"tnum"}
+a{color:#1F5F8B}a:hover{color:#174A6C}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:6px;color:#4A5567;text-decoration:none;font-weight:500}
+.nav:hover{background:#EEF0F4;color:#141B26}
+.t{border-collapse:collapse;width:100%;font-size:13px}
+.t th{text-align:left;font-size:12px;font-weight:600;color:#6B7686;padding:8px 8px;border-bottom:1px solid #DDE1E8;white-space:nowrap;background:#FFFFFF;position:sticky;top:0}
+.t td{padding:7px 8px;border-bottom:1px solid #EEF0F4;white-space:nowrap;vertical-align:middle}
+.t .r{text-align:right}
+.t tbody tr:hover td{background:#F5F7FA}
+.cell{display:inline-block;min-width:64px;padding:2px 7px;border-radius:4px;font-size:12px}
+.seg{font:inherit;font-size:13px;padding:7px 12px;border:1px solid #DDE1E8;background:#FFFFFF;color:#141B26;cursor:pointer}
+.ex{display:inline-block;font-size:11px;font-weight:700;color:#8A5A00;border:1px solid #C99A2E;border-radius:4px;padding:0 6px;line-height:1.6}
+.tag{display:inline-block;font-size:11px;font-weight:600;color:#4A5567;background:#EEF0F4;border:1px solid #DDE1E8;border-radius:4px;padding:0 6px;line-height:1.6}
+.tk{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;color:#141B26;text-decoration:none}.tk:hover .tk-n{color:#1F5F8B}.tk-n{font-weight:600}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; align-items: stretch; min-height: 100vh">
+<nav aria-label="화면" style="flex: 1 1 216px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #DDE1E8; padding: 20px 14px; display: flex; flex-direction: column; gap: 2px">
+<div style="padding: 0 10px 18px"><div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">에이전트 운용 데스크</div><div style="font-size: 12px; color: #6B7686">시안 v0.4 · KRX · 자동 모드</div></div>
+<a class="nav" href="Main.dc.html">오늘 요약</a>
+<a class="nav" href="Screens.dc.html" style="background: #E6EEF5; color: #1F5F8B; font-weight: 600">종목 선별<span style="font-size: 12px">8</span></a>
+<a class="nav" href="Decisions.dc.html">결정·실행<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">예외 1</span></a>
+<a class="nav" href="Ticker.dc.html">종목 상세</a>
+<a class="nav" href="Positions.dc.html">포지션·리스크<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">1</span></a>
+<a class="nav" href="Performance.dc.html">성과·백테스트<span style="font-size: 12px; color: #6B7686">160</span></a>
+<a class="nav" href="Config.dc.html">설정·감사 로그</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 18px 32px 56px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; font-size: 13px; color: #4A5567; padding-bottom: 12px; border-bottom: 1px solid #DDE1E8">
+<span>기준일 <b style="color: #141B26">2026-07-24</b></span>
+<span>마지막 선별 <b style="color: #141B26">2026-11-13 02:03 UTC</b></span>
+<span>마지막 결정 <b style="color: #141B26">2026-07-24</b></span>
+<a href="Positions.dc.html" style="background: #C6352C; color: #FFFFFF; padding: 3px 10px; border-radius: 999px; font-weight: 600; text-decoration: none">Protections 1건 발동</a><span class="ex">예시</span>
+<span style="margin-left: auto; display: inline-flex; gap: 8px; align-items: center"><span style="background: #E7F3EB; color: #1E6A3A; padding: 3px 10px; border-radius: 999px; font-weight: 600">● 자동 매매 실행 중</span><a href="KillSwitch.dc.html" style="border: 1px solid #C6352C; color: #B32F27; background: #FFFFFF; padding: 3px 12px; border-radius: 6px; font-weight: 700; text-decoration: none">긴급 정지</a></span>
+</div>
+<a href="Screens.dc.html" style="font-size: 13px; text-decoration: none">← 선별 실행 목록</a>
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em">KOSPI200 표본 · 2026-07-24 · 20 → 5</h1>
+<p style="margin: 0; color: #4A5567; max-width: 72ch">20종목 중 왜 이 5종목이 남았고, 나머지는 어느 규칙에서 떨어졌는지. 단계를 누르면 그 규칙에서 탈락한 종목만 아래 표에 남습니다.</p>
+</div>
+<span style="font-size: 12px; color: #6B7686">실행 baseline_krx_v2_2026-07-24 · 2026-11-13 02:03:55 UTC</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px" role="group" aria-label="깔때기 단계">
+<sc-for list="{{stages}}" as="st" hint-placeholder-count="9">
+<button type="button" onClick="{{st.pick}}" aria-pressed="{{st.on}}" style="flex: 1 1 112px; min-width: 112px; text-align: left; font: inherit; cursor: pointer; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 1px; {{st.style}}">
+<span style="font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2">{{st.n}}</span>
+<span style="font-size: 12px; color: #4A5567">{{st.label}}</span>
+<span style="font-size: 12px; font-weight: 600; {{st.dropStyle}}">{{st.drop}}</span>
+</button>
+</sc-for>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<div role="group" aria-label="선정 필터" style="display: flex">
+<sc-for list="{{segs}}" as="sg" hint-placeholder-count="3"><button type="button" class="seg" onClick="{{sg.pick}}" aria-pressed="{{sg.on}}" style="{{sg.style}}">{{sg.label}}</button></sc-for>
+</div>
+<label for="q" style="position: absolute; left: -9999px">티커·이름 검색</label>
+<input id="q" type="search" placeholder="티커·이름 검색" onInput="{{onQ}}" style="font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid #DDE1E8; border-radius: 6px; width: 200px; max-width: 100%">
+<span style="font-size: 13px; color: #4A5567">{{shown}}</span>
+<span style="margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 12px; color: #4A5567">셀 = 값 (임계)
+<span class="cell" style="background: #E7F3EB; color: #1E6A3A; min-width: 0">✓ 통과</span><span class="cell" style="background: #FBE8E6; color: #B32F27; min-width: 0">✗ 탈락</span><span class="cell" style="background: #F2F3F6; color: #6B7686; min-width: 0">– 미평가</span></span>
+<button type="button" style="font: inherit; font-size: 13px; padding: 7px 12px; border: 1px solid #DDE1E8; border-radius: 6px; background: #FFFFFF; cursor: pointer">CSV 내보내기</button>
+</div>
+<div style="overflow: auto; max-height: 760px"><table class="t"><thead><tr><th>선정</th><th class="r">순위</th><th>종목</th><th class="r">점수</th>
+<sc-for list="{{ruleHeads}}" as="h" hint-placeholder-count="8"><th title="{{h.desc}}">{{h.label}}</th></sc-for>
+</tr></thead><tbody>
+<sc-for list="{{rows}}" as="c" hint-placeholder-count="20">
+<tr><td><span style="font-size: 12px; font-weight: 700; {{c.selStyle}}">{{c.sel}}</span></td><td class="r">{{c.rank}}</td><td><a class="tk" href="Ticker.dc.html"><span class="tk-n">{{c.name}}</span><span class="tag">{{c.ticker}}</span></a></td><td class="r">{{c.score}}</td>
+<sc-for list="{{c.cells}}" as="x" hint-placeholder-count="8"><td><span class="cell" title="{{x.note}}" style="{{x.style}}">{{x.text}}</span></td></sc-for>
+</tr>
+</sc-for>
+</tbody></table>
+<sc-if value="{{empty}}" hint-placeholder-val="{{ false }}"><div style="padding: 28px; text-align: center; color: #6B7686; border: 1px dashed #DDE1E8; border-radius: 8px; margin: 8px">조건에 맞는 종목이 없습니다</div></sc-if>
+</div>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px; min-width: 0">
+<h2 style="margin: 0 0 8px; font-size: 16px; font-weight: 700">규칙</h2>
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>#</th><th>규칙</th><th>설명</th><th class="r">임계값</th><th class="r">이번 실행 탈락</th><th>마지막 변경</th></tr></thead><tbody>
+<sc-for list="{{rulePanel}}" as="p" hint-placeholder-count="8">
+<tr><td>{{p.i}}</td><td><b>{{p.label}}</b> <span style="color: #6B7686; font-size: 12px">{{p.id}}</span></td><td style="white-space: normal; color: #4A5567">{{p.desc}}</td><td class="r">{{p.thr}}</td><td class="r" style="font-weight: 600; {{p.dropStyle}}">{{p.drop}}</td><td style="color: #4A5567">{{p.changed}}</td></tr>
+</sc-for>
+</tbody></table></div>
+<p style="margin: 10px 0 0; font-size: 12px; color: #6B7686">마지막 변경은 설정·감사 로그의 변경 이력을 참조합니다. 행 클릭은 종목 상세의 선별 이력 탭으로 이동합니다.</p>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1640}}'>
+const RULES = [
+  ['price_min', '가격 하한', '종가 ≥ 임계(원)', '1,000원', '초기값'],
+  ['listed_days_min', '상장일수', '상장 후 일수 ≥ 임계', '180일', '초기값'],
+  ['dollar_volume_top_n', '거래대금 상위', '20일 평균 거래대금 순위 ≤ N', '15위', '초기값'],
+  ['volatility_band', '변동성 밴드', '20일 변동성(연율)이 밴드 안', '0.10–0.80', '초기값'],
+  ['range_stability_min', '60일 고저폭', '60일 (고−저)/저 ≥ 임계', '0.05', '초기값'],
+  ['sector_quota', '섹터 쿼터', '섹터 내 모멘텀 순위 ≤ 상한', '3위', '2026-07-20 · 관리자 (예시)'],
+  ['performance_filter', '성과 필터', '최근 정산 알파 평균 ≥ 임계 (기록 없으면 통과)', '−3%', '초기값'],
+  ['momentum_top_k', '모멘텀 상위', '리스크조정 모멘텀 z-score 순위 ≤ K', '5위', '초기값']
+];
+const COUNTS = [20, 20, 15, 9, 9, 9, 9, 5];
+const SECT = { '032830.KS': 'Financial Services', '066570.KS': 'Technology', '005380.KS': 'Consumer Cyclical', '055550.KS': 'Financial Services', '012330.KS': 'Consumer Cyclical', '105560.KS': 'Financial Services', '000270.KS': 'Consumer Cyclical', '068270.KS': 'Healthcare', '035420.KS': 'Communication Services' };
+const MOM = { '032830.KS': '12-1m +265.4%, 6-1m +192.7%', '066570.KS': '12-1m +178.0%, 6-1m +115.3%', '005380.KS': '12-1m +160.7%, 6-1m +74.8%', '055550.KS': '12-1m +65.3%, 6-1m +26.0%', '012330.KS': '12-1m +79.4%, 6-1m +41.3%', '105560.KS': '12-1m +46.2%, 6-1m +23.6%', '000270.KS': '12-1m +49.6%, 6-1m +16.9%', '068270.KS': '12-1m +12.3%, 6-1m −3.0%', '035420.KS': '12-1m +0.2%, 6-1m −16.2%' };
+// [ticker, name, selected, rank, score, price, listedDays, dvRank, vol, range, sectorRank, momRank]
+const C = [
+  ['032830.KS', 'Samsung Life', true, 1, 2.17, 318000, 1712, 11, 0.695, 1.139, 1, 1],
+  ['066570.KS', 'LG Electronics', true, 2, 0.77, 168734, 1712, 4, 0.744, 2.441, 1, 2],
+  ['005380.KS', 'Hyundai Motor', true, 3, 0.63, 398481, 1712, 3, 0.550, 1.055, 1, 3],
+  ['055550.KS', 'Shinhan Financial', true, 4, -0.08, 102778, 1712, 13, 0.448, 0.267, 2, 4],
+  ['012330.KS', 'Hyundai Mobis', true, 5, -0.19, 480577, 1712, 10, 0.608, 0.946, 2, 5],
+  ['105560.KS', 'KB Financial', false, 6, -0.44, 169038, 1712, 5, 0.474, 0.341, 3, 6],
+  ['000270.KS', 'Kia', false, 7, -0.58, 130500, 1712, 12, 0.772, 0.422, 3, 7],
+  ['068270.KS', 'Celltrion', false, 8, -1.04, 177600, 1712, 15, 0.438, 0.262, 1, 8],
+  ['035420.KS', 'NAVER', false, 9, -1.25, 207500, 1712, 9, 0.583, 0.679, 1, 9],
+  ['000660.KS', 'SK hynix', false, null, null, 1758619, 1712, 1, 1.165],
+  ['005930.KS', 'Samsung Electronics', false, null, null, 245248, 1712, 2, 0.929],
+  ['028260.KS', 'Samsung C&T', false, null, null, 342000, 1712, 6, 0.811],
+  ['006400.KS', 'Samsung SDI', false, null, null, 428000, 1712, 7, 0.930],
+  ['034730.KS', 'SK Inc.', false, null, null, 628291, 1712, 8, 0.927],
+  ['373220.KS', 'LG Energy Solution', false, null, null, 329500, 1639, 14, 0.972],
+  ['207940.KS', 'Samsung Biologics', false, null, null, 1518000, 1712, 16],
+  ['015760.KS', 'KEPCO', false, null, null, 35400, 1712, 17],
+  ['035720.KS', 'Kakao', false, null, null, 36200, 1712, 18],
+  ['051910.KS', 'LG Chem', false, null, null, 259000, 1712, 19],
+  ['003670.KS', 'Posco Future M', false, null, null, 141600, 1712, 20]
+];
+const PASS = 'background:#E7F3EB;color:#1E6A3A', FAIL = 'background:#FBE8E6;color:#B32F27;font-weight:700', NONE = 'background:#F2F3F6;color:#6B7686';
+function cellsOf(r) {
+  const [t, , , , , price, days, dv, vol, range, sec, mom] = r;
+  const spec = [
+    price == null ? null : [price.toLocaleString('ko-KR') + ' (1,000)', price >= 1000, ''],
+    days == null ? null : [days + '일 (180)', days >= 180, ''],
+    dv == null ? null : ['#' + dv + ' (15)', dv <= 15, '20일 평균 거래대금 순위'],
+    vol == null ? null : [vol.toFixed(3) + ' (0.1–0.8)', vol >= 0.1 && vol <= 0.8, ''],
+    range == null ? null : [range.toFixed(3) + ' (0.05)', range >= 0.05, ''],
+    sec == null ? null : [sec + '위 (3)', sec <= 3, SECT[t] || ''],
+    sec == null ? null : ['기록 없음 (−3%)', true, '정산된 결정이 아직 없어 통과'],
+    mom == null ? null : ['#' + mom + ' (5)', mom <= 5, MOM[t] || '']
+  ];
+  return spec.map(s => s == null ? { text: '–', style: NONE, note: '이전 규칙에서 탈락해 평가하지 않음', pass: null }
+    : { text: (s[1] ? '✓ ' : '✗ ') + s[0], style: s[1] ? PASS : FAIL, note: s[2], pass: s[1] });
+}
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { stage: null, filter: 'all', q: '' }; }
+  renderVals() {
+    const { stage, filter, q } = this.state;
+    const all = C.map(r => ({ r, cells: cellsOf(r) }));
+    let list = all;
+    if (stage != null) list = list.filter(x => x.cells[stage].pass === false);
+    if (filter === 'selected') list = list.filter(x => x.r[2]);
+    if (filter === 'rejected') list = list.filter(x => !x.r[2]);
+    if (q) { const s = q.toLowerCase(); list = list.filter(x => x.r[0].toLowerCase().includes(s) || x.r[1].toLowerCase().includes(s)); }
+    const rows = list.map(({ r, cells }) => ({ ticker: r[0], name: r[1], sel: r[2] ? '✓ 선정' : '✗ 탈락', selStyle: r[2] ? 'color:#1E6A3A' : 'color:#B32F27',
+      rank: r[3] ?? '', score: r[4] == null ? '' : r[4].toFixed(2), cells }));
+    const prev = i => i === 0 ? 20 : COUNTS[i - 1];
+    const stages = [{ n: 20, label: '유니버스', drop: '전체 보기', idx: null }].concat(RULES.map((ru, i) => ({ n: COUNTS[i], label: ru[1], drop: '−' + (prev(i) - COUNTS[i]), idx: i })))
+      .map(s => { const on = stage === s.idx; const zero = s.drop === '−0';
+        return { ...s, on: on ? 'true' : 'false', pick: () => this.setState({ stage: s.idx }),
+          style: on ? 'background:#E6EEF5;border:2px solid #1F5F8B' : 'background:#FFFFFF;border:1px solid #DDE1E8',
+          dropStyle: s.idx == null ? 'color:#6B7686' : zero ? 'color:#8A94A6' : 'color:#B32F27' }; });
+    const segs = [['all', '전체'], ['selected', '선정만'], ['rejected', '탈락만']].map(([k, label], i) => ({ label, on: filter === k ? 'true' : 'false',
+      pick: () => this.setState({ filter: k }),
+      style: (filter === k ? 'background:#1F5F8B;color:#FFFFFF;border-color:#1F5F8B;' : '') + (i === 0 ? 'border-radius:6px 0 0 6px' : i === 2 ? 'border-radius:0 6px 6px 0;margin-left:-1px' : 'margin-left:-1px') }));
+    const rulePanel = RULES.map((ru, i) => ({ i: i + 1, id: ru[0], label: ru[1], desc: ru[2], thr: ru[3], changed: ru[4],
+      drop: prev(i) - COUNTS[i], dropStyle: prev(i) - COUNTS[i] ? 'color:#B32F27' : 'color:#8A94A6' }));
+    const ruleHeads = RULES.map(ru => ({ label: ru[1], desc: ru[2] }));
+    const shown = rows.length + '종목 표시' + (stage != null ? ' · ' + RULES[stage][1] + '에서 탈락' : '');
+    return { stages, segs, rows, ruleHeads, rulePanel, shown, empty: rows.length === 0, onQ: e => this.setState({ q: e.target.value }) };
+  }
+}
+</script>
+</body>
+</html>

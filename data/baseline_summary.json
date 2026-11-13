@@ -1,0 +1,68 @@
+{
+  "run_id": "baseline_krx_v2",
+  "log_path": "D:\\trading-core\\data\\results\\backtest\\baseline_krx_v2\\trading_memory.md",
+  "cells_run": 160,
+  "resolved": 160,
+  "pending": 0,
+  "unscored": 0,
+  "by_rating": {
+    "Buy": {
+      "count": 12,
+      "hit_rate": 0.3333333333333333,
+      "mean_alpha": 0.008749999999999999
+    },
+    "Hold": {
+      "count": 112,
+      "hit_rate": null,
+      "mean_alpha": -0.0015803571428571438
+    },
+    "Sell": {
+      "count": 12,
+      "hit_rate": 0.5833333333333334,
+      "mean_alpha": 0.021
+    },
+    "Overweight": {
+      "count": 12,
+      "hit_rate": 0.4166666666666667,
+      "mean_alpha": -0.001499999999999999
+    },
+    "Underweight": {
+      "count": 12,
+      "hit_rate": 0.6666666666666666,
+      "mean_alpha": -0.007583333333333335
+    }
+  },
+  "holding": "5 trading days",
+  "dates": [
+    "2026-06-05",
+    "2026-06-12",
+    "2026-06-19",
+    "2026-06-26",
+    "2026-07-03",
+    "2026-07-10",
+    "2026-07-17",
+    "2026-07-24"
+  ],
+  "universe": [
+    "005930.KS",
+    "000660.KS",
+    "373220.KS",
+    "207940.KS",
+    "005380.KS",
+    "000270.KS",
+    "068270.KS",
+    "105560.KS",
+    "055550.KS",
+    "035420.KS",
+    "012330.KS",
+    "028260.KS",
+    "006400.KS",
+    "051910.KS",
+    "003670.KS",
+    "035720.KS",
+    "032830.KS",
+    "066570.KS",
+    "015760.KS",
+    "034730.KS"
+  ]
+}

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>선별 실행 목록</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Pretendard";src:url(/_blob/6c64cc769316fb936a503ff9895798ec) format("woff2");font-weight:45 920;font-style:normal;font-display:swap}
+body{margin:0;background:#F5F6F8;color:#141B26;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.5;font-feature-settings:"tnum"}
+a{color:#1F5F8B}a:hover{color:#174A6C}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:6px;color:#4A5567;text-decoration:none;font-weight:500}
+.nav:hover{background:#EEF0F4;color:#141B26}
+.t{border-collapse:collapse;width:100%;font-size:13px}
+.t th{text-align:left;font-size:12px;font-weight:600;color:#6B7686;padding:8px 10px;border-bottom:1px solid #DDE1E8;white-space:nowrap;background:#FFFFFF}
+.t td{padding:10px;border-bottom:1px solid #EEF0F4;white-space:nowrap;vertical-align:top}
+.t .r{text-align:right}
+.t tbody tr:hover td{background:#F5F7FA}
+.ex{display:inline-block;font-size:11px;font-weight:700;color:#8A5A00;border:1px solid #C99A2E;border-radius:4px;padding:0 6px;line-height:1.6}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; align-items: stretch; min-height: 100vh">
+<nav aria-label="화면" style="flex: 1 1 216px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #DDE1E8; padding: 20px 14px; display: flex; flex-direction: column; gap: 2px">
+<div style="padding: 0 10px 18px"><div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">에이전트 운용 데스크</div><div style="font-size: 12px; color: #6B7686">시안 v0.4 · KRX · 자동 모드</div></div>
+<a class="nav" href="Main.dc.html">오늘 요약</a>
+<a class="nav" href="Screens.dc.html" style="background: #E6EEF5; color: #1F5F8B; font-weight: 600">종목 선별<span style="font-size: 12px">8</span></a>
+<a class="nav" href="Decisions.dc.html">결정·실행<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">예외 1</span></a>
+<a class="nav" href="Ticker.dc.html">종목 상세</a>
+<a class="nav" href="Positions.dc.html">포지션·리스크<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">1</span></a>
+<a class="nav" href="Performance.dc.html">성과·백테스트<span style="font-size: 12px; color: #6B7686">160</span></a>
+<a class="nav" href="Config.dc.html">설정·감사 로그</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 18px 32px 56px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; font-size: 13px; color: #4A5567; padding-bottom: 12px; border-bottom: 1px solid #DDE1E8">
+<span>기준일 <b style="color: #141B26">2026-07-24</b></span>
+<span>마지막 선별 <b style="color: #141B26">2026-11-13 02:03 UTC</b></span>
+<span>마지막 결정 <b style="color: #141B26">2026-07-24</b></span>
+<a href="Positions.dc.html" style="background: #C6352C; color: #FFFFFF; padding: 3px 10px; border-radius: 999px; font-weight: 600; text-decoration: none">Protections 1건 발동</a><span class="ex">예시</span>
+<span style="margin-left: auto; display: inline-flex; gap: 8px; align-items: center"><span style="background: #E7F3EB; color: #1E6A3A; padding: 3px 10px; border-radius: 999px; font-weight: 600">● 자동 매매 실행 중</span><a href="KillSwitch.dc.html" style="border: 1px solid #C6352C; color: #B32F27; background: #FFFFFF; padding: 3px 12px; border-radius: 6px; font-weight: 700; text-decoration: none">긴급 정지</a></span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em">종목 선별</h1>
+<p style="margin: 0; color: #4A5567; max-width: 68ch">선별 실행 목록. 행을 열면 유니버스가 규칙을 하나씩 지나며 몇 종목 남는지, 각 종목이 어느 규칙에서 어떤 값으로 떨어졌는지 볼 수 있습니다.</p>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<label for="period" style="font-size: 13px; color: #4A5567">기간</label>
+<select id="period" style="font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid #DDE1E8; border-radius: 6px; background: #FFFFFF; color: #141B26"><option>최근 8주</option><option>최근 4주</option><option>전체</option></select>
+<label for="universe" style="font-size: 13px; color: #4A5567; margin-left: 8px">유니버스</label>
+<select id="universe" style="font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid #DDE1E8; border-radius: 6px; background: #FFFFFF; color: #141B26"><option>KOSPI200 표본 (20)</option><option>KOSPI200+KOSDAQ150</option></select>
+<span style="margin-left: auto; font-size: 12px; color: #6B7686">기준일 내림차순</span>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 6px 8px; min-width: 0">
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>실행 ID</th><th>기준일</th><th>유니버스</th><th class="r">크기</th><th class="r">통과</th><th class="r">규칙 수</th><th style="width: 34%">깔때기</th><th>실행 시각</th></tr></thead><tbody>
+<sc-for list="{{runs}}" as="s" hint-placeholder-count="8">
+<tr><td><a href="ScreenDetail.dc.html" style="font-weight: 600">{{s.id}}</a></td><td>{{s.asof}}</td><td>KOSPI200 표본</td><td class="r">20</td><td class="r"><b>{{s.pass}}</b></td><td class="r">8</td>
+<td style="vertical-align: middle"><div style="display: flex; gap: 2px; align-items: flex-end; height: 22px" aria-label="{{s.funnel}}" role="img"><sc-for list="{{s.bars}}" as="b" hint-placeholder-count="9"><div style="flex: 1 1 0; background: #9DB9D0; border-radius: 2px 2px 0 0; {{b.h}}"></div></sc-for></div><div style="font-size: 11px; color: #6B7686; margin-top: 2px">{{s.funnel}}</div></td>
+<td>{{s.at}}</td></tr>
+</sc-for>
+</tbody></table></div>
+</section>
+<p style="margin: 0; font-size: 12px; color: #6B7686">선별 실행이 아직 없으면 이 자리에 "오늘 선별이 아직 실행되지 않았습니다 · 마지막 실행 날짜 · 다음 예정 시각"이 나옵니다.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const rows = [
+      ['2026-07-24', [20, 20, 15, 9, 9, 9, 9, 5], '02:03:55'], ['2026-07-17', [20, 20, 15, 9, 9, 9, 9, 5], '02:03:54'],
+      ['2026-07-10', [20, 20, 15, 8, 8, 8, 8, 5], '02:03:54'], ['2026-07-03', [20, 20, 15, 6, 6, 6, 6, 5], '02:03:53'],
+      ['2026-06-26', [20, 20, 15, 6, 6, 6, 6, 5], '02:03:53'], ['2026-06-19', [20, 20, 15, 7, 7, 7, 7, 5], '02:03:52'],
+      ['2026-06-12', [20, 20, 15, 7, 7, 7, 7, 5], '02:03:52'], ['2026-06-05', [20, 20, 15, 8, 8, 8, 8, 5], '02:03:51']
+    ];
+    const runs = rows.map(([asof, sc, t]) => {
+      const all = [20].concat(sc);
+      return { id: 'baseline_krx_v2_' + asof, asof, pass: sc[sc.length - 1], at: '2026-11-13 ' + t,
+        funnel: all.join(' → '), bars: all.map(n => ({ h: 'height:' + Math.max(8, n / 20 * 100) + '%' })) };
+    });
+    return { runs };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>설정·감사 로그</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Pretendard";src:url(/_blob/6c64cc769316fb936a503ff9895798ec) format("woff2");font-weight:45 920;font-style:normal;font-display:swap}
+body{margin:0;background:#F5F6F8;color:#141B26;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.5;font-feature-settings:"tnum"}
+a{color:#1F5F8B}a:hover{color:#174A6C}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:6px;color:#4A5567;text-decoration:none;font-weight:500}
+.nav:hover{background:#EEF0F4;color:#141B26}
+.t{border-collapse:collapse;width:100%;font-size:13px}
+.t th{text-align:left;font-size:12px;font-weight:600;color:#6B7686;padding:8px 10px;border-bottom:1px solid #DDE1E8;white-space:nowrap;background:#FFFFFF;position:sticky;top:0}
+.t td{padding:9px 10px;border-bottom:1px solid #EEF0F4;white-space:nowrap;vertical-align:top}
+.t .r{text-align:right}
+.ex{display:inline-block;font-size:11px;font-weight:700;color:#8A5A00;border:1px solid #C99A2E;border-radius:4px;padding:0 6px;line-height:1.6}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; align-items: stretch; min-height: 100vh">
+<nav aria-label="화면" style="flex: 1 1 216px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #DDE1E8; padding: 20px 14px; display: flex; flex-direction: column; gap: 2px">
+<div style="padding: 0 10px 18px"><div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">에이전트 운용 데스크</div><div style="font-size: 12px; color: #6B7686">시안 v0.4 · KRX · 자동 모드</div></div>
+<a class="nav" href="Main.dc.html">오늘 요약</a>
+<a class="nav" href="Screens.dc.html">종목 선별<span style="font-size: 12px; color: #6B7686">8</span></a>
+<a class="nav" href="Decisions.dc.html">결정·실행<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">예외 1</span></a>
+<a class="nav" href="Ticker.dc.html">종목 상세</a>
+<a class="nav" href="Positions.dc.html">포지션·리스크<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">1</span></a>
+<a class="nav" href="Performance.dc.html">성과·백테스트<span style="font-size: 12px; color: #6B7686">160</span></a>
+<a class="nav" href="Config.dc.html" style="background: #E6EEF5; color: #1F5F8B; font-weight: 600">설정·감사 로그</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 18px 32px 56px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; font-size: 13px; color: #4A5567; padding-bottom: 12px; border-bottom: 1px solid #DDE1E8">
+<span>기준일 <b style="color: #141B26">2026-07-24</b></span>
+<span>마지막 선별 <b style="color: #141B26">2026-11-13 02:03 UTC</b></span>
+<span>권한 <b style="color: #141B26">관리자</b> · 규칙 변경 가능</span>
+<span style="margin-left: auto; display: inline-flex; gap: 8px; align-items: center"><span style="background: #E7F3EB; color: #1E6A3A; padding: 3px 10px; border-radius: 999px; font-weight: 600">● 자동 매매 실행 중</span><a href="KillSwitch.dc.html" style="border: 1px solid #C6352C; color: #B32F27; background: #FFFFFF; padding: 3px 12px; border-radius: 6px; font-weight: 700; text-decoration: none">긴급 정지</a></span>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px; display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #6B7686; font-weight: 600">운용 모드 <span class="ex">예시</span></span><span style="font-size: 20px; font-weight: 700">자동 매매 <span style="font-size: 13px; font-weight: 600; color: #1E6A3A">● 실행 중</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: #4A5567"><span>결정 후 다음 거래일 09:00 시가에 자동 주문</span><span>예외(REVIEW · 한도 초과 · 벤더 장애)는 주문하지 않고 예외 큐와 알림으로</span></div>
+<div role="group" aria-label="운용 모드" style="display: flex; margin-left: auto">
+<button type="button" style="font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border: 1px solid #1F5F8B; background: #1F5F8B; color: #FFFFFF; border-radius: 6px 0 0 6px">자동</button>
+<button type="button" style="font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border: 1px solid #DDE1E8; background: #FFFFFF; color: #141B26; margin-left: -1px">수동 승인</button>
+<button type="button" style="font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border: 1px solid #DDE1E8; background: #FFFFFF; color: #141B26; margin-left: -1px; border-radius: 0 6px 6px 0">모의투자</button>
+</div>
+</section>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em">설정·감사 로그</h1>
+<p style="margin: 0; color: #4A5567; max-width: 72ch">선별·하드룰·실행 규칙의 현재 파라미터와 모든 변경 기록. 조회는 전원, 승인은 운영자, 규칙 변경은 관리자만 할 수 있고, 변경은 지워지지 않는 기록으로 남습니다.</p>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px"><h2 style="margin: 0; font-size: 16px; font-weight: 700">규칙 레지스트리</h2><span style="font-size: 12px; color: #6B7686">2026-07-24 실행 기준</span></div>
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>규칙</th><th>설명</th><th class="r">현재 파라미터</th><th>레이어</th><th>마지막 변경</th><th></th></tr></thead><tbody>
+<sc-for list="{{rules}}" as="r" hint-placeholder-count="12">
+<tr><td><b>{{r.label}}</b> <span style="font-size: 12px; color: #6B7686">{{r.id}}</span></td><td style="white-space: normal; color: #4A5567">{{r.desc}}</td><td class="r" style="font-weight: 600">{{r.p}}</td><td><span style="display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 4px; {{r.layerStyle}}">{{r.layer}}</span></td><td style="color: #4A5567">{{r.changed}}</td><td><button type="button" style="font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid #DDE1E8; border-radius: 6px; background: #FFFFFF; cursor: pointer">수정</button></td></tr>
+</sc-for>
+</tbody></table></div>
+<p style="margin: 8px 0 0; font-size: 12px; color: #6B7686">선별 규칙은 실측 값, 하드룰·실행 규칙은 <span class="ex">예시</span>입니다.</p>
+</section>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 14px">
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px"><h2 style="margin: 0; font-size: 16px; font-weight: 700">모델 설정</h2><span style="font-size: 12px; color: #6B7686">DecisionRecord.settings와 같은 키</span></div>
+<table class="t"><tbody>
+<tr><td style="color: #6B7686">decider</td><td style="font-weight: 600">rule_momentum_baseline</td></tr>
+<tr><td style="color: #6B7686">screen</td><td style="white-space: normal">ScreenConfig defaults, top_n=15, top_k=5</td></tr>
+<tr><td style="color: #6B7686">provider</td><td style="color: #6B7686">미연결</td></tr>
+<tr><td style="color: #6B7686">quick_think_llm / deep_think_llm</td><td style="color: #6B7686">미연결 · LLM 에이전트 연결 시 표시</td></tr>
+<tr><td style="color: #6B7686">max_debate_rounds</td><td style="color: #6B7686">–</td></tr>
+<tr><td style="color: #6B7686">output_language</td><td>ko</td></tr>
+<tr><td style="color: #6B7686">approval_mode</td><td style="font-weight: 600">auto <span class="ex">예시</span></td></tr>
+</tbody></table>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; flex-wrap: wrap; gap: 8px"><h2 style="margin: 0; font-size: 16px; font-weight: 700">데이터·캐시 상태</h2>
+<span style="font-size: 12px; color: #4A5567">캐시 20개 · 2,264 KB · 벤더 yfinance <span style="color: #1E6A3A; font-weight: 700">● 도달 가능</span></span></div>
+<div style="overflow: auto; max-height: 300px"><table class="t"><thead><tr><th>심볼</th><th class="r">크기</th><th>마지막 다운로드 (UTC)</th></tr></thead><tbody>
+<sc-for list="{{cache}}" as="c" hint-placeholder-count="20"><tr><td>{{c.s}}</td><td class="r">{{c.kb}} KB</td><td>{{c.at}}</td></tr></sc-for>
+</tbody></table></div>
+</section>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px; min-width: 0">
+<div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px"><h2 style="margin: 0; font-size: 16px; font-weight: 700">변경 이력</h2><span class="ex">예시</span><span style="font-size: 12px; color: #6B7686">append-only</span></div>
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>시각</th><th>변경자</th><th>대상</th><th>이전 값</th><th>새 값</th><th>사유</th></tr></thead><tbody>
+<tr><td>2026-07-24 17:30</td><td>관리자</td><td>approval_mode</td><td style="color: #6B7686">manual</td><td style="font-weight: 600">auto</td><td style="white-space: normal">모의투자 4주 검증 후 자동 전환. 한도: 일일 주문 1억 · 일일 손실 −2%</td></tr>
+<tr><td>2026-07-20 14:02</td><td>관리자</td><td>sector_quota.sector_max</td><td style="color: #6B7686">2</td><td style="font-weight: 600">3</td><td style="white-space: normal">섹터 쿼터가 너무 좁아 금융 3번째 종목이 빠짐</td></tr>
+<tr><td>2026-07-08 10:40</td><td>관리자</td><td>max_position_pct</td><td style="color: #6B7686">8%</td><td style="font-weight: 600">6%</td><td style="white-space: normal">베이스라인 리뷰</td></tr>
+<tr><td>2026-06-30 09:15</td><td>운영자</td><td>approval_mode</td><td style="color: #6B7686">auto</td><td style="font-weight: 600">manual</td><td style="white-space: normal">LLM 연결 전 수동 승인</td></tr>
+</tbody></table></div>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+const LAYER = { 선별: 'background:#EEF3F8;color:#1F5F8B', 하드룰: 'background:#FBE8E6;color:#B32F27', 실행: 'background:#F2F3F6;color:#4A5567', '자동 실행': 'background:#E7F3EB;color:#1E6A3A' };
+class Component extends DCLogic {
+  renderVals() {
+    const rules = [
+      ['가격 하한', 'price_min', '종가 ≥ 임계(원)', '1,000원', '선별', '초기값'],
+      ['상장일수', 'listed_days_min', '상장 후 일수 ≥ 임계', '180일', '선별', '초기값'],
+      ['거래대금 상위', 'dollar_volume_top_n', '20일 평균 거래대금 순위 ≤ N', '15', '선별', '초기값'],
+      ['변동성 밴드', 'volatility_band', '20일 변동성(연율)이 밴드 안', '0.10–0.80', '선별', '초기값'],
+      ['60일 고저폭', 'range_stability_min', '60일 (고−저)/저 ≥ 임계', '0.05', '선별', '초기값'],
+      ['섹터 쿼터', 'sector_quota', '섹터 내 모멘텀 순위 ≤ 상한', '3', '선별', '2026-07-20 · 관리자 · 이전 2'],
+      ['성과 필터', 'performance_filter', '최근 정산 알파 평균 ≥ 임계', '−3%', '선별', '초기값'],
+      ['모멘텀 상위', 'momentum_top_k', '리스크조정 모멘텀 z-score 순위 ≤ K', '5', '선별', '초기값'],
+      ['종목 비중 한도', 'max_position_pct', '한 종목 비중 상한', '6%', '하드룰', '2026-07-08 · 관리자 · 이전 8%'],
+      ['섹터 한도', 'sector_cap', '섹터 합계 비중 상한', '20%', '하드룰', '초기값'],
+      ['손절', 'stop_loss', '진입가 대비 하락 시 청산', '−7%', '실행', '초기값'],
+      ['쿨다운', 'protection:CooldownPeriod', '손절 후 같은 종목 재진입 금지', '2거래일', '실행', '초기값'],
+      ['일일 주문 한도', 'auto_daily_order_cap', '하루 자동 주문 금액 합계 상한. 넘으면 신규 주문 중단', '1억원', '자동 실행', '2026-07-24 · 관리자'],
+      ['일일 손실 한도', 'auto_daily_loss_limit', '실현+미실현 일일 손실이 넘으면 자동 매매 정지', '−2%', '자동 실행', '2026-07-24 · 관리자'],
+      ['주문당 상한', 'auto_order_max', '한 번의 주문 금액 상한', '6,000만원', '자동 실행', '2026-07-24 · 관리자'],
+      ['긴급 정지 해제', 'kill_switch_reset', '긴급 정지 후 다시 켤 수 있는 권한', '관리자', '자동 실행', '초기값']
+    ].map(([label, id, desc, p, layer, changed]) => ({ label, id, desc, p, layer, changed, layerStyle: LAYER[layer] }));
+    const cache = [
+      ['000270.KS', 116], ['000660.KS', 119, '01:58'], ['003670.KS', 116], ['005380.KS', 119], ['005930.KS', 120, '01:58'], ['006400.KS', 104], ['012330.KS', 118],
+      ['015760.KS', 116], ['028260.KS', 115], ['032830.KS', 113], ['034730.KS', 118], ['035420.KS', 115], ['035720.KS', 115], ['051910.KS', 113],
+      ['055550.KS', 122], ['066570.KS', 118], ['068270.KS', 116], ['105560.KS', 121], ['207940.KS', 91], ['373220.KS', 79]
+    ].map(([s, kb, t]) => ({ s, kb, at: '2026-11-13 ' + (t || '01:59') }));
+    return { rules, cache };
+  }
+}
+</script>
+</body>
+</html>

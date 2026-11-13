@@ -1,0 +1,29 @@
+agent-trading-core
+
+This package contains code derived from TradingAgents
+(https://github.com/TauricResearch/TradingAgents), Copyright Tauric Research,
+licensed under the Apache License, Version 2.0. The upstream revision used is
+v0.7.1, commit 9fa1196fffbcfd9de5146d2dd2869df84ab99838 (2026-11-04).
+
+Files copied verbatim apart from import paths:
+  agent_trading_core/errors.py        <- tradingagents/dataflows/errors.py
+  agent_trading_core/symbols.py       <- tradingagents/dataflows/symbols.py
+  agent_trading_core/files.py         <- tradingagents/dataflows/files.py
+  agent_trading_core/date_window.py   <- tradingagents/dataflows/date_window.py
+  agent_trading_core/schemas.py       <- tradingagents/agents/schemas.py
+  agent_trading_core/rating.py        <- tradingagents/agents/rating.py
+  agent_trading_core/structured.py    <- tradingagents/agents/structured.py
+  agent_trading_core/portfolio.py     <- tradingagents/portfolio.py
+  agent_trading_core/memory/log.py    <- tradingagents/memory/log.py
+  agent_trading_core/memory/settlement.py <- tradingagents/memory/settlement.py
+  agent_trading_core/memory/reflection.py <- tradingagents/memory/reflection.py
+
+Files adapted (config lookup replaced by explicit arguments, modules merged,
+or the graph dependency removed):
+  agent_trading_core/snapshot.py      <- tradingagents/dataflows/vendors/yahoo/snapshot.py
+  agent_trading_core/yahoo.py         <- vendors/yahoo/{common,ohlcv,market,fundamentals}.py, dataflows/net.py
+  agent_trading_core/identity.py      <- tradingagents/agents/context.py
+  agent_trading_core/backtest.py      <- tradingagents/backtest.py
+  agent_trading_core/config.py        <- subset of tradingagents/default_config.py
+
+Modifications are licensed under the same Apache License, Version 2.0.

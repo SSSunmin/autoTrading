@@ -1,0 +1,17 @@
+.venv/
+.cache/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+data/cache/
+data/*.log
+mockup/dashboard.html
+frontend/node_modules/
+frontend/dist/
+data/audit/
+data/results/
+*.lock

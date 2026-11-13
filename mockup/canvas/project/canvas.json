@@ -1,0 +1,26 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-11-13T03:10:00Z"},
+  "title": "에이전트 운용 데스크",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 1740, "title": "1 오늘 요약", "expand": "fill"},
+    "Screens.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "2-A 선별 실행 목록", "expand": "fill"},
+    "ScreenDetail.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 1640, "title": "2-B 선별 실행 상세", "expand": "fill", "is_interactive": true},
+    "Decisions.dc.html": {"x": 0, "y": 1940, "w": 1440, "h": 1560, "title": "3 결정·실행", "expand": "fill", "is_interactive": true},
+    "KillSwitch.dc.html": {"x": 1520, "y": 1940, "w": 560, "h": 600, "title": "긴급 정지 확인 모달"},
+    "Ticker.dc.html": {"x": 2160, "y": 1940, "w": 1440, "h": 1640, "title": "4 종목 상세", "expand": "fill", "is_interactive": true},
+    "Positions.dc.html": {"x": 0, "y": 4000, "w": 1440, "h": 1400, "title": "5 포지션·리스크", "expand": "fill"},
+    "Performance.dc.html": {"x": 1520, "y": 4000, "w": 1440, "h": 1500, "title": "6 성과·백테스트", "expand": "fill"},
+    "Config.dc.html": {"x": 3040, "y": 4000, "w": 1440, "h": 1560, "title": "7 설정·감사 로그", "expand": "fill"}
+  },
+  "order": ["Main.dc.html", "Screens.dc.html", "ScreenDetail.dc.html", "Decisions.dc.html", "KillSwitch.dc.html", "Ticker.dc.html", "Positions.dc.html", "Performance.dc.html", "Config.dc.html"],
+  "notes": {
+    "row1": {"x": 0, "y": -300, "text": "홈 · 종목 선별", "kind": "title1", "maxW": 4480},
+    "row2": {"x": 0, "y": 1780, "text": "결정·실행 · 종목 상세", "kind": "title1", "maxW": 3600},
+    "row3": {"x": 0, "y": 3700, "text": "포지션 · 성과 · 설정", "kind": "title1", "maxW": 4480},
+    "legend": {"x": -560, "y": 0, "w": 440, "text": "자동 매매 모드 시안 (v0.4).\n\n실측: baseline_krx_v2 (KOSPI200 표본 20종목 × 8 결정일, 규칙 전용 베이스라인).\n\n'예시' 배지: LLM 에이전트 · 하드룰 · 실행 레이어 연결 후 모습을 보여주는 가상 데이터. 07-24 결정 → 07-25 09:00 시가 자동 주문.\n\n색: 빨강 = 상승·매수, 파랑 = 하락·매도 (KRX 관례). 등급은 색과 텍스트를 함께 씀.", "color": "orange"}
+  },
+  "designSystems": []
+}

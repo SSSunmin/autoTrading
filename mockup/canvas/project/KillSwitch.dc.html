@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>긴급 정지 확인</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Pretendard";src:url(/_blob/6c64cc769316fb936a503ff9895798ec) format("woff2");font-weight:45 920;font-style:normal;font-display:swap}
+body{margin:0;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;color:#141B26;font-feature-settings:"tnum"}
+a{color:#1F5F8B}a:hover{color:#174A6C}
+</style>
+</helmet>
+<div style="width: 560px; height: 600px; box-sizing: border-box; background: #5B6472; display: flex; align-items: center; justify-content: center; padding: 24px; font-size: 14px; line-height: 1.5">
+<div role="dialog" aria-modal="true" aria-labelledby="t" style="width: 100%; background: #FFFFFF; border-radius: 12px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; border-top: 4px solid #C6352C">
+<h2 id="t" style="margin: 0; font-size: 19px; font-weight: 700">자동 매매를 긴급 정지할까요?</h2>
+<ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; color: #141B26">
+<li>새 주문을 즉시 멈춥니다. 다음 결정부터는 기록만 하고 주문하지 않습니다.</li>
+<li>미체결 주문 <b>0건</b>을 취소합니다.</li>
+<li>보유 4종목 · 2억 5,976만원은 그대로 둡니다.</li>
+</ul>
+<label for="keepStops" style="display: flex; gap: 10px; align-items: flex-start; background: #F5F6F8; border-radius: 6px; padding: 10px 12px; cursor: pointer">
+<input id="keepStops" type="checkbox" checked style="margin-top: 3px; width: 18px; height: 18px">
+<span><b>손절·트레일링 청산은 계속 작동</b><br><span style="font-size: 13px; color: #4A5567">끄면 보유 종목이 손절선을 깨도 자동으로 팔지 않습니다.</span></span>
+</label>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<label for="reason" style="font-size: 13px; font-weight: 600">정지 사유 <span style="font-weight: 400; color: #6B7686">감사 로그에 남습니다</span></label>
+<input id="reason" type="text" placeholder="예: 시장 급락으로 수동 점검" style="font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid #DDE1E8; border-radius: 6px">
+</div>
+<p style="margin: 0; font-size: 13px; color: #4A5567">다시 켜기는 관리자만 할 수 있습니다. 설정·감사 로그에서 정지 시각과 사유를 확인할 수 있습니다.</p>
+<div style="display: flex; justify-content: flex-end; gap: 8px">
+<a href="Main.dc.html" style="font-size: 14px; font-weight: 600; padding: 10px 16px; min-height: 44px; box-sizing: border-box; border-radius: 6px; border: 1px solid #DDE1E8; background: #FFFFFF; color: #141B26; text-decoration: none; display: inline-flex; align-items: center">취소</a>
+<a href="Main.dc.html" style="font-size: 14px; font-weight: 700; padding: 10px 16px; min-height: 44px; box-sizing: border-box; border-radius: 6px; background: #C6352C; color: #FFFFFF; text-decoration: none; display: inline-flex; align-items: center">긴급 정지</a>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":560,"height":600}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

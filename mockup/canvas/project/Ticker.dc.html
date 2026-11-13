@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>종목 상세</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Pretendard";src:url(/_blob/6c64cc769316fb936a503ff9895798ec) format("woff2");font-weight:45 920;font-style:normal;font-display:swap}
+body{margin:0;background:#F5F6F8;color:#141B26;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.5;font-feature-settings:"tnum"}
+a{color:#1F5F8B}a:hover{color:#174A6C}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:6px;color:#4A5567;text-decoration:none;font-weight:500}
+.nav:hover{background:#EEF0F4;color:#141B26}
+.t{border-collapse:collapse;width:100%;font-size:13px}
+.t th{text-align:left;font-size:12px;font-weight:600;color:#6B7686;padding:8px 10px;border-bottom:1px solid #DDE1E8;white-space:nowrap;background:#FFFFFF}
+.t td{padding:9px 10px;border-bottom:1px solid #EEF0F4;white-space:nowrap;vertical-align:top}
+.t .r{text-align:right}
+.pill{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.7;border:1px solid transparent}
+.tab{font:inherit;font-size:14px;font-weight:600;background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;cursor:pointer;color:#4A5567}
+.ex{display:inline-block;font-size:11px;font-weight:700;color:#8A5A00;border:1px solid #C99A2E;border-radius:4px;padding:0 6px;line-height:1.6}
+.memo dt{font-size:12px;font-weight:600;color:#6B7686;padding-top:2px}
+.memo dd{margin:0;max-width:72ch;line-height:1.6}
+.tag{display:inline-block;font-size:11px;font-weight:600;color:#4A5567;background:#EEF0F4;border:1px solid #DDE1E8;border-radius:4px;padding:0 6px;line-height:1.6}
+.tk{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;color:#141B26;text-decoration:none}.tk:hover .tk-n{color:#1F5F8B}.tk-n{font-weight:600}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; align-items: stretch; min-height: 100vh">
+<nav aria-label="화면" style="flex: 1 1 216px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #DDE1E8; padding: 20px 14px; display: flex; flex-direction: column; gap: 2px">
+<div style="padding: 0 10px 18px"><div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">에이전트 운용 데스크</div><div style="font-size: 12px; color: #6B7686">시안 v0.4 · KRX · 자동 모드</div></div>
+<a class="nav" href="Main.dc.html">오늘 요약</a>
+<a class="nav" href="Screens.dc.html">종목 선별<span style="font-size: 12px; color: #6B7686">8</span></a>
+<a class="nav" href="Decisions.dc.html">결정·실행<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">예외 1</span></a>
+<a class="nav" href="Ticker.dc.html" style="background: #E6EEF5; color: #1F5F8B; font-weight: 600">종목 상세</a>
+<a class="nav" href="Positions.dc.html">포지션·리스크<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">1</span></a>
+<a class="nav" href="Performance.dc.html">성과·백테스트<span style="font-size: 12px; color: #6B7686">160</span></a>
+<a class="nav" href="Config.dc.html">설정·감사 로그</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 18px 32px 56px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; font-size: 13px; color: #4A5567; padding-bottom: 12px; border-bottom: 1px solid #DDE1E8">
+<span>기준일 <b style="color: #141B26">2026-07-24</b></span>
+<span>마지막 선별 <b style="color: #141B26">2026-11-13 02:03 UTC</b></span>
+<span>마지막 결정 <b style="color: #141B26">2026-07-24</b></span>
+<a href="Positions.dc.html" style="background: #C6352C; color: #FFFFFF; padding: 3px 10px; border-radius: 999px; font-weight: 600; text-decoration: none">Protections 1건 발동</a><span class="ex">예시</span>
+<span style="margin-left: auto; display: inline-flex; gap: 8px; align-items: center"><span style="background: #E7F3EB; color: #1E6A3A; padding: 3px 10px; border-radius: 999px; font-weight: 600">● 자동 매매 실행 중</span><a href="KillSwitch.dc.html" style="border: 1px solid #C6352C; color: #B32F27; background: #FFFFFF; padding: 3px 12px; border-radius: 6px; font-weight: 700; text-decoration: none">긴급 정지</a></span>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 20px; display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center">
+<div class="tk"><span style="font-size: 26px; font-weight: 700; letter-spacing: -0.02em">SK hynix</span><span class="tag">000660.KS</span></div>
+<dl style="display: flex; flex-wrap: wrap; gap: 6px 26px; margin: 0; font-size: 13px">
+<div><dt style="color: #6B7686; font-size: 12px">업종</dt><dd style="margin: 0; font-weight: 600">Technology · 반도체</dd></div>
+<div><dt style="color: #6B7686; font-size: 12px">거래소</dt><dd style="margin: 0; font-weight: 600">KRX 유가증권</dd></div>
+<div><dt style="color: #6B7686; font-size: 12px">보유</dt><dd style="margin: 0; font-weight: 600">22주 · 07-25 자동 체결 <span class="ex">예시</span></dd></div>
+<div><dt style="color: #6B7686; font-size: 12px">최근 등급</dt><dd style="margin: 0"><span class="pill" style="background: #FBE8E6; color: #B32F27">Overweight</span> <span class="ex">예시</span></dd></div>
+<div><dt style="color: #6B7686; font-size: 12px">최근 선별</dt><dd style="margin: 0"><span class="pill" style="background: #FBE8E6; color: #B32F27">탈락 · 변동성 밴드</span></dd></div>
+</dl>
+<span style="margin-left: auto; font-size: 12px; color: #6B7686">정체는 실행 시작 시 yfinance 프로필로 고정</span>
+</section>
+<div role="tablist" style="display: flex; gap: 2px; border-bottom: 1px solid #DDE1E8; flex-wrap: wrap">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="6"><button type="button" role="tab" class="tab" onClick="{{t.pick}}" aria-selected="{{t.on}}" style="{{t.style}}">{{t.label}}</button></sc-for>
+</div>
+
+<sc-if value="{{tDecisions}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+<span style="font-size: 12px; color: #6B7686; font-weight: 600">등급 띠</span>
+<sc-for list="{{band}}" as="b" hint-placeholder-count="9"><div style="display: flex; flex-direction: column; align-items: center; gap: 2px"><span style="width: 44px; height: 26px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; {{b.style}}">{{b.short}}</span><span style="font-size: 11px; color: #6B7686">{{b.d}}</span></div></sc-for>
+</div>
+<article style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<header style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center">
+<div style="display: flex; gap: 8px; align-items: center"><h2 style="margin: 0; font-size: 18px; font-weight: 700">투자 메모 · 2026-07-24</h2><span class="ex">예시</span></div>
+<span style="font-size: 12px; color: #6B7686">모델 deep/quick 설정 · 토론 1라운드</span>
+</header>
+<dl class="memo" style="display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px 18px; margin: 0">
+<dt>사업 요약</dt><dd>메모리 반도체(DRAM·NAND) 2위 사업자. HBM 매출 비중이 커지며 이익 변동성이 줄어드는 중.</dd>
+<dt>논지</dt><dd>HBM 공급 부족이 2027년까지 이어지고, 범용 DRAM 가격 반등이 겹쳐 이익 추정치가 상향될 여지가 크다.</dd>
+<dt>불 케이스</dt><dd>HBM4 조기 인증, 범용 DRAM 계약가 2분기 연속 상승.</dd>
+<dt>베어 케이스</dt><dd>고객사 재고 조정으로 하반기 출하 둔화, 경쟁사 HBM 인증 통과.</dd>
+<dt>밸류에이션</dt><dd style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-width: 560px">
+<div style="background: #F5F6F8; border-radius: 6px; padding: 8px 12px"><div style="font-size: 11px; color: #6B7686">현재가</div><b style="font-size: 16px">1,758,000</b></div>
+<div style="background: #FBE8E6; border-radius: 6px; padding: 8px 12px"><div style="font-size: 11px; color: #6B7686">목표가</div><b style="font-size: 16px; color: #B32F27">2,100,000</b> <span style="font-size: 12px; color: #B32F27">+19.5%</span></div>
+<div style="background: #E5EDF9; border-radius: 6px; padding: 8px 12px"><div style="font-size: 11px; color: #6B7686">하락가</div><b style="font-size: 16px; color: #1D5BB6">1,550,000</b> <span style="font-size: 12px; color: #1D5BB6">−11.8%</span></div>
+</div>
+<span style="font-size: 13px; color: #4A5567">reward/risk <b style="color: #141B26">1.6</b></span></dd>
+<dt>촉매</dt><dd><ul style="margin: 0; padding-left: 18px"><li>2분기 실적 발표 <span style="font-size: 12px; color: #6B7686">2026-07-30</span></li><li>HBM4 고객 인증 결과 <span style="font-size: 12px; color: #6B7686">2026-09</span></li></ul></dd>
+<dt>논지 깨짐 조건</dt><dd><ul style="margin: 0; padding-left: 18px"><li>범용 DRAM 계약가 2개월 연속 하락</li><li>HBM 점유율 40% 아래로 하락</li><li>종가 1,630,000원 아래로 이탈</li></ul></dd>
+<dt>등급·확신도·비중</dt><dd><span class="pill" style="background: #FBE8E6; color: #B32F27">Overweight</span> 확신도 <b>0.65</b> · 4% (원안 6%, 섹터 한도로 축소)</dd>
+<dt>매도 계획</dt><dd>목표가 도달 시 절반 매도. 논지 깨짐 조건이 하나라도 충족되면 전량 재검토.</dd>
+<dt>기간</dt><dd>3~6개월</dd>
+</dl>
+<div style="border-top: 1px solid #EEF0F4; padding-top: 10px; display: flex; flex-direction: column; gap: 6px">
+<div style="font-size: 12px; color: #6B7686; font-weight: 600">증거 4건 · 하드룰 개입 2건</div>
+<sc-for list="{{evidence}}" as="e" hint-placeholder-count="4"><div style="display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 10px; font-size: 13px; align-items: baseline"><span style="display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; background: #EEF3F8; color: #1F5F8B; text-align: center">{{e.src}}</span><span>{{e.s}}</span><span style="font-size: 12px; {{e.st}}">{{e.d}}</span></div></sc-for>
+</div>
+</article>
+<p style="margin: 0; font-size: 12px; color: #6B7686">결정 카드와 결과 카드는 (ticker, trade_date)로 이어집니다. 베이스라인 실측에서 이 종목은 8번 모두 선별에서 탈락해 Hold로 기록됐습니다.</p>
+</div>
+</sc-if>
+
+<sc-if value="{{tScreening}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 8px 10px">
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>기준일</th><th>선정</th><th>첫 탈락 규칙</th><th class="r">값</th><th class="r">임계</th><th>비고</th></tr></thead><tbody>
+<sc-for list="{{screening}}" as="s" hint-placeholder-count="8"><tr><td>{{s.d}}</td><td style="color: #B32F27; font-weight: 700">✗ 탈락</td><td>변동성 밴드 <span style="font-size: 12px; color: #6B7686">volatility_band</span></td><td class="r" style="color: #B32F27; font-weight: 600">{{s.v}}</td><td class="r">0.10–0.80</td><td style="color: #4A5567">거래대금 1위 · 20일 변동성 연율</td></tr></sc-for>
+</tbody></table></div>
+</section>
+</sc-if>
+
+<sc-if value="{{tOutcomes}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 8px 10px">
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>결정일</th><th>등급</th><th class="r">실현</th><th class="r">알파</th><th>보유</th><th>정산일</th><th>교훈</th></tr></thead><tbody>
+<sc-for list="{{outcomes}}" as="o" hint-placeholder-count="8"><tr><td>{{o.d}}</td><td><span class="pill" style="background: #EEF0F4; color: #4A5567">Hold</span></td><td class="r" style="{{o.rs}}">{{o.raw}}</td><td class="r" style="font-weight: 600; {{o.as}}">{{o.alpha}}</td><td>5일</td><td>{{o.res}}</td><td style="white-space: normal; color: #6B7686">규칙 전용 베이스라인, LLM 반성 없음</td></tr></sc-for>
+</tbody></table></div>
+<p style="margin: 8px 10px; font-size: 12px; color: #6B7686">미정산 결정은 실현·알파 자리에 "정산 대기"가 표시됩니다.</p>
+</section>
+</sc-if>
+
+<sc-if value="{{tSnapshot}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-size: 13px; background: #EEF3F8; color: #1F5F8B; border-radius: 6px; padding: 8px 12px; font-weight: 600">이 표가 에이전트에게 주어진 유일한 숫자 출처입니다. <span style="font-weight: 400">as-of 2026-07-24</span></p>
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>항목</th><th class="r">값</th><th class="r">임계</th><th>판정</th><th>비고</th></tr></thead><tbody>
+<tr><td>종가</td><td class="r">1,758,619</td><td class="r">1,000</td><td style="color: #1E6A3A; font-weight: 600">✓ 통과</td><td></td></tr>
+<tr><td>상장일수</td><td class="r">1,712일</td><td class="r">180</td><td style="color: #1E6A3A; font-weight: 600">✓ 통과</td><td></td></tr>
+<tr><td>20일 평균 거래대금 순위</td><td class="r">1위</td><td class="r">15</td><td style="color: #1E6A3A; font-weight: 600">✓ 통과</td><td style="color: #4A5567">12조 9,437억원</td></tr>
+<tr><td>20일 변동성 (연율)</td><td class="r">1.165</td><td class="r">0.10–0.80</td><td style="color: #B32F27; font-weight: 700">✗ 탈락</td><td></td></tr>
+</tbody></table></div>
+<p style="margin: 0; font-size: 12px; color: #6B7686">OHLCV 표, 지표 11개, 최근 30 종가 미니 차트는 스냅샷 저장본이 생기면 이 자리에 들어갑니다. 지금 기록에는 선별 시점의 규칙 값만 있습니다.</p>
+</section>
+</sc-if>
+
+<sc-if value="{{tThesis}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px"><h2 style="margin: 0; font-size: 16px; font-weight: 700">논지 점검</h2><span class="ex">예시</span><span style="font-size: 12px; color: #6B7686">2차 범위 · as-of 2026-07-24</span></div>
+<p style="margin: 0 0 6px; font-size: 13px; color: #4A5567">투자 메모의 논지 깨짐 조건을 최신 데이터로 다시 확인합니다. 매도 판단 에이전트의 입력이기도 합니다.</p>
+<sc-for list="{{checks}}" as="c" hint-placeholder-count="3"><div style="display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 12px; padding: 10px 0; border-bottom: 1px solid #EEF0F4; align-items: baseline"><span style="font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: #E7F3EB; color: #1E6A3A; justify-self: start">미충족 · 유지</span><span>{{c.c}}</span><span style="color: #4A5567; font-size: 13px">{{c.v}}</span></div></sc-for>
+<p style="margin: 10px 0 0; font-weight: 700">논지 유지 <span style="font-weight: 400; color: #4A5567">· 3개 조건 중 0개 충족</span></p>
+</section>
+</sc-if>
+
+<sc-if value="{{tHolding}}" hint-placeholder-val="{{ false }}">
+<section style="display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-size: 12px; color: #6B7686"><span class="ex">예시</span> 07-25 09:00:02 자동 매수 체결분입니다.</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px">
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">수량</div><div style="font-size: 24px; font-weight: 700">22주</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">평단 / 현재가</div><div style="font-size: 20px; font-weight: 700">1,758,000 / 1,758,000</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">미실현</div><div style="font-size: 24px; font-weight: 700">0.0%</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">손절선 · 트레일링 고점</div><div style="font-size: 20px; font-weight: 700">1,630,000 · 1,758,000</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">보유일 · 만료</div><div style="font-size: 20px; font-weight: 700">0일 · 10-23</div></div>
+</div>
+</section>
+</sc-if>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1640}}'>
+const DATES = ['06-05', '06-12', '06-19', '06-26', '07-03', '07-10', '07-17', '07-24'];
+const VOL = [0.871, 0.999, 0.961, 1.125, 1.256, 1.135, 1.298, 1.165];
+const OUT = [[19.7, 5.5, '06-15'], [27.6, 20.9, '06-22'], [-10.0, -2.1, '06-29'], [-10.8, -6.8, '07-06'], [-21.3, -5.8, '07-13'], [-0.5, 0.4, '07-21'], [2.9, -0.7, '07-27'], [-13.7, -6.3, '08-03']];
+const sg = v => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1) + '%';
+const tone = v => v > 0 ? 'color:#C6352C' : v < 0 ? 'color:#1D5BB6' : '';
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'decisions' }; }
+  renderVals() {
+    const tab = this.state.tab;
+    const tabs = [['decisions', '결정 이력'], ['screening', '선별 이력'], ['outcomes', '결과·교훈'], ['snapshot', '검증 스냅샷'], ['thesis', '논지 점검'], ['holding', '보유']].map(([k, label]) => ({
+      label, on: tab === k ? 'true' : 'false', pick: () => this.setState({ tab: k }), style: tab === k ? 'color:#141B26;border-bottom-color:#1F5F8B' : '' }));
+    const band = DATES.map(d => ({ d: d.replace('-', '/'), short: 'H', style: 'background:#8A94A6;color:#FFFFFF' }))
+      .concat([{ d: '07/24', short: 'OW', style: 'background:#FBE8E6;color:#B32F27;border:1px dashed #C6352C' }]);
+    const evidence = [
+      ['시장', '종가 1,758,000 · RSI 58 · 50SMA 위 · 20일 변동성 1.16', '2026-07-24'],
+      ['재무', '12개월 선행 PER 7.8배, 컨센서스 영업이익 3개월 +11%', '2026-07-23'],
+      ['뉴스', 'HBM4 샘플 출하 보도 3건', '2026-07-22'],
+      ['메모리', '06-26 결정 → 5일 알파 −6.8%: 고변동 구간 진입 주의', '2026-07-06']
+    ].map(([src, s, d]) => ({ src, s, d, st: d === '2026-07-24' ? 'color:#6B7686' : 'color:#9A6B00;font-weight:600' }));
+    const screening = DATES.slice().reverse().map((d, i) => ({ d: '2026-' + d, v: VOL[DATES.length - 1 - i].toFixed(3) }));
+    const outcomes = DATES.map((d, i) => ({ d: '2026-' + d, raw: sg(OUT[i][0]), alpha: sg(OUT[i][1]), rs: tone(OUT[i][0]), as: tone(OUT[i][1]), res: '2026-' + OUT[i][2] })).reverse();
+    const checks = [['범용 DRAM 계약가 2개월 연속 하락', '6월 +3.0%, 7월 +1.2%'], ['HBM 점유율 40% 아래로 하락', '추정 점유율 52% (2분기)'], ['종가 1,630,000원 아래로 이탈', '종가 1,758,000 · 여유 7.3%']].map(([c, v]) => ({ c, v }));
+    return { tabs, band, evidence, screening, outcomes, checks,
+      tDecisions: tab === 'decisions', tScreening: tab === 'screening', tOutcomes: tab === 'outcomes', tSnapshot: tab === 'snapshot', tThesis: tab === 'thesis', tHolding: tab === 'holding' };
+  }
+}
+</script>
+</body>
+</html>

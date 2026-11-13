@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>성과·백테스트</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Pretendard";src:url(/_blob/6c64cc769316fb936a503ff9895798ec) format("woff2");font-weight:45 920;font-style:normal;font-display:swap}
+body{margin:0;background:#F5F6F8;color:#141B26;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.5;font-feature-settings:"tnum"}
+a{color:#1F5F8B}a:hover{color:#174A6C}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:6px;color:#4A5567;text-decoration:none;font-weight:500}
+.nav:hover{background:#EEF0F4;color:#141B26}
+.t{border-collapse:collapse;width:100%;font-size:13px}
+.t th{text-align:left;font-size:12px;font-weight:600;color:#6B7686;padding:8px 10px;border-bottom:1px solid #DDE1E8;white-space:nowrap;background:#FFFFFF}
+.t td{padding:9px 10px;border-bottom:1px solid #EEF0F4;white-space:nowrap;vertical-align:middle}
+.t .r{text-align:right}
+.pill{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.7;border:1px solid transparent}
+.ex{display:inline-block;font-size:11px;font-weight:700;color:#8A5A00;border:1px solid #C99A2E;border-radius:4px;padding:0 6px;line-height:1.6}
+.tag{display:inline-block;font-size:11px;font-weight:600;color:#4A5567;background:#EEF0F4;border:1px solid #DDE1E8;border-radius:4px;padding:0 6px;line-height:1.6}
+.tk{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;color:#141B26;text-decoration:none}.tk:hover .tk-n{color:#1F5F8B}.tk-n{font-weight:600}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; align-items: stretch; min-height: 100vh">
+<nav aria-label="화면" style="flex: 1 1 216px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #DDE1E8; padding: 20px 14px; display: flex; flex-direction: column; gap: 2px">
+<div style="padding: 0 10px 18px"><div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">에이전트 운용 데스크</div><div style="font-size: 12px; color: #6B7686">시안 v0.4 · KRX · 자동 모드</div></div>
+<a class="nav" href="Main.dc.html">오늘 요약</a>
+<a class="nav" href="Screens.dc.html">종목 선별<span style="font-size: 12px; color: #6B7686">8</span></a>
+<a class="nav" href="Decisions.dc.html">결정·실행<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">예외 1</span></a>
+<a class="nav" href="Ticker.dc.html">종목 상세</a>
+<a class="nav" href="Positions.dc.html">포지션·리스크<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">1</span></a>
+<a class="nav" href="Performance.dc.html" style="background: #E6EEF5; color: #1F5F8B; font-weight: 600">성과·백테스트<span style="font-size: 12px">160</span></a>
+<a class="nav" href="Config.dc.html">설정·감사 로그</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 18px 32px 56px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; font-size: 13px; color: #4A5567; padding-bottom: 12px; border-bottom: 1px solid #DDE1E8">
+<span>기준일 <b style="color: #141B26">2026-07-24</b></span>
+<span>마지막 선별 <b style="color: #141B26">2026-11-13 02:03 UTC</b></span>
+<span>마지막 결정 <b style="color: #141B26">2026-07-24</b></span>
+<a href="Positions.dc.html" style="background: #C6352C; color: #FFFFFF; padding: 3px 10px; border-radius: 999px; font-weight: 600; text-decoration: none">Protections 1건 발동</a><span class="ex">예시</span>
+<span style="margin-left: auto; display: inline-flex; gap: 8px; align-items: center"><span style="background: #E7F3EB; color: #1E6A3A; padding: 3px 10px; border-radius: 999px; font-weight: 600">● 자동 매매 실행 중</span><a href="KillSwitch.dc.html" style="border: 1px solid #C6352C; color: #B32F27; background: #FFFFFF; padding: 3px 12px; border-radius: 6px; font-weight: 700; text-decoration: none">긴급 정지</a></span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em">성과·백테스트</h1>
+<p style="margin: 0; color: #4A5567; max-width: 72ch">실행 <b style="color: #141B26">baseline_krx_v2</b>: 20종목 × 8결정일 = 160셀. 규칙 전용 베이스라인이라 LLM 에이전트가 더하는 알파를 재는 기준선입니다.</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px">
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">정산 완료</div><div style="font-size: 28px; font-weight: 700">160</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">정산 대기</div><div style="font-size: 28px; font-weight: 700">0</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">미채점 (REVIEW)</div><div style="font-size: 28px; font-weight: 700">0</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">정산 실패</div><div style="font-size: 28px; font-weight: 700">0</div><div style="font-size: 12px; color: #6B7686">prices unavailable · reflection failed</div></div>
+<div style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 14px 16px"><div style="font-size: 12px; color: #6B7686; font-weight: 600">보유기간</div><div style="font-size: 28px; font-weight: 700">5거래일</div></div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 14px">
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px; min-width: 0">
+<h2 style="margin: 0 0 8px; font-size: 16px; font-weight: 700">등급별 성과</h2>
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>등급</th><th class="r">n</th><th class="r">방향 적중률</th><th class="r">평균 알파</th><th style="width: 36%">−5% · 0 · +5%</th></tr></thead><tbody>
+<sc-for list="{{ratings}}" as="r" hint-placeholder-count="5">
+<tr><td><span class="pill" style="{{r.pill}}">{{r.rating}}</span></td><td class="r">{{r.n}}</td><td class="r">{{r.hit}}</td><td class="r" style="font-weight: 600; {{r.color}}">{{r.alpha}}</td><td><div style="position: relative; height: 10px; background: #EEF0F4; border-radius: 3px"><div style="position: absolute; top: 0; bottom: 0; {{r.bar}}"></div><div style="position: absolute; top: -3px; bottom: -3px; left: 50%; width: 1px; background: #8A94A6"></div></div></td></tr>
+</sc-for>
+</tbody></table></div>
+<p style="margin: 10px 0 0; font-size: 12px; color: #6B7686">Hold는 방향을 주장하지 않으므로 적중률이 없습니다. 숏 콜(Sell/Underweight)은 알파가 음수일 때 적중.</p>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px; min-width: 0">
+<h2 style="margin: 0 0 8px; font-size: 16px; font-weight: 700">결정일별 평균 알파</h2>
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>결정일</th><th class="r">정산 n</th><th class="r">Buy/OW</th><th class="r">Sell/UW</th><th style="width: 36%">±20% 스케일</th></tr></thead><tbody>
+<sc-for list="{{byDate}}" as="d" hint-placeholder-count="8">
+<tr><td>{{d.d}}</td><td class="r">20</td><td class="r" style="font-weight: 600; {{d.lc}}">{{d.l}}</td><td class="r" style="font-weight: 600; {{d.sc}}">{{d.s}}</td><td><div style="position: relative; height: 14px; background: #EEF0F4; border-radius: 3px"><div style="position: absolute; top: 1px; height: 5px; {{d.lb}}"></div><div style="position: absolute; bottom: 1px; height: 5px; {{d.sb}}"></div><div style="position: absolute; top: -3px; bottom: -3px; left: 50%; width: 1px; background: #8A94A6"></div></div></td></tr>
+</sc-for>
+</tbody></table></div>
+<p style="margin: 10px 0 0; font-size: 12px; color: #6B7686">위 막대 빨강 = 롱 콜, 아래 막대 파랑 = 숏 콜.</p>
+</section>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 14px">
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px; min-width: 0">
+<h2 style="margin: 0 0 8px; font-size: 16px; font-weight: 700">백테스트 실행</h2>
+<div style="overflow-x: auto"><table class="t"><thead><tr><th>run_id</th><th class="r">티커</th><th>날짜 격자</th><th class="r">셀</th><th class="r">실패</th><th>결정자</th></tr></thead><tbody>
+<tr><td style="font-weight: 600">baseline_krx_v2</td><td class="r">20</td><td>2026-06-05 → 07-24 · 주 1회 8일</td><td class="r">160</td><td class="r">0</td><td>rule_momentum_baseline</td></tr>
+</tbody></table></div>
+<div style="margin-top: 12px; padding: 12px 14px; border: 1px dashed #DDE1E8; border-radius: 8px; color: #4A5567; font-size: 13px">규칙 vs 에이전트 비교 (2차): 같은 격자에서 LLM 에이전트 run이 생기면 등급별 알파 차이를 나란히 보여줍니다.</div>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px; min-width: 0">
+<h2 style="margin: 0 0 8px; font-size: 16px; font-weight: 700">반성 피드</h2>
+<sc-for list="{{feed}}" as="f" hint-placeholder-count="6">
+<div style="display: grid; grid-template-columns: 210px auto 64px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid #EEF0F4; font-size: 13px">
+<span style="display: flex; gap: 8px; align-items: flex-start"><a class="tk" href="Ticker.dc.html"><span class="tk-n">{{f.n}}</span><span class="tag">{{f.t}}</span></a><span style="color: #6B7686">{{f.d}}</span></span><span class="pill" style="{{f.pill}}">{{f.r}}</span><span style="font-weight: 700; text-align: right; {{f.ac}}">{{f.a}}</span><span style="color: #4A5567">{{f.text}}</span>
+</div>
+</sc-for>
+<p style="margin: 10px 0 0; font-size: 12px; color: #6B7686">베이스라인에는 LLM 반성이 없어 수치만 기록됩니다. 에이전트 연결 후에는 2~4문장 교훈이 들어오고 다음 판단 프롬프트에 주입됩니다.</p>
+</section>
+</div>
+<p style="margin: 0; font-size: 13px; color: #4A5567; background: #FFF8EA; border: 1px solid #EBD5A6; border-radius: 8px; padding: 10px 14px">알파는 결정일 다음 첫 종가 진입 기준 5거래일, 벤치마크는 종목 접미사별 지수(.KS → KOSPI). 이 run은 규칙만 돌려 재현 가능하지만, 모델 샘플링과 뉴스·소셜 피드가 들어가는 에이전트 run은 재현값이 아닙니다.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+const PILL = {
+  Buy: 'background:#C6352C;color:#FFFFFF', Overweight: 'background:#FBE8E6;color:#B32F27', Hold: 'background:#EEF0F4;color:#4A5567',
+  Underweight: 'background:#E5EDF9;color:#1D5BB6', Sell: 'background:#1D5BB6;color:#FFFFFF'
+};
+const tone = v => v > 0 ? 'color:#C6352C' : v < 0 ? 'color:#1D5BB6' : '';
+const sg = (v, d) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d) + '%';
+const bar = (v, scale, c) => (v >= 0 ? 'left:50%;' : 'right:50%;') + 'width:' + Math.min(50, Math.abs(v) / scale * 50) + '%;background:' + c + ';border-radius:2px';
+class Component extends DCLogic {
+  renderVals() {
+    const ratings = [['Buy', 12, 0.333, 0.875], ['Overweight', 12, 0.417, -0.150], ['Hold', 112, null, -0.158], ['Underweight', 12, 0.667, -0.758], ['Sell', 12, 0.583, 2.100]]
+      .map(([rating, n, hit, a]) => ({ rating, n, pill: PILL[rating], hit: hit == null ? '방향 없음' : Math.round(hit * 100) + '%', alpha: sg(a, 2), color: tone(a), bar: bar(a, 5, a >= 0 ? '#C6352C' : '#1D5BB6') }));
+    const byDate = [['07-24', 2.5, 5.33], ['07-17', -2.33, 1.35], ['07-10', -3.58, -1.5], ['07-03', 7.0, 19.7], ['06-26', 10.45, -6.75], ['06-19', 4.4, 7.55], ['06-12', -5.25, -16.05], ['06-05', -2.73, -3.38]]
+      .map(([d, l, s]) => ({ d: '2026-' + d, l: sg(l, 2), s: sg(s, 2), lc: tone(l), sc: tone(s), lb: bar(l, 20, '#C6352C'), sb: bar(s, 20, '#1D5BB6') }));
+    const NAME = {'000270.KS':'Kia','005380.KS':'Hyundai Motor','068270.KS':'Celltrion','055550.KS':'Shinhan Financial','032830.KS':'Samsung Life','035420.KS':'NAVER','000660.KS':'SK hynix','005930.KS':'Samsung Electronics','105560.KS':'KB Financial','012330.KS':'Hyundai Mobis','035720.KS':'Kakao','051910.KS':'LG Chem','006400.KS':'Samsung SDI','207940.KS':'Samsung Biologics','373220.KS':'LG Energy Solution','066570.KS':'LG Electronics','028260.KS':'Samsung C&T','034730.KS':'SK Inc.','015760.KS':'KEPCO','003670.KS':'Posco Future M'};
+    const feed = [['000270.KS', 'Underweight', -0.6, 6.8], ['005380.KS', 'Overweight', -2.5, 4.9], ['068270.KS', 'Sell', 2.0, 9.3], ['055550.KS', 'Overweight', -1.5, 5.9], ['032830.KS', 'Buy', -7.7, -0.3], ['035420.KS', 'Sell', -7.8, -0.4]]
+      .map(([t, r, raw, a]) => ({ t, n: NAME[t], d: '07-24', r, pill: PILL[r], a: sg(a, 1), ac: tone(a), text: '규칙 전용, LLM 없음. 5일 KOSPI 대비 알파 ' + sg(a, 1) + ', 실현 ' + sg(raw, 1) + '.' }));
+    return { ratings, byDate, feed };
+  }
+}
+</script>
+</body>
+</html>

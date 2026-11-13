@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>결정·실행</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Pretendard";src:url(/_blob/6c64cc769316fb936a503ff9895798ec) format("woff2");font-weight:45 920;font-style:normal;font-display:swap}
+body{margin:0;background:#F5F6F8;color:#141B26;font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.5;font-feature-settings:"tnum"}
+a{color:#1F5F8B}a:hover{color:#174A6C}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:6px;color:#4A5567;text-decoration:none;font-weight:500}
+.nav:hover{background:#EEF0F4;color:#141B26}
+.pill{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.7;border:1px solid transparent}
+.chip{display:inline-block;padding:1px 8px;border-radius:4px;font-size:12px;font-weight:600;line-height:1.7}
+.tab{font:inherit;font-size:14px;font-weight:600;background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;cursor:pointer;color:#4A5567}
+.btn{font:inherit;font-size:13px;font-weight:600;padding:8px 14px;min-height:36px;border-radius:6px;border:1px solid #DDE1E8;background:#FFFFFF;color:#141B26;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+.ex{display:inline-block;font-size:11px;font-weight:700;color:#8A5A00;border:1px solid #C99A2E;border-radius:4px;padding:0 6px;line-height:1.6}
+.tag{display:inline-block;font-size:11px;font-weight:600;color:#4A5567;background:#EEF0F4;border:1px solid #DDE1E8;border-radius:4px;padding:0 6px;line-height:1.6}
+.tk{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;color:#141B26;text-decoration:none}.tk:hover .tk-n{color:#1F5F8B}.tk-n{font-weight:600}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; align-items: stretch; min-height: 100vh">
+<nav aria-label="화면" style="flex: 1 1 216px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #DDE1E8; padding: 20px 14px; display: flex; flex-direction: column; gap: 2px">
+<div style="padding: 0 10px 18px"><div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">에이전트 운용 데스크</div><div style="font-size: 12px; color: #6B7686">시안 v0.4 · KRX · 자동 모드</div></div>
+<a class="nav" href="Main.dc.html">오늘 요약</a>
+<a class="nav" href="Screens.dc.html">종목 선별<span style="font-size: 12px; color: #6B7686">8</span></a>
+<a class="nav" href="Decisions.dc.html" style="background: #E6EEF5; color: #1F5F8B; font-weight: 600">결정·실행<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">예외 1</span></a>
+<a class="nav" href="Ticker.dc.html">종목 상세</a>
+<a class="nav" href="Positions.dc.html">포지션·리스크<span style="font-size: 11px; font-weight: 700; color: #FFFFFF; background: #C6352C; border-radius: 999px; padding: 0 7px">1</span></a>
+<a class="nav" href="Performance.dc.html">성과·백테스트<span style="font-size: 12px; color: #6B7686">160</span></a>
+<a class="nav" href="Config.dc.html">설정·감사 로그</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 18px 32px 56px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; font-size: 13px; color: #4A5567; padding-bottom: 12px; border-bottom: 1px solid #DDE1E8">
+<span>기준일 <b style="color: #141B26">2026-07-24</b></span>
+<span>마지막 선별 <b style="color: #141B26">2026-11-13 02:03 UTC</b></span>
+<span>마지막 결정 <b style="color: #141B26">2026-07-24</b></span>
+<a href="Positions.dc.html" style="background: #C6352C; color: #FFFFFF; padding: 3px 10px; border-radius: 999px; font-weight: 600; text-decoration: none">Protections 1건 발동</a><span class="ex">예시</span>
+<span style="margin-left: auto; display: inline-flex; gap: 8px; align-items: center"><span style="background: #E7F3EB; color: #1E6A3A; padding: 3px 10px; border-radius: 999px; font-weight: 600">● 자동 매매 실행 중</span><a href="KillSwitch.dc.html" style="border: 1px solid #C6352C; color: #B32F27; background: #FFFFFF; padding: 3px 12px; border-radius: 6px; font-weight: 700; text-decoration: none">긴급 정지</a></span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em">결정·실행</h1>
+<p style="margin: 0; color: #4A5567; max-width: 72ch">에이전트가 무엇을 결정했고, 룰이 무엇을 바꾸거나 막았고, 실제로 무엇이 체결됐는지. 자동 모드라 승인 단계는 없고, 사람이 봐야 할 것은 예외 큐에만 올라옵니다.</p>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<div role="group" aria-label="데이터 출처" style="display: flex">
+<sc-for list="{{srcs}}" as="s" hint-placeholder-count="2"><button type="button" class="btn" onClick="{{s.pick}}" aria-pressed="{{s.on}}" style="{{s.style}}">{{s.label}}</button></sc-for>
+</div>
+<span style="font-size: 13px; color: #4A5567">결정일 <b style="color: #141B26">2026-07-24</b> · {{modeLabel}}</span>
+</div>
+<div role="tablist" style="display: flex; gap: 2px; border-bottom: 1px solid #DDE1E8; flex-wrap: wrap">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3"><button type="button" role="tab" class="tab" onClick="{{t.pick}}" aria-selected="{{t.on}}" style="{{t.style}}">{{t.label}} <span style="{{t.cntStyle}}">{{t.count}}</span></button></sc-for>
+</div>
+<sc-if value="{{showDecisions}}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; align-items: start">
+<sc-for list="{{cards}}" as="d" hint-placeholder-count="4">
+<article style="background: #FFFFFF; border: 1px solid #DDE1E8; border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+<header style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center">
+<div style="display: flex; gap: 8px; align-items: flex-start"><a class="tk" href="Ticker.dc.html"><span class="tk-n">{{d.name}}</span><span class="tag">{{d.ticker}}</span></a> <sc-if value="{{d.ex}}" hint-placeholder-val="{{ true }}"><span class="ex">예시</span></sc-if></div>
+<div style="display: flex; gap: 6px; align-items: center"><span class="pill" style="{{d.pill}}">{{d.ratingText}}</span><span class="pill" style="background: #F2F3F6; color: #4A5567">{{d.action}}</span><span style="font-size: 12px; color: #6B7686">확신도 <b style="color: #141B26">{{d.conf}}</b></span></div>
+</header>
+<sc-if value="{{d.hasReasons}}" hint-placeholder-val="{{ false }}"><div style="display: flex; flex-wrap: wrap; gap: 6px"><sc-for list="{{d.reasons}}" as="r" hint-placeholder-count="1"><span class="chip" style="{{r.style}}">{{r.text}}</span></sc-for></div></sc-if>
+<sc-if value="{{d.isReview}}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; font-size: 13px; color: #4A5567">등급을 읽을 수 없어 거래 대상에서 빠졌습니다. 에이전트 원문 전체:</p>
+<div style="font-size: 13px; white-space: pre-wrap; background: #F5F6F8; border: 1px dashed #8A94A6; border-radius: 6px; padding: 10px 12px; color: #4A5567">{{d.raw}}</div>
+</sc-if>
+<p style="margin: 0; font-size: 14px; line-height: 1.6; max-width: 68ch">{{d.thesis}}</p>
+<sc-if value="{{d.hasPrices}}" hint-placeholder-val="{{ false }}">
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<div style="background: #F5F6F8; border-radius: 6px; padding: 7px 10px"><div style="font-size: 11px; color: #6B7686">진입가</div><b>{{d.entry}}</b></div>
+<div style="background: #F5F6F8; border-radius: 6px; padding: 7px 10px"><div style="font-size: 11px; color: #6B7686">손절가</div><b>{{d.stop}}</b></div>
+<div style="background: #F5F6F8; border-radius: 6px; padding: 7px 10px"><div style="font-size: 11px; color: #6B7686">비중</div><b>{{d.sizing}}</b></div>
+</div>
+</sc-if>
+<sc-if value="{{d.showCompare}}" hint-placeholder-val="{{ false }}">
+<div style="display: grid; grid-template-columns: 90px minmax(0, 1fr) minmax(0, 1fr); border: 1px solid #DDE1E8; border-radius: 6px; overflow: hidden; font-size: 13px">
+<div style="padding: 7px 10px; background: #F5F6F8; font-size: 12px; color: #6B7686"></div><div style="padding: 7px 10px; background: #F5F6F8; font-size: 12px; color: #6B7686; font-weight: 600">원안 (에이전트)</div><div style="padding: 7px 10px; background: #F5F6F8; font-size: 12px; color: #6B7686; font-weight: 600">최종 (룰 적용 후)</div>
+<sc-for list="{{d.cmp}}" as="c" hint-placeholder-count="4">
+<div style="padding: 7px 10px; border-top: 1px solid #EEF0F4; color: #6B7686">{{c.label}}</div><div style="padding: 7px 10px; border-top: 1px solid #EEF0F4; {{c.style}}">{{c.a}}</div><div style="padding: 7px 10px; border-top: 1px solid #EEF0F4; {{c.style}}">{{c.b}}</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px"><sc-for list="{{d.overrides}}" as="o" hint-placeholder-count="2"><span class="chip" style="background: #FFF4DE; color: #7A5200; font-weight: 500; border: 1px solid #E9C77A">{{o}}</span></sc-for></div>
+</sc-if>
+<sc-if value="{{d.hasExec}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; border-radius: 6px; padding: 9px 12px; font-size: 13px; {{d.execBox}}">
+<span class="pill" style="{{d.execPill}}">{{d.execStatus}}</span>
+<span>{{d.execText}}</span>
+<span style="margin-left: auto; font-size: 12px; color: #6B7686">{{d.execAt}}</span>
+</div>
+</sc-if>
+<div style="display: flex; flex-direction: column; gap: 5px; border-top: 1px solid #EEF0F4; padding-top: 8px">
+<div style="font-size: 12px; color: #6B7686; font-weight: 600">증거 {{d.evCount}}건</div>
+<sc-for list="{{d.evidence}}" as="e" hint-placeholder-count="2">
+<div style="display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; font-size: 13px"><span class="chip" style="background: #EEF3F8; color: #1F5F8B; text-align: center">{{e.src}}</span><span>{{e.summary}}</span><span style="font-size: 12px; {{e.asofStyle}}">{{e.asof}}</span></div>
+</sc-for>
+</div>
+<footer style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<span style="font-size: 12px; color: #4A5567">{{d.result}}</span>
+<span style="margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap">
+<sc-if value="{{d.isReview}}" hint-placeholder-val="{{ false }}"><button type="button" class="btn">재실행</button><button type="button" class="btn">수동 등급 지정</button><button type="button" class="btn" style="color: #4A5567">무시</button></sc-if>
+<a class="btn" href="Ticker.dc.html">종목 상세</a>
+</span>
+</footer>
+</article>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{empty}}" hint-placeholder-val="{{ false }}"><div style="padding: 36px; text-align: center; color: #6B7686; border: 1px dashed #DDE1E8; border-radius: 10px">이 탭에 해당하는 결정이 없습니다. 베이스라인은 등급을 항상 읽을 수 있고, 하드룰 레이어가 아직 연결되지 않았습니다.</div></sc-if>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1480}}'>
+const PILL = {
+  Buy: 'background:#C6352C;color:#FFFFFF', Overweight: 'background:#FBE8E6;color:#B32F27', Hold: 'background:#EEF0F4;color:#4A5567',
+  Underweight: 'background:#E5EDF9;color:#1D5BB6', Sell: 'background:#1D5BB6;color:#FFFFFF', REVIEW: 'background:#FFFFFF;color:#4A5567;border:1px dashed #6B7686'
+};
+const SELL = 'background:#E5EDF9;color:#1D5BB6', HARD = 'background:#FBE8E6;color:#B32F27';
+const EX = [
+  { ticker: '000660.KS', name: 'SK hynix', rating: 'Overweight', action: 'Buy', conf: 0.65,
+    thesis: 'HBM 공급 부족이 2027년까지 이어지고 범용 DRAM 가격 반등이 겹쳐 이익 추정치가 올라갈 여지가 크다. 다만 반도체 섹터 노출이 한도에 가까워 비중을 줄였다.',
+    entry: '1,758,000', stop: '1,630,000', sizing: '4% (원안 6%)', exec: ['체결', '매수 22주 · 1,758,000 · 38,676,000원', '07-25 09:00:02'],
+    cmp: [['방향', 'Buy', 'Buy'], ['비중', '6%', '4%'], ['수량', '34주', '22주'], ['예상 금액', '59,772,000원', '38,676,000원']],
+    overrides: ['sector_cap: 반도체 22.2% → 20.0%', 'max_position_pct: 6% → 4%'],
+    evidence: [['시장', '종가 1,758,000 · RSI 58 · 50SMA 위 · 20일 변동성 1.16', '2026-07-24'], ['재무', '12개월 선행 PER 7.8배, 컨센서스 영업이익 3개월 +11%', '2026-07-23'], ['뉴스', 'HBM4 샘플 출하 보도 3건', '2026-07-22'], ['메모리', '06-26 결정 → 5일 알파 −6.8%: 고변동 구간 진입 주의', '2026-07-06']] },
+  { ticker: '051910.KS', name: 'LG Chem', rating: 'Sell', action: 'Sell', conf: 0.70, reasons: [['매도 사유 · 논지 깨짐', SELL]],
+    thesis: '양극재 증설 효과로 2분기 흑자 전환을 기대했으나 고객사 감산으로 전제가 사라졌다. 다음 거래일 시가에 보유 전량 매도.',
+    entry: '–', stop: '–', sizing: '보유 전량 85주', exec: ['체결', '매도 85주 · 259,000 · 22,015,000원 · 실현 −1,700,000', '07-25 09:00:02'],
+    evidence: [['뉴스', '주요 고객사 3분기 배터리 감산 발표', '2026-07-23'], ['포트폴리오', '보유 85주 · 평단 279,000 · 미실현 −7.2%', '2026-07-24']] },
+  { ticker: '005380.KS', name: 'Hyundai Motor', rating: 'Hold', action: 'Hold', conf: 0.50, reasons: [['하드룰 · Protections', HARD]],
+    thesis: '07-22 손절 직후라 쿨다운 중. 에이전트 원안은 재매수였으나 잠금이 풀리는 07-25 09:00까지 보류.',
+    exec: ['차단', '매수 75주 주문을 내지 않음 · protection:CooldownPeriod', '07-25 09:00:01'],
+    cmp: [['방향', 'Buy', 'Hold'], ['비중', '3%', '–'], ['수량', '75주', '0주'], ['예상 금액', '29,850,000원', '0원']],
+    overrides: ['protection:CooldownPeriod (07-25 09:00 해제)'],
+    evidence: [['포트폴리오', '07-22 손절 청산 −5.0%, 쿨다운 2거래일', '2026-07-22']] },
+  { ticker: '035720.KS', name: 'Kakao', rating: 'REVIEW', action: '–', conf: null, review: true,
+    raw: 'Recommendation: 단기 반등 가능성은 있으나 규제 리스크를 고려하면 관망과 비중 축소 사이에서 판단이 어렵다. 포지션 유지 또는 일부 축소를 권고...\n\n(등급 라벨 없음 · 구조화 출력 파싱 실패: rating 필드 누락)',
+    thesis: '', exec: ['예외', '주문하지 않음 · 사람이 확인할 때까지 대기', '07-24 18:12'],
+    evidence: [['심리', '커뮤니티 언급량 3배, 부정 비율 61%', '2026-07-24']] }
+];
+const REAL = [
+  ['032830.KS', 'Samsung Life', 'Buy', 0.8, '모멘텀 1/9위 · 12-1m +265.4%, 6-1m +192.7%', '실현 −7.7% · 알파 −0.3%'],
+  ['066570.KS', 'LG Electronics', 'Buy', 0.8, '모멘텀 2/9위 · 12-1m +178.0%, 6-1m +115.3%', '실현 −7.8% · 알파 −0.5%'],
+  ['005380.KS', 'Hyundai Motor', 'Overweight', 0.5, '모멘텀 3/9위 · 12-1m +160.7%, 6-1m +74.8%', '실현 −2.5% · 알파 +4.9%'],
+  ['055550.KS', 'Shinhan Financial', 'Overweight', 0.5, '모멘텀 4/9위 · 12-1m +65.3%, 6-1m +26.0%', '실현 −1.5% · 알파 +5.9%'],
+  ['105560.KS', 'KB Financial', 'Underweight', 0.5, '모멘텀 6/9위 · 12-1m +46.2%, 6-1m +23.6%', '실현 −1.8% · 알파 +5.6%'],
+  ['000270.KS', 'Kia', 'Underweight', 0.5, '모멘텀 7/9위 · 12-1m +49.6%, 6-1m +16.9%', '실현 −0.6% · 알파 +6.8%'],
+  ['068270.KS', 'Celltrion', 'Sell', 0.8, '모멘텀 8/9위 · 12-1m +12.3%, 6-1m −3.0%', '실현 +2.0% · 알파 +9.3%'],
+  ['035420.KS', 'NAVER', 'Sell', 0.8, '모멘텀 9/9위 · 12-1m +0.2%, 6-1m −16.2%', '실현 −7.8% · 알파 −0.4%']
+];
+const EXEC = {
+  체결: ['background:#E7F3EB;color:#1E6A3A', 'background:#F3F9F5;border:1px solid #CFE6D7'],
+  차단: ['background:#FFF4DE;color:#7A5200;border:1px solid #E9C77A', 'background:#FFFBF2;border:1px solid #EFD9A8'],
+  예외: ['background:#FFFFFF;color:#B32F27;border:1px dashed #C6352C', 'background:#FDF3F2;border:1px solid #E8B4AE']
+};
+function exCard(x) {
+  const cmp = (x.cmp || []).map(([label, a, b]) => ({ label, a, b, style: a !== b ? 'background:#FFF4DE;font-weight:700' : '' }));
+  return { ticker: x.ticker, name: x.name, ex: true, rating: x.rating, ratingText: (x.review ? '⚠ ' : '') + x.rating, pill: PILL[x.rating], action: x.action,
+    conf: x.conf == null ? '–' : x.conf.toFixed(2), thesis: x.thesis, isReview: !!x.review, raw: x.raw || '',
+    reasons: (x.reasons || []).map(([text, style]) => ({ text, style })), hasReasons: !!(x.reasons && x.reasons.length),
+    hasPrices: !!x.entry, entry: x.entry, stop: x.stop, sizing: x.sizing,
+    hasOverride: !!(x.overrides && x.overrides.length), overrides: x.overrides || [], cmp,
+    hasExec: !!x.exec, execStatus: x.exec[0], execText: x.exec[1], execAt: x.exec[2], execPill: EXEC[x.exec[0]][0], execBox: EXEC[x.exec[0]][1],
+    evidence: x.evidence.map(([src, summary, asof]) => ({ src, summary, asof, asofStyle: asof === '2026-07-24' ? 'color:#6B7686' : 'color:#9A6B00;font-weight:600' })),
+    evCount: x.evidence.length, result: x.review ? '예외 큐 · 확인 필요' : '자동 실행' };
+}
+function realCard([ticker, name, rating, conf, ev, res]) {
+  return { ticker, name, ex: false, rating, ratingText: rating, pill: PILL[rating], action: rating === 'Buy' || rating === 'Overweight' ? 'Buy' : 'Sell',
+    conf: conf.toFixed(2), thesis: '규칙 전용 모멘텀 베이스라인. ' + ev, isReview: false, raw: '', reasons: [], hasReasons: false, hasPrices: false,
+    hasOverride: false, overrides: [], cmp: [], hasExec: false, execStatus: '', execText: '', execAt: '', execPill: '', execBox: '', evidence: [{ src: '시장', summary: ev, asof: '2026-07-24', asofStyle: 'color:#6B7686' }], evCount: 1,
+    result: '5일 정산 · ' + res };
+}
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { src: 'ex', tab: 'all' }; }
+  renderVals() {
+    const { src, tab } = this.state;
+    const all = src === 'ex' ? EX.map(exCard) : REAL.map(realCard);
+    const review = all.filter(c => c.isReview), over = all.filter(c => c.hasOverride);
+    let cards = tab === 'review' ? review : tab === 'override' ? over : all;
+    cards = cards.map(c => ({ ...c, showCompare: tab === 'override' || (tab === 'all' && c.hasOverride) }));
+    const tabs = [['all', '결정·실행', all.length], ['review', '예외 큐', review.length], ['override', '하드룰 개입', over.length]].map(([k, label, count]) => ({
+      label, count, on: tab === k ? 'true' : 'false', pick: () => this.setState({ tab: k }),
+      style: tab === k ? 'color:#141B26;border-bottom-color:#1F5F8B' : '',
+      cntStyle: k === 'review' && count ? 'background:#C6352C;color:#FFFFFF;border-radius:999px;padding:0 7px;font-size:12px' : 'color:#6B7686;font-size:12px' }));
+    const srcs = [['ex', 'LLM 에이전트 (예시)'], ['real', '규칙 베이스라인 (실측)']].map(([k, label], i) => ({ label, on: src === k ? 'true' : 'false',
+      pick: () => this.setState({ src: k, tab: 'all' }),
+      style: (src === k ? 'background:#1F5F8B;color:#FFFFFF;border-color:#1F5F8B;' : '') + (i === 0 ? 'border-radius:6px 0 0 6px' : 'border-radius:0 6px 6px 0;margin-left:-1px') }));
+    return { cards, tabs, srcs, showDecisions: cards.length > 0, empty: cards.length === 0,
+      modeLabel: src === 'ex' ? '자동 모드 · 주문 2026-07-25 09:00 시가' : '베이스라인 기록 (주문 없음)' };
+  }
+}
+</script>
+</body>
+</html>

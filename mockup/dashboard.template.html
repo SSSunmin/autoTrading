@@ -1,0 +1,689 @@
+<title>에이전트 운용 데스크</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: fixed left rail (7 screens), main column; data tables scroll inside their own box.
+   Korean market color convention: red = up/buy, blue = down/sell. Semantic colors are separate from the accent. */
+:root {
+  --bg: #f6f7f9;        /* paper, cool bias */
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --fg: #16202e;
+  --fg-2: #4b5667;
+  --fg-3: #7f8a9a;
+  --line: #d9dee6;
+  --accent: #1f5f8b;    /* desk blue-steel */
+  --accent-fg: #ffffff;
+  --up: #c8382f;        /* KRX red = 상승·매수 */
+  --down: #1e5bb8;      /* KRX blue = 하락·매도 */
+  --hold: #6b7482;
+  --warn: #b8860b;
+  --ok-bg: #e9f4ec; --ok: #2d7a46;
+  --bad-bg: #fbe9e7;
+  --review: #8a94a6;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141b; --surface: #171d26; --surface-2: #1f2733; --fg: #e8ecf1; --fg-2: #aeb7c4; --fg-3: #7c8794;
+  --line: #2b3441; --accent: #6fa8d6; --accent-fg: #0f141b; --up: #ef6b62; --down: #6d9ee8; --hold: #8b95a3;
+  --warn: #d4a72c; --ok-bg: #16301f; --ok: #6fcf8e; --bad-bg: #3a1f1c; --review: #8a94a6; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f141b; --surface: #171d26; --surface-2: #1f2733; --fg: #e8ecf1; --fg-2: #aeb7c4; --fg-3: #7c8794;
+  --line: #2b3441; --accent: #6fa8d6; --accent-fg: #0f141b; --up: #ef6b62; --down: #6d9ee8; --hold: #8b95a3;
+  --warn: #d4a72c; --ok-bg: #16301f; --ok: #6fcf8e; --bad-bg: #3a1f1c; --review: #8a94a6; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.5;
+  margin: 0; min-height: 100%; }
+a { color: var(--accent) }
+button { font: inherit; color: inherit }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.app { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+.rail { background: var(--surface); border-right: 1px solid var(--line); padding-block: 16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 12px; position: sticky; top: 0; height: 100vh; }
+.brand { font-weight: 700; font-size: 15px; letter-spacing: .01em; margin: 0 0 4px }
+.brand small { display: block; color: var(--fg-3); font-weight: 400; font-size: 12px }
+.nav { display: flex; flex-direction: column; gap: 2px; margin-top: 20px }
+.nav a { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px;
+  text-decoration: none; color: var(--fg-2); font-weight: 500 }
+.nav a.active { background: var(--surface-2); color: var(--fg) }
+.nav a .cnt { font-size: 11px; color: var(--fg-3) }
+.nav a.stub { color: var(--fg-3) }
+.main { padding-block: 16px 48px; padding-left: 24px; padding-right: max(24px, env(safe-area-inset-right, 0px)); min-width: 0 }
+.statusbar { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 12px; color: var(--fg-2);
+  border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 18px }
+.statusbar b { color: var(--fg); font-weight: 600 }
+.badge-lock { background: var(--ok-bg); color: var(--ok); padding: 2px 8px; border-radius: 999px; font-weight: 600; text-decoration: none }
+.badge-lock.on { background: var(--up); color: var(--accent-fg) }
+h1 { font-size: 20px; font-weight: 700; margin: 0 0 4px; text-wrap: balance }
+h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; color: var(--fg) }
+.sub { color: var(--fg-2); margin: 0 0 18px; max-width: 65ch }
+.grid { display: grid; gap: 14px }
+.kpis { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px }
+.tile .lab { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-3) }
+.tile .val { font-size: 24px; font-weight: 600; margin-top: 2px }
+.tile .val small { font-size: 12px; color: var(--fg-3); font-weight: 400; margin-left: 4px }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-width: 0 }
+.row2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)) }
+table { border-collapse: collapse; width: 100%; font-size: 13px }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-3); font-weight: 600; position: sticky; top: 0; background: var(--surface) }
+td.r, th.r { text-align: right }
+.scroll { overflow-x: auto; max-height: 70vh; overflow-y: auto }
+tr.click { cursor: pointer } tr.click:hover td { background: var(--surface-2) }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.6; border: 1px solid transparent }
+.pill.Buy, .pill.Overweight { background: color-mix(in srgb, var(--up) 14%, transparent); color: var(--up) }
+.pill.Sell, .pill.Underweight { background: color-mix(in srgb, var(--down) 14%, transparent); color: var(--down) }
+.pill.Hold { background: var(--surface-2); color: var(--hold) }
+.pill.REVIEW { background: transparent; color: var(--review); border: 1px dashed var(--review) }
+.pill.pending { background: var(--surface-2); color: var(--fg-3) }
+.pos { color: var(--up) } .neg { color: var(--down) }
+.cell { display: inline-block; min-width: 56px; padding: 1px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px }
+.cell.pass { background: var(--ok-bg); color: var(--ok) }
+.cell.fail { background: var(--bad-bg); color: var(--up) }
+.cell.none { color: var(--fg-3) }
+.asof { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono) }
+.funnel { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; margin: 6px 0 14px }
+.stage { flex: 1 1 110px; min-width: 110px; background: var(--surface-2); border-radius: 6px; padding: 8px 10px; cursor: pointer; border: 1px solid transparent; text-align: left }
+.stage.active { border-color: var(--accent) }
+.stage .n { font-size: 20px; font-weight: 600 } .stage .d { font-size: 11px; color: var(--fg-3); white-space: normal }
+.stage .drop { font-size: 11px; color: var(--up) }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px }
+.toolbar button, .toolbar select, .toolbar input { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font-size: 13px }
+.toolbar button.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent) }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--surface); display: grid; gap: 8px }
+.card .hd { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between }
+.card .tk { font-weight: 600 } .card .nm { color: var(--fg-2); margin-left: 6px; font-weight: 400 }
+.ev { display: grid; gap: 4px; font-size: 13px }
+.ev div { display: grid; grid-template-columns: 84px 1fr auto; gap: 8px; align-items: baseline }
+.src { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); font-weight: 600 }
+.memo { font-size: 13px; white-space: pre-wrap; color: var(--fg-2); max-width: 70ch }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 14px; flex-wrap: wrap }
+.tabs button { background: none; border: 0; padding: 8px 12px; border-bottom: 2px solid transparent; color: var(--fg-2); font-weight: 500 }
+.tabs button.on { color: var(--fg); border-bottom-color: var(--accent) }
+.timeline { display: flex; gap: 4px; flex-wrap: wrap }
+.timeline .tl { width: 28px; height: 28px; border-radius: 4px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff }
+.tl.Buy, .tl.Overweight { background: var(--up) } .tl.Sell, .tl.Underweight { background: var(--down) } .tl.Hold { background: var(--hold) } .tl.REVIEW { background: var(--review) }
+.note { background: var(--surface-2); border-left: 3px solid var(--warn); padding: 8px 12px; font-size: 13px; color: var(--fg-2); border-radius: 0 6px 6px 0; margin-top: 14px }
+.empty { color: var(--fg-3); padding: 24px; text-align: center; border: 1px dashed var(--line); border-radius: 8px }
+.bar { height: 8px; background: var(--surface-2); border-radius: 4px; position: relative; overflow: hidden }
+.bar i { position: absolute; top: 0; bottom: 0; }
+.legend { font-size: 12px; color: var(--fg-3); margin-top: 6px }
+.sr { position: absolute; left: -9999px }
+.ex { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--warn); border: 1px solid var(--warn); border-radius: 3px; padding: 0 5px; line-height: 1.6; vertical-align: middle }
+.reason { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 4px; background: color-mix(in srgb, var(--down) 10%, transparent); color: var(--down); font-weight: 600 }
+.reason.hard { background: var(--bad-bg); color: var(--up) }
+.lockrib { display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent-fg); background: var(--up); padding: 1px 8px; border-radius: 3px }
+.memo-sec { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 14px; font-size: 13px }
+.memo-sec dt { color: var(--fg-3); font-size: 12px; padding-top: 1px }
+.memo-sec dd { margin: 0; color: var(--fg); max-width: 68ch }
+.memo-sec ul { margin: 0; padding-left: 18px }
+.val3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
+.val3 div { background: var(--surface-2); border-radius: 6px; padding: 6px 10px }
+.val3 small { display: block; color: var(--fg-3); font-size: 11px }
+.cmp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font-size: 13px }
+.cmp > div { padding: 6px 10px; border-bottom: 1px solid var(--line) }
+.cmp > div:nth-child(odd) { border-right: 1px solid var(--line) }
+.cmp .h { font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: .05em; background: var(--surface-2) }
+.cmp .chg { background: color-mix(in srgb, var(--warn) 16%, transparent); font-weight: 600 }
+.btn { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent) }
+.btn:hover { border-color: var(--fg-3) }
+.raw { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--surface-2); border: 1px dashed var(--review); border-radius: 6px; padding: 10px; color: var(--fg-2) }
+.gauge { display: grid; grid-template-columns: 110px minmax(0, 1fr) 90px; gap: 10px; align-items: center; font-size: 13px; padding: 4px 0 }
+.gauge .bar { height: 10px }
+.gauge .lim { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--fg) }
+.prot { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px }
+.prot > div { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; display: grid; gap: 4px; font-size: 13px }
+.prot > div.on { border-color: var(--up); background: var(--bad-bg) }
+.st { font-size: 12px; font-weight: 700 } .st.ok { color: var(--ok) } .st.on { color: var(--up) }
+.stack { display: flex; height: 22px; border-radius: 4px; overflow: hidden; gap: 2px }
+.stack i { display: block; height: 100% }
+.chk { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px }
+.modal { position: fixed; inset: 0; background: color-mix(in srgb, var(--fg) 40%, transparent); display: grid; place-items: center; z-index: 20;
+  padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+.modal .box { background: var(--surface); border-radius: 10px; padding: 18px 20px; width: min(440px, 100%); display: grid; gap: 12px; border: 1px solid var(--line) }
+.modal dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 13px }
+.modal dt { color: var(--fg-3) } .modal dd { margin: 0 }
+.toast { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: 13px; z-index: 30 }
+.chart svg { width: 100%; height: auto; display: block }
+.chart text { fill: var(--fg-3); font-size: 10px; font-family: var(--font-mono) }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr }
+  .rail { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+  .nav { flex-direction: row; flex-wrap: wrap; margin-top: 10px } .nav a .cnt { display: none }
+  .main { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+}
+@media (prefers-reduced-motion: no-preference) { .stage, .nav a { transition: background .15s, border-color .15s } }
+</style>
+
+<div class="app">
+  <nav class="rail" aria-label="화면">
+    <p class="brand">에이전트 운용 데스크<small>시안 v0.2 · 규칙 전용 베이스라인 데이터</small></p>
+    <div class="nav" id="nav"></div>
+    <p class="legend" style="margin-top:18px">색 규칙: <span class="pos">빨강 = 상승·매수</span>, <span class="neg">파랑 = 하락·매도</span> (KRX 관례). REVIEW는 회색 점선.</p>
+    <p class="legend"><span class="ex">예시</span> 표시가 붙은 카드는 LLM 에이전트·실행 레이어가 연결된 뒤의 모습을 보여주는 가상 데이터입니다. 나머지는 baseline_krx_v2 실측 기록입니다.</p>
+  </nav>
+  <main class="main" id="main"></main>
+</div>
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="box" id="modalBox"></div></div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script>
+const DATA = /*__DATA__*/null;
+
+const SCREENS = [
+  ["home", "오늘 요약"], ["screens", "종목 선별"], ["decisions", "결정 큐"], ["ticker", "종목 상세"],
+  ["positions", "포지션·리스크"], ["performance", "성과·백테스트"], ["config", "설정·감사 로그"],
+];
+/* "config", not "settings": claude.ai reserves #settings. */
+
+/* ---- 예시 데이터: LLM 에이전트·하드룰·실행 레이어 연결 후의 모습. 숫자는 가상이며 화면 구성 확인용 ---- */
+const SELL_REASONS = ["목표가 도달", "논지 깨짐", "더 좋은 대안", "비중 초과", "촉매 소멸", "재매수 테스트 실패"];
+const HARD_REASONS = ["손절", "트레일링", "기간 만료", "Protections"];
+const EX_DATE = "2026-07-24";
+const EXAMPLES = [
+  { ticker: "000660.KS", trade_date: EX_DATE, rating: "Overweight", action: "Buy", confidence: 0.65, entry_price: 268000, stop_loss: 249000,
+    position_sizing: "4% of portfolio", example: true,
+    proposal: { action: "Buy", position_sizing: "6% of portfolio", qty: 224, amount: 60032000 },
+    final: { action: "Buy", position_sizing: "4% of portfolio", qty: 149, amount: 39932000 },
+    hard_rule_overrides: ["sector_cap: 반도체 22% → 20%", "max_position_pct: 6% → 4%"],
+    memo: {
+      business: "메모리 반도체(DRAM·NAND) 2위 사업자. HBM 매출 비중이 커지며 이익 변동성이 줄어드는 중.",
+      thesis: "HBM 공급 부족이 2027년까지 이어지고, 범용 DRAM 가격 반등이 겹쳐 이익 추정치가 상향될 여지가 크다.",
+      bull: "HBM4 조기 인증, 범용 DRAM 계약가 2분기 연속 상승.", bear: "고객사 재고 조정으로 하반기 출하 둔화, 경쟁사 HBM 인증 통과.",
+      valuation: { price: 268000, target: 320000, downside: 236000 },
+      catalysts: [["2분기 실적 발표", "2026-07-30"], ["HBM4 고객 인증 결과", "2026-09"]],
+      invalidation: ["범용 DRAM 계약가 2개월 연속 하락", "HBM 점유율 40% 아래로 하락", "종가가 249,000원 아래로 이탈"],
+      sizing: "4% (원안 6%, 섹터 한도로 축소)",
+      exit_plan: "목표가 320,000원 도달 시 절반 매도, 논지 깨짐 조건 하나라도 충족 시 전량 재검토.", horizon: "3~6개월" },
+    evidence: [
+      { source: "market", summary: "종가 268,000 · RSI 58 · 50SMA 위 · 20일 변동성 34%", as_of: EX_DATE },
+      { source: "fundamentals", summary: "12개월 선행 PER 7.8배, 컨센서스 영업이익 3개월간 +11%", as_of: "2026-07-23" },
+      { source: "news", summary: "HBM4 샘플 출하 보도 3건", as_of: "2026-07-22" },
+      { source: "memory", summary: "06-26 Overweight → 5일 알파 +2.1%: 실적 전 진입이 유효했음", as_of: "2026-07-03" }] },
+  { ticker: "051910.KS", trade_date: EX_DATE, rating: "Sell", action: "Sell", confidence: 0.7, entry_price: null, stop_loss: null,
+    position_sizing: "보유 전량", example: true, sell_reason: "논지 깨짐", hard_rule_overrides: [],
+    final: { action: "Sell", position_sizing: "보유 전량", qty: 85, amount: 24650000 },
+    memo: { thesis: "양극재 증설 효과로 2분기 흑자 전환을 기대했으나 고객사 감산으로 전제가 사라졌다.",
+      invalidation: ["양극재 출하 전분기 대비 감소 (충족)"], exit_plan: "다음 거래일 시가에 전량 매도.", horizon: "–" },
+    evidence: [{ source: "news", summary: "주요 고객사 3분기 배터리 감산 발표", as_of: "2026-07-23" },
+      { source: "portfolio", summary: "보유 85주, 평단 312,000 · 미실현 −7.1%", as_of: EX_DATE }] },
+  { ticker: "005380.KS", trade_date: EX_DATE, rating: "Hold", action: "Hold", confidence: 0.5, example: true, hard_rule_overrides: ["protection:CooldownPeriod 잠금 (07-25 09:00 해제)"],
+    sell_reason_hard: "Protections",
+    proposal: { action: "Buy", position_sizing: "3% of portfolio", qty: 110, amount: 26400000 },
+    final: { action: "Hold", position_sizing: "–", qty: 0, amount: 0 },
+    memo: { thesis: "07-22 손절 직후라 쿨다운 중. 에이전트 원안은 재매수였으나 잠금 해제까지 보류." },
+    evidence: [{ source: "portfolio", summary: "07-22 손절 청산 (−5.0%), 쿨다운 2거래일", as_of: "2026-07-22" }] },
+  { ticker: "035720.KS", trade_date: EX_DATE, rating: "REVIEW", action: null, confidence: null, example: true, hard_rule_overrides: [],
+    raw: "**Recommendation**: 단기 반등 가능성은 있으나 규제 리스크를 고려하면 관망과 비중 축소 사이에서 판단이 어렵다. 포지션 유지 또는 일부 축소를 권고...\n\n(등급 라벨 없음 · 구조화 출력 파싱 실패: rating 필드 누락)",
+    evidence: [{ source: "sentiment", summary: "커뮤니티 언급량 3배 증가, 부정 비율 61%", as_of: "2026-07-24" }] },
+];
+const THESIS_CHECK = { ticker: "000660.KS", as_of: EX_DATE, items: [
+  ["범용 DRAM 계약가 2개월 연속 하락", "6월 +3.0%, 7월 +1.2%", false],
+  ["HBM 점유율 40% 아래로 하락", "추정 점유율 52% (2분기)", false],
+  ["종가가 249,000원 아래로 이탈", "종가 268,000 · 여유 7.1%", false]] };
+const POSITIONS = [
+  ["000660.KS", 149, 268000, 271500, 249000, 274000, 1, "2026-10-24"],
+  ["005930.KS", 190, 201000, 208000, 187000, 212000, 12, "2026-09-11"],
+  ["012330.KS", 96, 241000, 236500, 226500, 244000, 8, "2026-09-15"],
+  ["051910.KS", 85, 312000, 290000, 290200, 318000, 33, "2026-08-21"],
+  ["105560.KS", 310, 92300, 95600, 86800, 96100, 19, "2026-09-04"]];
+const SECTORS = [["반도체", 0.20], ["자동차·부품", 0.06], ["금융", 0.05], ["화학", 0.04], ["현금", 0.65]];
+const PROTECTIONS = [
+  { k: "StoplossGuard", on: false, why: "lookback 24시간 손절 1건 / 한도 3건", until: "–", n: 1 },
+  { k: "MaxDrawdown", on: false, why: "피크 대비 −3.4% / 한도 −10%", until: "–", n: 0 },
+  { k: "CooldownPeriod", on: true, why: "005380.KS 손절 후 2거래일 재진입 금지", until: "07-25 09:00", n: 1 },
+  { k: "LowProfitPairs", on: false, why: "최근 6건 중 손실 종목 없음", until: "–", n: 0 }];
+const EXITS = [["roi", 7, "var(--up)"], ["stop_loss", 4, "var(--down)"], ["trailing", 3, "var(--accent)"], ["exit_signal", 6, "var(--hold)"], ["force", 0, "var(--warn)"], ["expired", 2, "var(--review)"]];
+const HISTORY = [
+  ["2026-07-20 14:02", "관리자", "sector_quota", "sector_max 3 → 2", "섹터 쏠림 축소"],
+  ["2026-07-08 10:40", "관리자", "max_position_pct", "8% → 6%", "베이스라인 리뷰"],
+  ["2026-06-30 09:15", "운영자", "approval_mode", "auto → manual", "LLM 연결 전 수동 승인"]];
+const RULE_LABEL = {
+  price_min: "가격 하한", listed_days_min: "상장일수", dollar_volume_top_n: "거래대금 상위", volatility_band: "변동성 밴드",
+  range_stability_min: "60일 고저폭", sector_quota: "섹터 쿼터", performance_filter: "성과 필터", momentum_top_k: "모멘텀 상위", data: "데이터",
+};
+const RULE_DESC = {
+  price_min: "종가 ≥ 임계(원)", listed_days_min: "상장 후 일수 ≥ 임계", dollar_volume_top_n: "20일 평균 거래대금 순위 ≤ N",
+  volatility_band: "20일 변동성(연율)이 밴드 안", range_stability_min: "60일 (고-저)/저 ≥ 임계", sector_quota: "섹터 내 모멘텀 순위 ≤ 상한",
+  performance_filter: "최근 정산 알파 평균 ≥ 임계 (기록 없으면 통과)", momentum_top_k: "MSCI식 리스크조정 모멘텀 z-score 순위 ≤ K",
+};
+const DIR = { Buy: 1, Overweight: 1, Hold: 0, Underweight: -1, Sell: -1 };
+
+const state = { view: "home", screenIdx: null, stage: null, filter: "all", q: "", ticker: null, tab: "decisions", decTab: "all", decSrc: "example" };
+const fmt = n => n == null ? "–" : Number(n).toLocaleString("ko-KR");
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pct = (v, d = 1) => v == null ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(d) + "%";
+const cls = v => v == null ? "" : v > 0 ? "pos" : v < 0 ? "neg" : "";
+const name = t => DATA.names[t] || "";
+const screens = DATA.screens.slice().sort((a, b) => b.as_of.localeCompare(a.as_of));
+const latest = screens[0];
+const memoryByKey = Object.fromEntries(DATA.memory.map(e => [e.ticker + "|" + e.date, e]));
+const decisions = DATA.decisions.slice().sort((a, b) => b.trade_date.localeCompare(a.trade_date) || a.ticker.localeCompare(b.ticker));
+const latestDate = decisions[0]?.trade_date;
+
+function alphaOf(e) { if (!e || e.pending || !e.alpha) return null; const v = parseFloat(e.alpha); return isNaN(v) ? null : v / 100; }
+function rawOf(e) { if (!e || e.pending || !e.raw) return null; const v = parseFloat(e.raw); return isNaN(v) ? null : v / 100; }
+
+function nav() {
+  const counts = { screens: screens.length, decisions: decisions.filter(d => d.trade_date === latestDate).length,
+    performance: DATA.summary.resolved };
+  $("#nav").innerHTML = SCREENS.map(([k, label, stub]) =>
+    `<a href="#${k}" class="${state.view === k ? "active" : ""} ${stub ? "stub" : ""}">${label}${counts[k] != null ? `<span class="cnt num">${counts[k]}</span>` : ""}</a>`).join("");
+}
+
+function statusbar() {
+  return `<div class="statusbar">
+    <span>기준일 <b class="num">${esc(latest.as_of)}</b></span>
+    <span>마지막 선별 <b class="num">${esc(latest.recorded_at.replace("T", " ").replace("Z", " UTC"))}</b></span>
+    <span>마지막 결정 <b class="num">${esc(latestDate || "–")}</b></span>
+    ${PROTECTIONS.some(p => p.on) ? `<a href="#positions" class="badge-lock on">Protections ${PROTECTIONS.filter(p => p.on).length}건 발동</a> <span class="ex">예시</span>` : `<span class="badge-lock">잠금 없음 · Protections 정상</span>`}
+    <span style="margin-left:auto">결정자 <b>rule_momentum_baseline</b> · LLM 미사용</span>
+  </div>`;
+}
+
+/* ---------- 1 home ---------- */
+function viewHome() {
+  const today = decisions.filter(d => d.trade_date === latestDate);
+  const review = today.filter(d => d.rating === "REVIEW").length;
+  const settled = DATA.memory.filter(e => !e.pending).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
+  const byRating = DATA.summary.by_rating;
+  return `<h1>오늘 요약</h1><p class="sub">선별 → 결정 → 정산의 마지막 상태. 숫자는 전부 기록(audit·memory log)에서 읽었고 화면에서 재계산하지 않습니다.</p>
+  <div class="grid kpis">
+    <div class="tile"><div class="lab">선별 통과</div><div class="val num">${latest.stage_counts.at(-1)}<small>/ ${latest.universe_size}</small></div></div>
+    <div class="tile"><div class="lab">오늘 결정</div><div class="val num">${today.length}<small>${["Buy", "Overweight", "Underweight", "Sell"].map(r => `${r[0]} ${today.filter(d => d.rating === r).length}`).join(" · ")}</small></div></div>
+    <div class="tile"><div class="lab">REVIEW</div><div class="val num" style="color:${review ? "var(--up)" : "inherit"}">${review}</div></div>
+    <div class="tile"><div class="lab">정산 완료 / 대기</div><div class="val num">${DATA.summary.resolved}<small>/ ${DATA.summary.pending} 대기</small></div></div>
+  </div>
+  <div class="grid row2" style="margin-top:14px">
+    <div class="panel"><h2>오늘의 결정 <span class="asof">${esc(latestDate)}</span></h2>
+      <div class="scroll"><table><thead><tr><th>종목</th><th>등급</th><th class="r">확신도</th><th>근거</th></tr></thead><tbody>
+      ${today.map(d => `<tr class="click" data-ticker="${esc(d.ticker)}"><td><b>${esc(d.ticker)}</b> <span style="color:var(--fg-2)">${esc(name(d.ticker))}</span></td>
+        <td><span class="pill ${esc(d.rating)}">${esc(d.rating)}</span></td><td class="r num">${d.confidence?.toFixed(2) ?? "–"}</td>
+        <td style="white-space:normal;max-width:36ch">${esc(d.evidence[0]?.summary ?? "")}</td></tr>`).join("")}
+      </tbody></table></div></div>
+    <div class="panel"><h2>최근 정산</h2>
+      <div class="scroll"><table><thead><tr><th>종목</th><th>결정일</th><th>등급</th><th class="r">실현</th><th class="r">알파</th><th>정산일</th></tr></thead><tbody>
+      ${settled.map(e => `<tr class="click" data-ticker="${esc(e.ticker)}"><td><b>${esc(e.ticker)}</b></td><td class="num">${esc(e.date)}</td><td><span class="pill ${esc(e.rating)}">${esc(e.rating)}</span></td>
+        <td class="r num ${cls(rawOf(e))}">${pct(rawOf(e))}</td><td class="r num ${cls(alphaOf(e))}">${pct(alphaOf(e))}</td><td class="num">${esc(e.resolved || "")}</td></tr>`).join("")}
+      </tbody></table></div></div>
+  </div>
+  <div class="grid row2" style="margin-top:14px">
+  <div class="panel"><h2>등급별 성과 (${esc(DATA.summary.holding)}, KOSPI 대비 알파)</h2>${ratingTable(byRating)}
+    <p class="legend">Hold는 방향을 주장하지 않으므로 적중률이 없습니다. 지표는 결정일 다음 첫 종가 진입 기준입니다.</p></div>
+  <div class="panel chart"><h2>결정일별 평균 알파 추이</h2>${alphaChart(perDateAlpha())}
+    <p class="legend"><span class="pos">━ Buy/Overweight</span> · <span class="neg">━ Sell/Underweight</span> · 숏 콜은 알파가 음수일 때 적중</p></div></div>`;
+}
+function perDateAlpha() {
+  const resolved = DATA.memory.filter(e => !e.pending && alphaOf(e) != null);
+  const avg = a => a.length ? a.reduce((x, e) => x + alphaOf(e), 0) / a.length : null;
+  return DATA.summary.dates.map(d => { const rows = resolved.filter(e => e.date === d);
+    return { d, n: rows.length, long: avg(rows.filter(e => DIR[e.rating] > 0)), short: avg(rows.filter(e => DIR[e.rating] < 0)) }; });
+}
+function alphaChart(rows) {
+  const W = 520, H = 200, L = 44, R = 12, T = 12, B = 26;
+  const vals = rows.flatMap(r => [r.long, r.short]).filter(v => v != null);
+  const m = Math.max(0.02, ...vals.map(Math.abs)); const lim = Math.ceil(m * 100 / 2) * 2 / 100;
+  const x = i => L + (W - L - R) * (rows.length < 2 ? 0.5 : i / (rows.length - 1));
+  const y = v => T + (H - T - B) * (1 - (v + lim) / (2 * lim));
+  const ticks = [-lim, -lim / 2, 0, lim / 2, lim];
+  const line = (k, c) => { const pts = rows.map((r, i) => r[k] == null ? null : [x(i), y(r[k])]).filter(Boolean);
+    const last = pts.at(-1);
+    return `<polyline fill="none" stroke="${c}" stroke-width="2" points="${pts.map(p => p.join(",")).join(" ")}"/>${pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="2.5" fill="${c}"/>`).join("")}${last ? `<circle cx="${last[0]}" cy="${last[1]}" r="4.5" fill="${c}"/>` : ""}`; };
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="결정일별 롱 콜과 숏 콜의 평균 알파">
+    ${ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="${t === 0 ? 1.5 : 1}"/><text x="${L - 6}" y="${y(t) + 3}" text-anchor="end">${(t * 100).toFixed(t === 0 ? 0 : 1)}%</text>`).join("")}
+    ${rows.map((r, i) => `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${r.d.slice(5).replace("-", "/")}</text>`).join("")}
+    ${line("long", "var(--up)")}${line("short", "var(--down)")}</svg>`;
+}
+
+function ratingTable(byRating) {
+  const order = ["Buy", "Overweight", "Hold", "Underweight", "Sell"].filter(r => byRating[r]);
+  if (!order.length) return `<div class="empty">정산된 결정이 없습니다</div>`;
+  return `<div class="scroll"><table><thead><tr><th>등급</th><th class="r">n</th><th class="r">방향 적중률</th><th class="r">평균 알파</th><th style="width:40%">평균 알파</th></tr></thead><tbody>
+  ${order.map(r => { const s = byRating[r]; const w = Math.min(100, Math.abs(s.mean_alpha) * 1000);
+    return `<tr><td><span class="pill ${r}">${r}</span></td><td class="r num">${s.count}</td><td class="r num">${s.hit_rate == null ? "방향 없음" : (s.hit_rate * 100).toFixed(0) + "%"}</td>
+    <td class="r num ${cls(s.mean_alpha)}">${pct(s.mean_alpha, 2)}</td><td><div class="bar"><i style="${s.mean_alpha >= 0 ? "left:50%" : "right:50%"};width:${w / 2}%;background:${s.mean_alpha >= 0 ? "var(--up)" : "var(--down)"}"></i><i style="left:50%;width:1px;background:var(--line)"></i></div></td></tr>`; }).join("")}
+  </tbody></table></div>`;
+}
+
+/* ---------- 2 screens ---------- */
+function viewScreens() {
+  if (state.screenIdx == null) {
+    return `<h1>종목 선별</h1><p class="sub">선별 실행 목록입니다. 행을 열면 유니버스 N개가 규칙을 하나씩 지나며 몇 개 남는지, 각 종목이 어느 규칙에서 어떤 값으로 떨어졌는지 봅니다.</p>
+    <div class="panel"><div class="scroll"><table><thead><tr><th>실행 ID</th><th>기준일</th><th>유니버스</th><th class="r">크기</th><th class="r">통과</th><th>깔때기</th><th>실행 시각</th></tr></thead><tbody>
+    ${screens.map((s, i) => `<tr class="click" data-screen="${i}"><td class="num">${esc(s.run_id)}</td><td class="num">${esc(s.as_of)}</td><td>${esc(s.universe)}</td><td class="r num">${s.universe_size}</td>
+      <td class="r num"><b>${s.stage_counts.at(-1)}</b></td><td class="num" style="color:var(--fg-3)">${s.universe_size} → ${s.stage_counts.join(" → ")}</td><td class="num">${esc(s.recorded_at.slice(0, 16).replace("T", " "))}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
+  }
+  const s = screens[state.screenIdx];
+  const rules = s.rules;
+  let cands = s.candidates.slice();
+  if (state.stage != null) { const rule = rules[state.stage]; cands = cands.filter(c => c.filters.some(f => f.rule === rule && !f.passed)); }
+  if (state.filter === "selected") cands = cands.filter(c => c.selected);
+  if (state.filter === "rejected") cands = cands.filter(c => !c.selected);
+  if (state.q) { const q = state.q.toLowerCase(); cands = cands.filter(c => c.ticker.toLowerCase().includes(q) || (name(c.ticker) || "").toLowerCase().includes(q)); }
+  cands.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999) || a.ticker.localeCompare(b.ticker));
+  const prev = i => i === 0 ? s.universe_size : s.stage_counts[i - 1];
+  return `<p><a href="#screens" id="back">← 선별 목록</a></p>
+  <h1>${esc(s.universe)} · <span class="num">${esc(s.as_of)}</span></h1>
+  <p class="sub"><span class="num">${s.universe_size} → ${s.stage_counts.at(-1)}</span> 종목. 단계를 누르면 그 규칙에서 탈락한 종목만 표에 남습니다.</p>
+  <div class="funnel">
+    <button class="stage ${state.stage == null ? "active" : ""}" data-stage="all"><div class="n num">${s.universe_size}</div><div class="d">유니버스</div></button>
+    ${rules.map((r, i) => `<button class="stage ${state.stage === i ? "active" : ""}" data-stage="${i}"><div class="n num">${s.stage_counts[i]}</div><div class="d">${esc(RULE_LABEL[r] || r)}</div><div class="drop num">−${prev(i) - s.stage_counts[i]}</div></button>`).join("")}
+  </div>
+  <div class="grid row2" style="grid-template-columns: minmax(0, 2.2fr) minmax(260px, 1fr)">
+  <div class="panel" style="grid-column:1 / -1">
+    <div class="toolbar">
+      <button data-filter="all" class="${state.filter === "all" ? "on" : ""}">전체</button>
+      <button data-filter="selected" class="${state.filter === "selected" ? "on" : ""}">선정만</button>
+      <button data-filter="rejected" class="${state.filter === "rejected" ? "on" : ""}">탈락만</button>
+      <input id="q" type="search" placeholder="티커·이름 검색" value="${esc(state.q)}" aria-label="검색">
+      <span class="legend" style="margin:0 0 0 auto">셀 = 값 (임계). <span class="cell pass">통과</span> <span class="cell fail">탈락</span> <span class="cell none">미평가</span></span>
+    </div>
+    <div class="scroll"><table><thead><tr><th>선정</th><th class="r">순위</th><th>종목</th><th class="r">점수</th>${rules.map(r => `<th title="${esc(RULE_DESC[r] || "")}">${esc(RULE_LABEL[r] || r)}</th>`).join("")}</tr></thead><tbody>
+    ${cands.map(c => `<tr class="click" data-ticker="${esc(c.ticker)}"><td>${c.selected ? "✓" : "✗"}</td><td class="r num">${c.rank ?? ""}</td>
+      <td><b>${esc(c.ticker)}</b> <span style="color:var(--fg-2)">${esc(c.name || name(c.ticker))}</span></td><td class="r num">${c.score != null ? c.score.toFixed(2) : ""}</td>
+      ${rules.map(r => { const f = c.filters.find(x => x.rule === r); const d = c.filters.find(x => x.rule === "data");
+        if (!f) return `<td><span class="cell none" title="${d ? esc(d.note) : "이전 규칙에서 탈락"}">${d && r === rules[0] ? "데이터 없음" : "–"}</span></td>`;
+        const v = typeof f.value === "number" ? (Number.isInteger(f.value) ? f.value : f.value.toFixed(3)) : (f.value ?? "–");
+        return `<td><span class="cell ${f.passed ? "pass" : "fail"}" title="${esc(f.note || "")}">${esc(v)} <span style="opacity:.7">(${esc(f.threshold ?? "")})</span></span></td>`; }).join("")}
+    </tr>`).join("") || `<tr><td colspan="${rules.length + 4}"><div class="empty">조건에 맞는 종목이 없습니다</div></td></tr>`}
+    </tbody></table></div>
+  </div>
+  <div class="panel" style="grid-column:1 / -1"><h2>규칙</h2><div class="scroll"><table><thead><tr><th>#</th><th>규칙</th><th>설명</th><th class="r">임계</th><th class="r">탈락</th></tr></thead><tbody>
+    ${rules.map((r, i) => `<tr><td class="num">${i + 1}</td><td><b>${esc(RULE_LABEL[r] || r)}</b> <span class="num" style="color:var(--fg-3)">${esc(r)}</span></td><td style="white-space:normal">${esc(RULE_DESC[r] || "")}</td><td class="r num">${esc(s.candidates.flatMap(c => c.filters).find(f => f.rule === r && f.threshold != null)?.threshold ?? "–")}</td><td class="r num">${prev(i) - s.stage_counts[i]}</td></tr>`).join("")}
+  </tbody></table></div></div></div>`;
+}
+
+/* ---------- 3 decisions ---------- */
+function viewDecisions() {
+  const ex = state.decSrc === "example";
+  const dates = [...new Set(decisions.map(d => d.trade_date))];
+  const day = ex ? EX_DATE : (state.decDate || latestDate);
+  const all = ex ? EXAMPLES : decisions.filter(d => d.trade_date === day);
+  let list = all;
+  if (state.decTab === "review") list = list.filter(d => d.rating === "REVIEW");
+  if (state.decTab === "override") list = list.filter(d => d.hard_rule_overrides.length);
+  const card = state.decTab === "review" ? reviewCard : state.decTab === "override" ? overrideCard : decisionCard;
+  return `<h1>결정 큐</h1><p class="sub">그날 에이전트가 낸 결정. REVIEW는 등급을 읽을 수 없어 거래 대상에서 빠진 결정이고, 하드룰 개입은 에이전트 원안과 룰 적용 후 최종안을 나란히 보여줍니다.</p>
+  <div class="toolbar">
+    <button data-decsrc="example" class="${ex ? "on" : ""}">LLM 에이전트 <span class="ex" style="margin-left:4px">예시</span></button>
+    <button data-decsrc="real" class="${ex ? "" : "on"}">규칙 베이스라인 실측</button>
+    ${ex ? `<span class="legend" style="margin:0">결정일 <b class="num">${EX_DATE}</b> · 수동 승인 모드</span>` : `<label>결정일 <select id="decDate">${dates.map(d => `<option ${d === day ? "selected" : ""}>${d}</option>`).join("")}</select></label>`}
+  </div>
+  <div class="tabs">
+    <button data-dectab="all" class="${state.decTab === "all" ? "on" : ""}">결정 <span class="num">${all.length}</span></button>
+    <button data-dectab="review" class="${state.decTab === "review" ? "on" : ""}">REVIEW <span class="num" style="${all.some(d => d.rating === "REVIEW") ? "color:var(--up);font-weight:700" : ""}">${all.filter(d => d.rating === "REVIEW").length}</span></button>
+    <button data-dectab="override" class="${state.decTab === "override" ? "on" : ""}">하드룰 개입 <span class="num">${all.filter(d => d.hard_rule_overrides.length).length}</span></button>
+  </div>
+  <div class="grid row2">${list.map(card).join("") || `<div class="empty">이 탭에 해당하는 결정이 없습니다. 베이스라인은 등급을 항상 읽을 수 있고 하드룰 레이어가 아직 연결되지 않아 두 탭이 비어 있습니다.</div>`}</div>
+  ${!ex && state.decTab === "all" ? `<div class="note">승인 흐름은 LLM 에이전트 예시에서 확인할 수 있습니다: [승인] → 주문 요약(종목·방향·수량·예상 금액·적용 룰) → 확인 → 실행 레이어.</div>` : ""}`;
+}
+function evList(d) {
+  return `<div class="ev">${d.evidence.map(e => `<div><span class="src">${esc(e.source)}</span><span>${esc(e.summary)}</span><span class="asof" style="${e.as_of && e.as_of !== d.trade_date ? "color:var(--warn)" : ""}">${esc(e.as_of || "")}</span></div>`).join("")}</div>`;
+}
+function cardHead(d) {
+  return `<div class="hd"><div><span class="tk">${esc(d.ticker)}</span><span class="nm">${esc(name(d.ticker))}</span> ${d.example ? `<span class="ex">예시</span>` : ""}</div>
+    <div><span class="pill ${esc(d.rating)}">${d.rating === "REVIEW" ? "⚠ " : ""}${esc(d.rating)}</span> ${d.action ? `<span class="pill Hold">${esc(d.action)}</span>` : ""} <span class="asof">${esc(d.trade_date)}</span></div></div>`;
+}
+function reasonBadges(d) {
+  return (d.sell_reason ? `<span class="reason">매도 사유 · ${esc(d.sell_reason)}</span> ` : "") + (d.sell_reason_hard ? `<span class="reason hard">하드룰 · ${esc(d.sell_reason_hard)}</span>` : "");
+}
+function decisionCard(d) {
+  if (d.rating === "REVIEW") return reviewCard(d);
+  const m = memoryByKey[d.ticker + "|" + d.trade_date];
+  const canApprove = d.example && d.final && d.final.qty > 0;
+  return `<div class="card">${cardHead(d)}
+    ${reasonBadges(d) ? `<div>${reasonBadges(d)}</div>` : ""}
+    ${d.memo ? `<div class="memo" style="white-space:normal;color:var(--fg)">${esc(d.memo.thesis)}</div>` : `<div class="memo">${esc((d.thesis || "").replace(/\*\*/g, ""))}</div>`}
+    ${d.entry_price ? `<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--fg-2)"><span>진입 <b class="num">${fmt(d.entry_price)}</b></span><span>손절 <b class="num">${fmt(d.stop_loss)}</b></span><span>비중 <b>${esc(d.position_sizing)}</b></span></div>` : ""}
+    <details><summary style="cursor:pointer;font-size:12px;color:var(--fg-2)">증거 ${d.evidence.length}건</summary>${evList(d)}</details>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--fg-2)">
+      <span>확신도 <b class="num">${d.confidence?.toFixed(2) ?? "–"}</b></span>
+      ${d.example ? "" : `<span>결과 ${m ? (m.pending ? `<span class="pill pending">정산 대기</span>` : `실현 <b class="num ${cls(rawOf(m))}">${pct(rawOf(m))}</b> · 알파 <b class="num ${cls(alphaOf(m))}">${pct(alphaOf(m))}</b>`) : "기록 없음"}</span>`}
+      ${d.hard_rule_overrides.length ? `<span>개입 ${d.hard_rule_overrides.map(o => `<span class="pill REVIEW">${esc(o)}</span>`).join(" ")}</span>` : ""}
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        ${canApprove ? `<button class="btn primary" data-approve="${esc(d.ticker)}">승인</button>` : ""}
+        <a href="#ticker" data-ticker="${esc(d.ticker)}">종목 상세 →</a></span></div></div>`;
+}
+function reviewCard(d) {
+  return `<div class="card">${cardHead(d)}
+    <p style="margin:0;font-size:13px;color:var(--fg-2)">등급을 읽을 수 없어 거래 대상에서 빠졌습니다. 에이전트 원문 전체:</p>
+    <div class="raw">${esc(d.raw || d.thesis || "")}</div>${evList(d)}
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="재실행을 요청했습니다">재실행</button><button class="btn" data-act="수동 등급 지정 창을 엽니다">수동 등급 지정</button><button class="btn" data-act="이 결정을 무시 목록에 넣었습니다">무시</button></div></div>`;
+}
+function overrideCard(d) {
+  const p = d.proposal || {}, f = d.final || {};
+  const rows = [["action", "방향"], ["position_sizing", "비중"], ["qty", "수량"], ["amount", "예상 금액"]];
+  const show = (o, k) => k === "amount" ? fmt(o[k]) + "원" : k === "qty" ? fmt(o[k]) + "주" : esc(o[k] ?? "–");
+  return `<div class="card">${cardHead(d)}
+    <div>${d.hard_rule_overrides.map(o => `<span class="pill REVIEW" style="font-family:var(--font-mono);font-weight:500">${esc(o)}</span>`).join(" ")} ${reasonBadges(d)}</div>
+    <div class="cmp"><div class="h">원안 (에이전트)</div><div class="h">최종 (룰 적용 후)</div>
+      ${rows.map(([k, l]) => { const chg = String(p[k]) !== String(f[k]); return `<div class="${chg ? "chg" : ""}"><small style="color:var(--fg-3)">${l}</small><br><span class="num">${show(p, k)}</span></div><div class="${chg ? "chg" : ""}"><small style="color:var(--fg-3)">${l}</small><br><span class="num">${show(f, k)}</span></div>`; }).join("")}
+    </div><p class="legend" style="margin:0">강조된 행이 룰 레이어가 바꾼 필드입니다.</p></div>`;
+}
+function openApprove(t) {
+  const d = EXAMPLES.find(x => x.ticker === t); const f = d.final;
+  $("#modalBox").innerHTML = `<h2 id="modalTitle" style="margin:0">주문 승인 <span class="ex">예시</span></h2>
+    <dl><dt>종목</dt><dd><b>${esc(d.ticker)}</b> ${esc(name(d.ticker))}</dd><dt>방향</dt><dd><span class="pill ${d.action === "Sell" ? "Sell" : "Buy"}">${esc(f.action)}</span></dd>
+    <dt>수량</dt><dd class="num">${fmt(f.qty)}주</dd><dt>예상 금액</dt><dd class="num">${fmt(f.amount)}원</dd>
+    <dt>적용된 룰</dt><dd>${d.hard_rule_overrides.length ? d.hard_rule_overrides.map(esc).join("<br>") : "없음"}</dd></dl>
+    <p class="legend" style="margin:0">확인하면 실행 레이어로 주문이 전달되고 감사 로그에 승인자가 남습니다.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="mCancel">취소</button><button class="btn primary" id="mOk">확인 후 전달</button></div>`;
+  $("#modal").hidden = false; $("#mOk").focus();
+  $("#mCancel").onclick = closeModal;
+  $("#mOk").onclick = () => { closeModal(); toast("시안이라 주문은 전달하지 않았습니다"); };
+}
+function closeModal() { $("#modal").hidden = true; }
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2600); }
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#modal").hidden) closeModal(); });
+$("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
+
+/* ---------- 4 ticker ---------- */
+function viewTicker() {
+  const t = state.ticker || decisions[0]?.ticker;
+  const tickers = [...new Set(DATA.generated_from.universe)].sort();
+  const mine = decisions.filter(d => d.ticker === t);
+  const mem = DATA.memory.filter(e => e.ticker === t).sort((a, b) => b.date.localeCompare(a.date));
+  const screenRows = screens.map(s => ({ s, c: s.candidates.find(c => c.ticker === t) })).filter(x => x.c);
+  const latestC = screenRows[0]?.c;
+  const tabs = [["decisions", "결정 이력"], ["screening", "선별 이력"], ["outcomes", "결과·교훈"], ["snapshot", "검증 스냅샷"], ["thesis", "논지 점검"], ["holding", "보유"]];
+  const exMemo = EXAMPLES.find(x => x.ticker === t && x.memo && x.memo.business);
+  const pos = POSITIONS.find(p => p[0] === t);
+  let body = "";
+  if (state.tab === "decisions") {
+    body = `<div class="timeline" style="margin-bottom:12px">${mem.slice().reverse().map(e => `<span class="tl ${esc(e.rating)}" title="${esc(e.date)} ${esc(e.rating)}">${esc(e.date.slice(5).replace("-", "/"))}</span>`).join("")}</div>
+    ${exMemo ? memoCard(exMemo) : `<p class="legend">투자 메모 예시는 <a href="#ticker" data-ticker="000660.KS">000660.KS</a>에서 볼 수 있습니다.</p>`}
+    <h2 style="margin-top:16px">베이스라인 결정 <span class="asof">실측</span></h2>
+    <div class="grid row2">${mine.map(decisionCard).join("") || `<div class="empty">이 종목은 베이스라인에서 Hold 외 결정이 없습니다.</div>`}</div>`;
+  } else if (state.tab === "thesis") {
+    body = exMemo && t === THESIS_CHECK.ticker ? `<p class="legend" style="margin-top:0">투자 메모의 논지 깨짐 조건을 최신 데이터로 다시 확인합니다. 매도 판단 에이전트의 입력이기도 합니다. <span class="ex">예시</span> <span class="asof">${THESIS_CHECK.as_of}</span></p>
+      ${THESIS_CHECK.items.map(([c, v, hit]) => `<div class="chk"><span class="cell ${hit ? "fail" : "pass"}">${hit ? "충족 · 논지 깨짐" : "미충족 · 유지"}</span><span>${esc(c)}</span><span class="num" style="color:var(--fg-2)">${esc(v)}</span></div>`).join("")}
+      <p style="margin:12px 0 0;font-weight:600">논지 유지 <span style="font-weight:400;color:var(--fg-2)">· 3개 조건 중 0개 충족</span></p>`
+      : `<div class="empty">이 종목에는 점검할 투자 메모가 없습니다. 2차 범위이며 예시는 000660.KS에 있습니다.</div>`;
+  } else if (state.tab === "holding") {
+    body = pos ? holdingDetail(pos) : `<div class="empty">보유하지 않은 종목입니다</div>`;
+  } else if (state.tab === "screening") {
+    body = `<div class="scroll"><table><thead><tr><th>기준일</th><th>선정</th><th class="r">순위</th><th class="r">점수</th><th>첫 탈락 규칙</th><th>비고</th></tr></thead><tbody>
+    ${screenRows.map(({ s, c }) => { const fail = c.filters.find(f => !f.passed); return `<tr><td class="num">${esc(s.as_of)}</td><td>${c.selected ? "✓" : "✗"}</td><td class="r num">${c.rank ?? ""}</td><td class="r num">${c.score?.toFixed(2) ?? ""}</td>
+      <td>${fail ? `<span class="cell fail">${esc(RULE_LABEL[fail.rule] || fail.rule)} ${esc(fail.value ?? "")} (${esc(fail.threshold ?? "")})</span>` : ""}</td><td style="white-space:normal">${esc((c.filters.find(f => f.rule === "momentum_top_k") || fail || {}).note || "")}</td></tr>`; }).join("")}
+    </tbody></table></div>`;
+  } else if (state.tab === "outcomes") {
+    body = `<div class="scroll"><table><thead><tr><th>결정일</th><th>등급</th><th class="r">실현</th><th class="r">알파</th><th>보유</th><th>정산일</th><th>교훈</th></tr></thead><tbody>
+    ${mem.map(e => `<tr><td class="num">${esc(e.date)}</td><td><span class="pill ${esc(e.rating)}">${esc(e.rating)}</span></td><td class="r num ${cls(rawOf(e))}">${e.pending ? `<span class="pill pending">대기</span>` : pct(rawOf(e))}</td>
+      <td class="r num ${cls(alphaOf(e))}">${e.pending ? "" : pct(alphaOf(e))}</td><td class="num">${esc(e.holding || "")}</td><td class="num">${esc(e.resolved || "")}</td><td style="white-space:normal;max-width:48ch;color:var(--fg-2)">${esc(e.reflection || "")}</td></tr>`).join("") || `<tr><td colspan="7"><div class="empty">기록 없음</div></td></tr>`}
+    </tbody></table></div>`;
+  } else {
+    body = latestC ? `<p class="legend">에이전트에게 주어진 유일한 숫자 출처는 검증 스냅샷(OHLCV·지표 11개·최근 30 종가)입니다. 시안에는 선별 시점의 규칙 값만 들어 있습니다.</p>
+    <div class="scroll"><table><thead><tr><th>규칙</th><th class="r">값</th><th class="r">임계</th><th>판정</th><th>비고</th></tr></thead><tbody>
+    ${latestC.filters.map(f => `<tr><td>${esc(RULE_LABEL[f.rule] || f.rule)}</td><td class="r num">${esc(typeof f.value === "number" ? f.value.toFixed(4).replace(/\.?0+$/, "") : f.value ?? "")}</td><td class="r num">${esc(f.threshold ?? "")}</td><td><span class="cell ${f.passed ? "pass" : "fail"}">${f.passed ? "통과" : "탈락"}</span></td><td style="white-space:normal">${esc(f.note || "")}</td></tr>`).join("")}
+    </tbody></table></div>` : `<div class="empty">선별 기록 없음</div>`;
+  }
+  return `<h1>종목 상세</h1>
+  <div class="toolbar"><label>종목 <select id="tickerSel">${tickers.map(x => `<option value="${x}" ${x === t ? "selected" : ""}>${x} ${esc(name(x))}</option>`).join("")}</select></label></div>
+  <div class="panel" style="margin-bottom:14px"><div class="hd" style="display:flex;flex-wrap:wrap;gap:16px;align-items:baseline">
+    <span style="font-size:18px;font-weight:700">${esc(t)}</span><span style="color:var(--fg-2)">${esc(name(t))}</span>
+    <span class="legend">정체는 yfinance 프로필로 실행 시작 시 고정됩니다</span>
+    ${t === "005380.KS" ? `<span class="lockrib">거래 잠금 · Cooldown</span> <span class="ex">예시</span>` : ""}
+    ${pos ? `<span class="pill Buy">보유 ${fmt(pos[1])}주</span> <span class="ex">예시</span>` : ""}
+    <span style="margin-left:auto">최근 선별 ${latestC ? (latestC.selected ? `<span class="pill Buy">선정 · ${latestC.rank}위</span>` : `<span class="pill Hold">탈락</span>`) : ""}</span></div></div>
+  <div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${state.tab === k ? "on" : ""}">${l}</button>`).join("")}</div>
+  <div class="panel">${body}</div>`;
+}
+
+function memoCard(d) {
+  const m = d.memo, v = m.valuation, up = v.target / v.price - 1, dn = v.downside / v.price - 1;
+  return `<div class="card">${cardHead(d)}
+    <dl class="memo-sec">
+      <dt>사업 요약</dt><dd>${esc(m.business)}</dd>
+      <dt>논지</dt><dd>${esc(m.thesis)}</dd>
+      <dt>불 케이스</dt><dd>${esc(m.bull)}</dd>
+      <dt>베어 케이스</dt><dd>${esc(m.bear)}</dd>
+      <dt>밸류에이션</dt><dd><div class="val3"><div><small>현재가</small><b class="num">${fmt(v.price)}</b></div><div><small>목표가</small><b class="num pos">${fmt(v.target)}</b> <span class="num pos">${pct(up)}</span></div><div><small>하락가</small><b class="num neg">${fmt(v.downside)}</b> <span class="num neg">${pct(dn)}</span></div></div>
+        <span class="legend">reward/risk <b class="num">${(up / -dn).toFixed(1)}</b></span></dd>
+      <dt>촉매</dt><dd><ul>${m.catalysts.map(([e, w]) => `<li>${esc(e)} <span class="asof">${esc(w)}</span></li>`).join("")}</ul></dd>
+      <dt>논지 깨짐 조건</dt><dd><ul>${m.invalidation.map(x => `<li>${esc(x)}</li>`).join("")}</ul></dd>
+      <dt>등급·확신도·비중</dt><dd><span class="pill ${esc(d.rating)}">${esc(d.rating)}</span> 확신도 <b class="num">${d.confidence.toFixed(2)}</b> · ${esc(m.sizing)}</dd>
+      <dt>매도 계획</dt><dd>${esc(m.exit_plan)}</dd>
+      <dt>기간</dt><dd>${esc(m.horizon)}</dd>
+    </dl>
+    <details><summary style="cursor:pointer;font-size:12px;color:var(--fg-2)">증거 ${d.evidence.length}건 · 하드룰 개입 ${d.hard_rule_overrides.length}건</summary>${evList(d)}
+      <div style="margin-top:6px">${d.hard_rule_overrides.map(o => `<span class="pill REVIEW">${esc(o)}</span>`).join(" ")}</div></details></div>`;
+}
+function holdingDetail(p) {
+  const [t, q, avg, cur, stop, peak, days, exp] = p;
+  return `<p class="legend" style="margin-top:0"><span class="ex">예시</span> 포지션 레이어 연결 후 채워집니다.</p><div class="grid kpis">
+    <div class="tile"><div class="lab">수량</div><div class="val num">${fmt(q)}</div></div>
+    <div class="tile"><div class="lab">평단 / 현재가</div><div class="val num" style="font-size:18px">${fmt(avg)} / ${fmt(cur)}</div></div>
+    <div class="tile"><div class="lab">미실현</div><div class="val num ${cls(cur / avg - 1)}">${pct(cur / avg - 1)}</div></div>
+    <div class="tile"><div class="lab">손절선 · 트레일링 고점</div><div class="val num" style="font-size:18px">${fmt(stop)} · ${fmt(peak)}</div></div>
+    <div class="tile"><div class="lab">보유일 · 만료</div><div class="val num" style="font-size:18px">${days}일 · ${exp.slice(5)}</div></div></div>`;
+}
+
+/* ---------- 5 positions ---------- */
+function viewPositions() {
+  const total = EXITS.reduce((s, e) => s + e[1], 0);
+  return `<h1>포지션·리스크 <span class="ex">예시</span></h1><p class="sub">보유 종목과 손절·트레일링 상태, 포트폴리오 한도, Protections 잠금. 실행 레이어가 연결되면 장중 10초마다 갱신됩니다. 지금은 가상 데이터입니다.</p>
+  <div class="panel"><h2>보유 <span class="asof">${EX_DATE}</span></h2><div class="scroll"><table><thead><tr><th>종목</th><th class="r">수량</th><th class="r">평단</th><th class="r">현재가</th><th class="r">미실현</th><th class="r">손절선</th><th class="r">손절까지</th><th class="r">트레일링 고점</th><th class="r">보유일</th><th>만료일</th></tr></thead><tbody>
+  ${POSITIONS.map(([t, q, avg, cur, stop, peak, days, exp]) => { const u = cur / avg - 1, gap = cur / stop - 1;
+    return `<tr class="click" data-ticker="${t}"><td><b>${t}</b> <span style="color:var(--fg-2)">${esc(name(t))}</span></td><td class="r num">${fmt(q)}</td><td class="r num">${fmt(avg)}</td><td class="r num">${fmt(cur)}</td>
+    <td class="r num ${cls(u)}">${pct(u)}</td><td class="r num">${fmt(stop)}</td><td class="r num" style="${gap < 0.02 ? "color:var(--up);font-weight:700" : ""}">${gap < 0.02 ? "⚠ " : ""}${pct(gap)}</td><td class="r num">${fmt(peak)}</td><td class="r num">${days}</td><td class="num">${exp}</td></tr>`; }).join("")}
+  </tbody></table></div><p class="legend">손절까지 2% 미만이면 경고로 표시합니다. 051910.KS는 오늘 결정 큐에서 매도(논지 깨짐)가 나와 승인 대기 중입니다.</p></div>
+  <div class="grid row2" style="margin-top:14px">
+    <div class="panel"><h2>리스크 게이지</h2>
+      ${gauge("드로다운", 0.034, 0.10, "피크 대비")}${gauge("그로스 노출", 0.35, 1.0, "자본 대비")}
+      <h2 style="margin-top:14px">섹터 노출 vs 한도 20%</h2>
+      ${SECTORS.filter(s => s[0] !== "현금").map(([s, v]) => gauge(s, v, 0.20, "")).join("")}
+      <p class="legend">검은 세로선이 한도입니다. 반도체는 한도에 닿아 000660.KS 신규 매수가 4%로 줄었습니다.</p></div>
+    <div class="panel"><h2>청산 사유 분포 <span class="asof">최근 ${total}건</span></h2>
+      <div class="stack" role="img" aria-label="청산 사유 분포">${EXITS.filter(e => e[1]).map(([k, n, c]) => `<i style="width:${n / total * 100}%;background:${c}" title="${k} ${n}"></i>`).join("")}</div>
+      <table style="margin-top:10px"><tbody>${EXITS.map(([k, n, c]) => `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c};margin-right:6px"></span><span class="num">${k}</span></td><td class="r num">${n}</td><td class="r num" style="color:var(--fg-3)">${(n / total * 100).toFixed(0)}%</td></tr>`).join("")}</tbody></table></div>
+  </div>
+  <div class="panel" style="margin-top:14px"><h2>Protections</h2><div class="prot">
+    ${PROTECTIONS.map(p => `<div class="${p.on ? "on" : ""}"><div style="display:flex;justify-content:space-between;gap:8px"><b class="num">${p.k}</b><span class="st ${p.on ? "on" : "ok"}">${p.on ? "● 발동" : "○ 정상"}</span></div>
+      <span style="color:var(--fg-2)">${esc(p.why)}</span><span class="legend" style="margin:0">해제 ${esc(p.until)} · lookback 내 트리거 ${p.n}건</span></div>`).join("")}
+  </div></div>`;
+}
+function gauge(label, v, lim, unit) {
+  const max = Math.max(lim * 1.25, v * 1.1), over = v >= lim;
+  return `<div class="gauge"><span>${esc(label)}</span><div class="bar" role="img" aria-label="${esc(label)} ${(v * 100).toFixed(1)}%, 한도 ${(lim * 100).toFixed(0)}%"><i style="left:0;width:${v / max * 100}%;background:${over ? "var(--up)" : "var(--accent)"}"></i><i class="lim" style="left:${lim / max * 100}%"></i></div>
+    <span class="num r" style="text-align:right;${over ? "color:var(--up);font-weight:700" : ""}">${(v * 100).toFixed(1)}% <small style="color:var(--fg-3)">/ ${(lim * 100).toFixed(0)}%</small></span></div>`;
+}
+
+/* ---------- 7 config ---------- */
+function viewConfig() {
+  const s = latest, thr = {};
+  s.candidates.forEach(c => c.filters.forEach(f => { if (thr[f.rule] == null && f.threshold != null) thr[f.rule] = f.threshold; }));
+  const dset = decisions[0]?.settings || {};
+  const newest = Math.max(...DATA.cache.map(c => c.mtime));
+  const ago = ts => { const h = (newest - ts) / 3600; return h < 1 ? "최신" : h.toFixed(0) + "시간 전"; };
+  return `<h1>설정·감사 로그</h1><p class="sub">선별·하드룰·실행 규칙의 현재 파라미터와 모든 변경 기록. 규칙 변경은 관리자만 할 수 있고, 변경은 지워지지 않는 기록으로 남습니다.</p>
+  <div class="panel"><h2>규칙 레지스트리 <span class="asof">${esc(s.as_of)} 실행 기준</span></h2><div class="scroll"><table><thead><tr><th>규칙</th><th>설명</th><th class="r">현재 파라미터</th><th>레이어</th><th>마지막 변경</th></tr></thead><tbody>
+    ${s.rules.map(r => { const h = HISTORY.find(x => x[2] === r); return `<tr><td><b>${esc(RULE_LABEL[r] || r)}</b> <span class="num" style="color:var(--fg-3)">${esc(r)}</span></td><td style="white-space:normal">${esc(RULE_DESC[r] || "")}</td><td class="r num">${esc(thr[r] ?? "–")}</td><td>선별</td><td>${h ? `<span class="num">${h[0].slice(0, 10)}</span> ${esc(h[1])} <span class="ex">예시</span>` : `<span style="color:var(--fg-3)">초기값</span>`}</td></tr>`; }).join("")}
+    <tr><td><b>종목 비중 한도</b> <span class="num" style="color:var(--fg-3)">max_position_pct</span></td><td style="white-space:normal">한 종목 비중 상한</td><td class="r num">6%</td><td>하드룰</td><td><span class="num">2026-07-08</span> 관리자 <span class="ex">예시</span></td></tr>
+    <tr><td><b>섹터 한도</b> <span class="num" style="color:var(--fg-3)">sector_cap</span></td><td style="white-space:normal">섹터 합계 비중 상한</td><td class="r num">20%</td><td>하드룰</td><td><span style="color:var(--fg-3)">초기값</span> <span class="ex">예시</span></td></tr>
+  </tbody></table></div></div>
+  <div class="grid row2" style="margin-top:14px">
+    <div class="panel"><h2>모델 설정 <span class="asof">DecisionRecord.settings</span></h2><table><tbody>
+      ${Object.entries(dset).map(([k, v]) => `<tr><td class="num" style="color:var(--fg-3)">${esc(k)}</td><td style="white-space:normal">${esc(v)}</td></tr>`).join("")}
+      <tr><td class="num" style="color:var(--fg-3)">quick_think_llm / deep_think_llm</td><td>미연결 <span class="legend">LLM 에이전트 연결 시 표시</span></td></tr>
+    </tbody></table></div>
+    <div class="panel"><h2>데이터·캐시 상태</h2><p class="legend" style="margin-top:0">캐시 ${DATA.cache.length}개 · ${fmt(DATA.cache.reduce((a, c) => a + c.kb, 0))} KB · 벤더 yfinance</p>
+      <div class="scroll" style="max-height:260px"><table><thead><tr><th>심볼</th><th class="r">크기</th><th>마지막 다운로드</th></tr></thead><tbody>
+      ${DATA.cache.map(c => `<tr><td class="num">${esc(c.file.replace("-YFin-data.csv", ""))}</td><td class="r num">${fmt(c.kb)} KB</td><td class="num">${new Date(c.mtime * 1000).toISOString().slice(0, 16).replace("T", " ")} <span style="color:var(--fg-3)">${ago(c.mtime)}</span></td></tr>`).join("")}
+      </tbody></table></div></div>
+  </div>
+  <div class="panel" style="margin-top:14px"><h2>변경 이력 <span class="ex">예시</span></h2><div class="scroll"><table><thead><tr><th>시각</th><th>변경자</th><th>대상</th><th>변경</th><th>사유</th></tr></thead><tbody>
+    ${HISTORY.map(h => `<tr><td class="num">${h[0]}</td><td>${esc(h[1])}</td><td class="num">${esc(h[2])}</td><td class="num">${esc(h[3])}</td><td>${esc(h[4])}</td></tr>`).join("")}
+  </tbody></table></div></div>`;
+}
+
+/* ---------- 6 performance ---------- */
+function viewPerformance() {
+  const s = DATA.summary;
+  const resolved = DATA.memory.filter(e => !e.pending && alphaOf(e) != null);
+  const dates = s.dates;
+  const perDate = dates.map(d => { const rows = resolved.filter(e => e.date === d); const long = rows.filter(e => DIR[e.rating] > 0), short = rows.filter(e => DIR[e.rating] < 0);
+    const avg = a => a.length ? a.reduce((x, e) => x + alphaOf(e), 0) / a.length : null; return { d, n: rows.length, long: avg(long), short: avg(short) }; });
+  const refl = DATA.memory.filter(e => !e.pending && e.reflection).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+  return `<h1>성과·백테스트</h1><p class="sub">실행 <b class="num">${esc(s.run_id)}</b>: ${esc(DATA.generated_from.universe.length)}종목 × ${dates.length}일 = ${esc(s.cells_run)}셀. 규칙 전용 베이스라인이라 LLM이 더하는 알파를 재는 기준선입니다.</p>
+  <div class="grid kpis"><div class="tile"><div class="lab">정산 완료</div><div class="val num">${s.resolved}</div></div><div class="tile"><div class="lab">대기</div><div class="val num">${s.pending}</div></div>
+    <div class="tile"><div class="lab">미채점(REVIEW)</div><div class="val num">${s.unscored}</div></div><div class="tile"><div class="lab">보유기간</div><div class="val" style="font-size:16px">${esc(s.holding)}</div></div></div>
+  <div class="panel" style="margin-top:14px"><h2>등급별 성과</h2>${ratingTable(s.by_rating)}</div>
+  <div class="panel" style="margin-top:14px"><h2>결정일별 평균 알파 (롱 콜 vs 숏 콜)</h2>
+    <div class="scroll"><table><thead><tr><th>결정일</th><th class="r">정산 n</th><th class="r">Buy/OW 평균 알파</th><th class="r">Sell/UW 평균 알파</th><th style="width:40%"></th></tr></thead><tbody>
+    ${perDate.map(r => `<tr><td class="num">${r.d}</td><td class="r num">${r.n}</td><td class="r num ${cls(r.long)}">${pct(r.long, 2)}</td><td class="r num ${cls(r.short)}">${pct(r.short, 2)}</td>
+      <td><div class="bar">${r.long != null ? `<i style="${r.long >= 0 ? "left:50%" : "right:50%"};width:${Math.min(50, Math.abs(r.long) * 500)}%;background:var(--up);opacity:.8"></i>` : ""}${r.short != null ? `<i style="${r.short >= 0 ? "left:50%" : "right:50%"};width:${Math.min(50, Math.abs(r.short) * 500)}%;background:var(--down);opacity:.5;top:4px"></i>` : ""}<i style="left:50%;width:1px;background:var(--line)"></i></div></td></tr>`).join("")}
+    </tbody></table></div><p class="legend">숏 콜(Sell/Underweight)은 알파가 음수일 때 적중입니다. 막대는 ±10% 스케일.</p></div>
+  <div class="panel" style="margin-top:14px"><h2>반성 피드</h2>${refl.map(e => `<div style="display:grid;grid-template-columns:auto auto 1fr;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px"><span class="num">${esc(e.date)} ${esc(e.ticker)}</span><span class="pill ${esc(e.rating)}">${esc(e.rating)}</span><span style="color:var(--fg-2)">${esc(e.reflection)}</span></div>`).join("")}
+    <p class="legend">베이스라인에는 LLM 반성이 없어 수치만 적힙니다. 에이전트 연결 후에는 2~4문장 교훈이 들어오고 다음 판단 프롬프트에 주입됩니다.</p></div>
+  <div class="note">알파는 결정일 다음 첫 종가 진입 기준 ${esc(s.holding)}, 벤치마크는 종목 접미사별 지수(.KS → KOSPI). 모델 샘플링 없이 규칙만 돌렸으므로 이 run은 재현 가능하지만, 뉴스·소셜 피드가 들어가는 에이전트 run은 재현값이 아닙니다.</div>`;
+}
+
+function viewStub(title, items) {
+  return `<h1>${title}</h1><p class="sub">이 화면은 실행 레이어·하드 룰 레이어가 연결되면 채워집니다. 기획서 2차 범위.</p>
+  <div class="grid row2">${items.map(([h, d]) => `<div class="panel"><h2>${h}</h2><p style="color:var(--fg-2);margin:0">${d}</p></div>`).join("")}</div>`;
+}
+
+function render() {
+  nav();
+  const main = $("#main");
+  let html = statusbar();
+  switch (state.view) {
+    case "screens": html += viewScreens(); break;
+    case "decisions": html += viewDecisions(); break;
+    case "ticker": html += viewTicker(); break;
+    case "performance": html += viewPerformance(); break;
+    case "positions": html += viewPositions(); break;
+    case "config": html += viewConfig(); break;
+    default: html += viewHome();
+  }
+  main.innerHTML = html;
+  main.querySelectorAll("tr.click[data-ticker], a[data-ticker]").forEach(el => el.addEventListener("click", ev => { ev.preventDefault(); state.ticker = el.dataset.ticker; state.tab = "decisions"; go("ticker"); }));
+  main.querySelectorAll("tr.click[data-screen]").forEach(el => el.addEventListener("click", () => { state.screenIdx = +el.dataset.screen; state.stage = null; state.filter = "all"; state.q = ""; render(); }));
+  main.querySelectorAll(".stage").forEach(el => el.addEventListener("click", () => { state.stage = el.dataset.stage === "all" ? null : +el.dataset.stage; render(); }));
+  main.querySelectorAll("[data-filter]").forEach(el => el.addEventListener("click", () => { state.filter = el.dataset.filter; render(); }));
+  main.querySelectorAll("[data-decsrc]").forEach(el => el.addEventListener("click", () => { state.decSrc = el.dataset.decsrc; render(); }));
+  main.querySelectorAll("[data-approve]").forEach(el => el.addEventListener("click", () => openApprove(el.dataset.approve)));
+  main.querySelectorAll("[data-act]").forEach(el => el.addEventListener("click", () => toast(el.dataset.act + " (시안)")));
+  main.querySelectorAll("[data-dectab]").forEach(el => el.addEventListener("click", () => { state.decTab = el.dataset.dectab; render(); }));
+  main.querySelectorAll("[data-tab]").forEach(el => el.addEventListener("click", () => { state.tab = el.dataset.tab; render(); }));
+  const q = $("#q"); if (q) q.addEventListener("input", () => { state.q = q.value; const pos = q.selectionStart; render(); const q2 = $("#q"); q2.focus(); q2.setSelectionRange(pos, pos); });
+  const dd = $("#decDate"); if (dd) dd.addEventListener("change", () => { state.decDate = dd.value; render(); });
+  const ts = $("#tickerSel"); if (ts) ts.addEventListener("change", () => { state.ticker = ts.value; render(); });
+  const back = $("#back"); if (back) back.addEventListener("click", ev => { ev.preventDefault(); state.screenIdx = null; render(); });
+}
+function go(view) { state.view = view; if (location.hash !== "#" + view) history.replaceState(null, "", "#" + view); render(); window.scrollTo(0, 0); }
+window.addEventListener("hashchange", () => { const v = location.hash.slice(1); if (SCREENS.some(s => s[0] === v)) { state.view = v; if (v === "screens") state.screenIdx = null; render(); } });
+(function start() {
+  const v = location.hash.slice(1);
+  if (SCREENS.some(s => s[0] === v)) state.view = v;
+  if (!DATA) { $("#main").innerHTML = `<div class="empty">데이터가 주입되지 않았습니다. scripts/build_mockup.py를 실행하세요.</div>`; return; }
+  render();
+})();
+</script>
