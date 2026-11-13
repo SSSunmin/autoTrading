@@ -15,3 +15,7 @@ frontend/dist/
 data/audit/
 data/results/
 *.lock
+.env
+.env.*
+!.env.example
+data/.kis_token.json
