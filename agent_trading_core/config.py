@@ -139,6 +139,20 @@ PAPER_TRADING = {
 }
 
 
+# The LLM fund manager (agent_trading_core/agent.py, docs/01 §12). ``enabled`` is the daily loop's default decider
+# (scripts/daily_loop.py --decider overrides it): False keeps the rule baseline until the control tower switches it.
+# ``max_calls_per_run``: model calls one decide stage may make; the targets past it get the rule decision
+# (``settings.fallback = "rule"``). The key is ANTHROPIC_API_KEY from the environment or the .env (TRADING_ENV_FILE).
+LLM = {
+    "model": "claude-opus-5-5",
+    "effort": "high",                    # output_config.effort; thinking is left out (adaptive by default)
+    "max_tokens": 16000,
+    "timeout": 120,                      # seconds per request; the SDK retries twice (its default)
+    "max_calls_per_run": 30,
+    "enabled": False,
+}
+
+
 def default_config() -> dict:
     """The settings the memory, settlement and backtest layers read.
 

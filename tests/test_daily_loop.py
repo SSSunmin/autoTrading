@@ -7,6 +7,7 @@ catch-up of a stage within its session and a missed one after it, and the schedu
 scheduler): its next times, what it runs on start and at each time, a stop signal during a stage. No network: every price comes from the fake client, names and sectors from local tables."""
 
 import importlib.util
+import re
 import signal
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -414,3 +415,149 @@ def test_prices_come_from_the_kis_cache_not_the_yahoo_file(tmp_path):
     assert p.close_asof("^KS11", "2026-08-04") == final(client, "^KS11", "2026-08-04")
     assert p.open_on("^KS11", "2026-08-04") == final(client, "^KS11", "2026-08-04", "Open")
     assert p.frame("NOPE").empty
+
+
+class FakeManager:
+    """An Anthropic client for the decide stage: a memo for a candidate, a sell review for a holding, built from the
+    ticker in the user message; with ``refuse_first`` the first call is declined. Counts the calls."""
+
+    def __init__(self, refuse_first=False, sell="Exit"):
+        self.refuse_first, self.sell, self.asked = refuse_first, sell, []
+        self.messages = self
+
+    def create(self, **kw):
+        import json
+
+        from anthropic.types import Message
+        text = kw["messages"][0]["content"]
+        ticker = re.search(r"종목: (\S+)", text).group(1)
+        self.asked.append((ticker, "holding" if "매도 검토" in text else "candidate"))
+        close = float(re.search(r"\| Close \| ([\d,.]+) \|", text).group(1).replace(",", ""))
+        usage = {"input_tokens": 1000, "output_tokens": 800, "cache_read_input_tokens": 1500,
+                 "cache_creation_input_tokens": 0}
+        if self.refuse_first:
+            self.refuse_first = False
+            body = {"content": [], "stop_reason": "refusal", "stop_details": {"type": "refusal", "category": None}}
+        elif self.asked[-1][1] == "holding":
+            body = {"content": [{"type": "text", "text": json.dumps({
+                "checks": [{"condition": "c", "met": self.sell == "Exit", "evidence": "e"}],
+                "reasons": ["thesis_broken"] if self.sell == "Exit" else [], "reasoning": "r", "action": self.sell})}],
+                "stop_reason": "end_turn"}
+        else:
+            body = {"content": [{"type": "text", "text": json.dumps({
+                "business_summary": "b", "thesis": "t", "bull_case": "u", "bear_case": "d", "valuation_basis": "v",
+                "current_price": close, "price_target": close * 1.3, "downside_price": close * 0.9,
+                "catalysts": [{"event": "실적"}], "invalidation": ["i"], "rating": "Buy", "conviction": 0.6,
+                "exit_plan": "e", "time_horizon": "6개월"})}], "stop_reason": "end_turn"}
+        return Message.model_validate({"id": "m", "type": "message", "role": "assistant", "model": kw["model"],
+                                       "stop_sequence": None, "usage": usage} | body)
+
+
+class NoManager:
+    messages = property(lambda self: pytest.fail("the rule decider must not touch the model client"))
+
+
+@pytest.mark.unit
+def test_the_rule_decider_stays_the_default_and_never_calls_the_model(tmp_path):
+    assert dl.LLM["enabled"] is False and dl.default_decider() == "rule"
+    client = _market(today="2026-08-04")
+    r = dl.run_stage("KRX", "decide", "2026-08-04", tmp_path, client, at("2026-08-04", "15:40"), llm=NoManager())
+    decisions = market_audit(tmp_path / "audit", "KRX").decisions()
+    assert r.status == "ok" and decisions and all(d.settings["decider"] == "rule_momentum_baseline" for d in decisions)
+    assert "llm_calls" not in r.counts and not any("결정자" in n for n in r.notes)
+
+
+@pytest.mark.unit
+def test_the_llm_decider_writes_memos_for_survivors_then_reviews_holdings_and_never_asks_twice(tmp_path):
+    client, llm = _market(), FakeManager(refuse_first=True)
+    run = lambda name, day, hm: (setattr(client, "today", day),
+                                 dl.run_stage("KRX", name, day, tmp_path, client, at(day, hm), decider="llm", llm=llm))[1]
+    r = run("decide", "2026-08-04", "15:40")
+    audit = market_audit(tmp_path / "audit", "KRX")
+    survivors = [c.ticker for c in audit.screens()[-1].selected]
+    assert r.status == "ok" and r.counts["llm_calls"] == len(survivors) == len(llm.asked)
+    assert r.counts["input_tokens"] == 1000 * len(survivors) and r.counts["cache_read_input_tokens"] == 1500 * len(survivors)
+    assert any("claude-opus-5-5" in n for n in r.notes)
+    decisions = {d.ticker: d for d in audit.decisions()}
+    assert set(decisions) == set(survivors)                    # no decision for a name nobody asked about
+    assert all(d.source == "agent" and d.settings["decider"] == "claude-opus-5-5" and d.usage for d in decisions.values())
+    # the refused name is REVIEW: an exception in the queue, no order; the others are open buys
+    orders = latest_orders(audit.orders())
+    refused = llm.asked[0][0]
+    assert decisions[refused].rating == "REVIEW" and orders[f"paper-2026-08-04-{refused}"].exception_kind == "review"
+    assert {o.ticker for o in orders.values() if o.status == "open"} == set(survivors) - {refused}
+    raw = sorted((tmp_path / "audit" / "KRX" / "agent_raw" / "2026-08-04").glob("*.json"))
+    assert len(raw) == len(survivors)
+
+    assert run("fill", "2026-08-05", "09:10").status == "ok"
+    llm.asked.clear()
+    r = run("decide", "2026-08-05", "15:40")
+    held = {o.ticker for o in latest_orders(audit.orders()).values() if o.side == "Buy" and o.status == "filled"}
+    reviews = [t for t, kind in llm.asked if kind == "holding"]
+    assert held and sorted(reviews) == sorted(held)            # every holding reviewed, first
+    assert [k for _, k in llm.asked[:len(held)]] == ["holding"] * len(held)
+    day = [d for d in audit.decisions() if d.trade_date == "2026-08-05" and d.ticker in held]
+    assert all((d.rating, d.action, d.sell_reason) == ("Sell", "Sell", "thesis_broken") for d in day)
+    assert {o.ticker for o in latest_orders(audit.orders()).values()
+            if o.trade_date == "2026-08-05" and o.side == "Sell" and o.status == "open"} == held
+    # a rerun without the run records asks nobody again
+    (tmp_path / "audit" / "KRX" / "runs.jsonl").unlink()
+    llm.asked.clear()
+    again = run("decide", "2026-08-05", "15:50")
+    assert again.status == "ok" and again.counts["decisions_new"] == 0 and llm.asked == []
+
+
+@pytest.mark.unit
+def test_past_the_call_cap_or_without_a_key_the_rest_get_the_rule_decision(tmp_path, monkeypatch):
+    client, llm = _market(today="2026-08-04"), FakeManager()
+    monkeypatch.setitem(dl.LLM, "max_calls_per_run", 2)
+    r = dl.run_stage("KRX", "decide", "2026-08-04", tmp_path, client, at("2026-08-04", "15:40"), decider="llm", llm=llm)
+    audit = market_audit(tmp_path / "audit", "KRX")
+    n = len(audit.screens()[-1].selected)
+    assert len(llm.asked) == r.counts["llm_calls"] == 2 and r.counts["llm_fallback"] == n - 2
+    rule = [d for d in audit.decisions() if d.settings.get("fallback") == "rule"]
+    assert len(rule) == n - 2 and all(d.settings["fallback_reason"] == "max_calls_per_run(2)" for d in rule)
+    assert all(d.settings["decider"] == "rule_momentum_baseline" and not d.usage for d in rule)
+    # no key: the stage still decides (by rule, each record says why) and orders go out
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("TRADING_ENV_FILE", str(tmp_path / "none.env"))
+    client.today = "2026-08-05"
+    r = dl.run_stage("KRX", "decide", "2026-08-05", tmp_path, client, at("2026-08-05", "15:40"), decider="llm")
+    day = [d for d in audit.decisions() if d.trade_date == "2026-08-05"]
+    assert r.status == "ok" and "llm_calls" not in r.counts and r.counts["llm_fallback"] == len(day) > 0
+    assert all("ANTHROPIC_API_KEY 없음" in d.settings["fallback_reason"] for d in day)
+
+
+@pytest.mark.unit
+def test_a_ticker_whose_prompt_or_record_breaks_does_not_stop_the_stage(tmp_path, monkeypatch):
+    client, llm = _market(today="2026-08-04"), FakeManager()
+    real = dl.memory_text
+    first = []
+
+    def memory(t, *a, **k):
+        if not first:
+            first.append(t)
+            raise KeyError("broken memory")
+        return real(t, *a, **k)
+
+    monkeypatch.setitem(dl.agent_decide.__globals__, "memory_text", memory)
+    r = dl.run_stage("KRX", "decide", "2026-08-04", tmp_path, client, at("2026-08-04", "15:40"), decider="llm", llm=llm)
+    audit = market_audit(tmp_path / "audit", "KRX")
+    d = {x.ticker: x for x in audit.decisions()}
+    assert r.status == "ok" and r.counts["llm_fallback"] == 1 and first[0] not in {t for t, _ in llm.asked}
+    assert d[first[0]].settings["fallback_reason"].startswith("prep: KeyError")
+    assert audit.orders()                                      # the day still executed
+
+
+@pytest.mark.unit
+def test_a_paid_answer_that_cannot_be_recorded_or_kept_is_a_review_and_the_stage_goes_on(tmp_path, monkeypatch):
+    client, llm = _market(today="2026-08-04"), FakeManager()
+    monkeypatch.setattr(dl.agent, "to_record", lambda *a, **k: (_ for _ in ()).throw(ValueError("bad record")))
+    monkeypatch.setattr(dl.agent, "_keep", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    r = dl.run_stage("KRX", "decide", "2026-08-04", tmp_path, client, at("2026-08-04", "15:40"), decider="llm", llm=llm)
+    audit = market_audit(tmp_path / "audit", "KRX")
+    decisions = audit.decisions()
+    assert r.status == "ok" and r.counts["llm_review"] == r.counts["llm_calls"] == len(decisions) > 0
+    assert all(d.rating == "REVIEW" and "record: ValueError: bad record" in d.thesis and d.settings["raw"] is None
+               for d in decisions)
+    assert all(o.exception_kind == "review" for o in latest_orders(audit.orders()).values())
