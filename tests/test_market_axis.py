@@ -51,7 +51,7 @@ def root(tmp_path):
 # --- the books do not mix -------------------------------------------------------------------------
 
 @pytest.mark.unit
-def test_a_record_of_one_market_cannot_be_written_to_or_read_from_the_other_book(root):
+def test_a_record_of_one_market_cannot_be_written_to_or_read_from_the_other_book(jsonl_store, root):
     us = market_audit(root, "US")
     with pytest.raises(ValueError, match="KRX 기록이 US 장부"):
         us.record_order(OrderRecord(order_id="x", ticker="AAPL", trade_date="2026-06-01", side="Buy", quantity=1,
@@ -66,7 +66,7 @@ def test_a_record_of_one_market_cannot_be_written_to_or_read_from_the_other_book
 
 
 @pytest.mark.unit
-def test_krx_reads_the_files_from_before_the_market_axis_as_krx_and_writes_beside_them(root):
+def test_krx_reads_the_files_from_before_the_market_axis_as_krx_and_writes_beside_them(jsonl_store, root):
     root.mkdir(parents=True)
     old = json.dumps({"order_id": "paper-2026-06-01-005930.KS", "ticker": "005930.KS", "trade_date": "2026-06-01",
                       "side": "Buy", "quantity": 3, "status": "open"}) + "\n"   # no market field: written before the axis
@@ -256,7 +256,7 @@ def test_halt_all_stops_both_books_and_resume_us_leaves_krx_halted(api):
 
 
 @pytest.mark.unit
-def test_a_broken_us_operations_log_does_not_block_the_halt_of_krx(api, tmp_path):
+def test_a_broken_us_operations_log_does_not_block_the_halt_of_krx(jsonl_store, api, tmp_path):
     ops = tmp_path / "data" / "audit" / "US" / "operations.jsonl"
     ops.write_text('{"kind": "halt", "at": "2026-06-0\n', encoding="utf-8")                  # a cut-short line
     r = api.post("/api/trading/halt", json={"operator": "운영자A", "reason": "장애"})
@@ -271,7 +271,7 @@ def test_a_broken_us_operations_log_does_not_block_the_halt_of_krx(api, tmp_path
 
 
 @pytest.mark.unit
-def test_a_broken_us_book_leaves_the_krx_card_and_krx_settings_readable(api, tmp_path):
+def test_a_broken_us_book_leaves_the_krx_card_and_krx_settings_readable(jsonl_store, api, tmp_path):
     with open(tmp_path / "data" / "audit" / "US" / "orders.jsonl", "a", encoding="utf-8") as f:
         f.write("{not json\n")
     cards = {c["market"]: c for c in api.get("/api/markets").json()}
@@ -328,7 +328,7 @@ def test_the_next_run_is_five_minutes_after_the_next_close_in_kst(now, market, e
 
 
 @pytest.mark.unit
-def test_the_cli_runs_the_us_book_under_audit_us(tmp_path, monkeypatch, capsys):
+def test_the_cli_runs_the_us_book_under_audit_us(jsonl_store, tmp_path, monkeypatch, capsys):
     from scripts import paper_execute
     days = ["2026-06-01", "2026-06-02", "2026-06-03"]
     prices = Prices(frames={"^GSPC": _rising(days), "^KS11": _rising(days), "AAPL": _flat(days, 100.0)})

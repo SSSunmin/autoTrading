@@ -18,7 +18,7 @@ import pytest
 
 from agent_trading_core import kis
 from agent_trading_core import scheduler as sched
-from agent_trading_core.audit import OperationRecord, latest_orders, market_audit
+from agent_trading_core.audit import AuditLog, OperationRecord, latest_orders, market_audit
 from agent_trading_core.errors import NoMarketDataError, VendorUnavailableError
 
 _spec = importlib.util.spec_from_file_location("daily_loop", Path(__file__).resolve().parents[1] / "scripts" / "daily_loop.py")
@@ -105,9 +105,9 @@ def _offline(monkeypatch):
 
 
 def _lines(data: Path, market="KRX") -> dict[str, int]:
-    d = data / "audit" / market
-    return {p.stem: sum(1 for line in p.read_text(encoding="utf-8").splitlines() if line.strip())
-            for p in sorted(d.glob("*.jsonl"))}
+    audit = market_audit(data / "audit", market)
+    counts = {name: len(getattr(audit, name)()) for name in ("screens", "decisions", "orders", "operations", "runs")}
+    return {name: n for name, n in counts.items() if n}                       # the kinds the book has records of
 
 
 @pytest.mark.unit
@@ -149,7 +149,7 @@ def test_a_stage_is_due_from_its_time_until_the_next_session_opens():
 
 
 @pytest.mark.unit
-def test_decide_fill_decide_records_each_step_once_and_a_rerun_writes_nothing(tmp_path):
+def test_decide_fill_decide_records_each_step_once_and_a_rerun_writes_nothing(tmp_path, monkeypatch):
     client = _market()
     r1 = stage(client, "KRX", "decide", "2026-08-04", at("2026-08-04", "15:40"), tmp_path)
     assert r1.status == "ok" and r1.counts["provisional"] == len(UNIVERSE) + 1
@@ -186,7 +186,7 @@ def test_decide_fill_decide_records_each_step_once_and_a_rerun_writes_nothing(tm
         assert stage(client, "KRX", name, day, at(*now.split()), tmp_path) is None
     assert _lines(tmp_path) == before
     # without the run records, the stage itself still adds no screen, decision or order
-    (tmp_path / "audit" / "KRX" / "runs.jsonl").unlink()
+    monkeypatch.setattr(AuditLog, "runs", lambda self: [])
     again = stage(client, "KRX", "decide", "2026-08-06", at("2026-08-06", "15:45"), tmp_path)
     assert again.status == "ok" and again.counts["decisions_new"] == 0
     assert {k: v for k, v in _lines(tmp_path).items() if k != "runs"} == {k: v for k, v in before.items() if k != "runs"}
@@ -468,7 +468,7 @@ def test_the_rule_decider_stays_the_default_and_never_calls_the_model(tmp_path):
 
 
 @pytest.mark.unit
-def test_the_llm_decider_writes_memos_for_survivors_then_reviews_holdings_and_never_asks_twice(tmp_path):
+def test_the_llm_decider_writes_memos_for_survivors_then_reviews_holdings_and_never_asks_twice(tmp_path, monkeypatch):
     client, llm = _market(), FakeManager(refuse_first=True)
     run = lambda name, day, hm: (setattr(client, "today", day),
                                  dl.run_stage("KRX", name, day, tmp_path, client, at(day, hm), decider="llm", llm=llm))[1]
@@ -501,7 +501,7 @@ def test_the_llm_decider_writes_memos_for_survivors_then_reviews_holdings_and_ne
     assert {o.ticker for o in latest_orders(audit.orders()).values()
             if o.trade_date == "2026-08-05" and o.side == "Sell" and o.status == "open"} == held
     # a rerun without the run records asks nobody again
-    (tmp_path / "audit" / "KRX" / "runs.jsonl").unlink()
+    monkeypatch.setattr(AuditLog, "runs", lambda self: [])
     llm.asked.clear()
     again = run("decide", "2026-08-05", "15:50")
     assert again.status == "ok" and again.counts["decisions_new"] == 0 and llm.asked == []

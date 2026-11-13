@@ -15,7 +15,7 @@ Stages, for one trading day of the market (default: today in the market's time z
   provisional row → ``execute_date`` of the previous session again, which fills its open orders at today's open.
 - ``all``: fill, then decide (a catch-up run after the close).
 
-Each stage appends one ``RunRecord`` (``audit/<market>/runs.jsonl``). A stage that ended ``ok`` or ``skipped``
+Each stage appends one ``RunRecord`` (``run_records``; ``audit/<market>/runs.jsonl`` with TRADING_STORE=jsonl). A stage that ended ``ok`` or ``skipped``
 (holiday) is not run again for that day: a second call prints so and writes nothing; the screen, decisions and
 orders are also keyed (screen run id, decision per screen and ticker, the executor's order id), so a rerun after a
 failure writes only what is missing. A failure stops the stage (and ``all`` before decide) with ``failed``. The

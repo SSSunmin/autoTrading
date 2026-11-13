@@ -237,7 +237,7 @@ def test_a_gap_up_open_fills_partly_or_is_rejected_for_cash(audit):
     assert [o.status for o in out] == ["filled", "partial"]
     assert out[1].filled_quantity < out[1].quantity and "잔량 취소" in out[1].reason
 
-    audit2 = AuditLog(audit.directory.parent / "audit2")
+    audit2 = AuditLog(audit.directory.parent / "other" / "audit")             # its own database too
     one = PaperConfig(initial_cash=1_000_000)
     big = _frame({"2026-06-01": (900_000, 900_000), "2026-06-02": (900_000, 900_000), "2026-06-04": (1_100_000, 1_100_000),
                   "2026-06-05": (1_100_000, 1_100_000), "2026-06-08": (1_100_000, 1_100_000)})
@@ -257,7 +257,7 @@ def test_an_earlier_date_after_a_later_one_is_refused(audit):
 
 
 @pytest.mark.unit
-def test_a_broken_orders_line_refuses_before_anything_is_appended(audit):
+def test_a_broken_orders_line_refuses_before_anything_is_appended(jsonl_store, audit):
     _decide(audit, "A.KS", "2026-06-02")
     path = audit.directory / "orders.jsonl"
     path.write_text('{"order_id": "x", "ticker"', encoding="utf-8")            # a write cut short
@@ -424,7 +424,7 @@ def test_the_executor_waits_for_the_lock_a_halt_holds(audit):
 
 
 @pytest.mark.unit
-def test_the_cli_exits_4_on_a_broken_orders_line(tmp_path, capsys):
+def test_the_cli_exits_4_on_a_broken_orders_line(jsonl_store, tmp_path, capsys):
     from scripts.paper_execute import main
     audit = AuditLog(tmp_path / "audit")
     _decide(audit, "A.KS", "2026-06-02")

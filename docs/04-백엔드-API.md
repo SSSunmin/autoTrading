@@ -2,9 +2,9 @@
 
 구현 `backend/main.py` (FastAPI) · 실행 `.venv\Scripts\python -m uvicorn backend.main:app --reload --port 8000` · 자동 문서 `http://127.0.0.1:8000/docs`
 
-원칙은 기획서 §0과 같다. 화면이 보여주는 숫자는 전부 기록(`data/audit/<시장>/*.jsonl`, 메모리 로그, `baseline_summary.json`)에서 읽고 서버가 그대로 서빙한다. 한글 라벨(규칙명·등급명·종목명·주문 상태·운용 모드)은 서버가 붙여 주므로 프론트는 번역 테이블을 갖지 않는다. 데이터의 **값**(rating `Buy`, rule id `price_min`, status `filled`)은 영문 고정이고, 표시용 `*_ko` 필드가 따로 온다.
+원칙은 기획서 §0과 같다. 화면이 보여주는 숫자는 전부 기록(`data/trading.db` — `TRADING_STORE=jsonl`이면 `data/audit/<시장>/*.jsonl`, 메모리 로그, `baseline_summary.json`)에서 읽고 서버가 그대로 서빙한다. 한글 라벨(규칙명·등급명·종목명·주문 상태·운용 모드)은 서버가 붙여 주므로 프론트는 번역 테이블을 갖지 않는다. 데이터의 **값**(rating `Buy`, rule id `price_min`, status `filled`)은 영문 고정이고, 표시용 `*_ko` 필드가 따로 온다.
 
-쓰기는 기획서 §0-5의 세 가지만 있다: **긴급 정지**, **재가동**, **운용 모드 변경**. 셋 다 그 시장의 `operations.jsonl`에 append-only로 기록되고, 현재 상태는 그 기록을 재생해서 만든다(`audit.trading_state`). 상태를 따로 저장하지 않으므로 상태와 감사 이력이 어긋날 수 없다.
+쓰기는 기획서 §0-5의 세 가지만 있다: **긴급 정지**, **재가동**, **운용 모드 변경**. 셋 다 그 시장의 운영 기록(`operations` 테이블 — JSONL이면 `operations.jsonl`)에 append-only로 기록되고, 현재 상태는 그 기록을 재생해서 만든다(`audit.trading_state`). 상태를 따로 저장하지 않으므로 상태와 감사 이력이 어긋날 수 없다.
 
 ## 시장 축 (docs/08)
 
@@ -19,16 +19,53 @@
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `TRADING_DATA_DIR` | `<repo>/data` | `audit/`, `baseline_summary.json`, `results/paper*/`, `cache/`가 있는 폴더 |
+| `TRADING_DATA_DIR` | `<repo>/data` | `trading.db`, `audit/`, `baseline_summary.json`, `results/paper*/`, `cache/`가 있는 폴더 |
+| `TRADING_STORE` | `sqlite` | 기록 정본: `sqlite`(`TRADING_DATA_DIR/trading.db`) 또는 `jsonl`(`audit/<시장>/*.jsonl`, 이전 방식). 그 밖의 값은 `ValueError`. 아래 "기록 저장소" |
 | `TRADING_MEMORY_LOG` | summary의 `log_path` | 읽을 메모리 로그(국내만 — 미국 결정 베이스라인은 아직 없음) |
 | `TRADING_CORS` | localhost 5173·3000 | 허용 오리진, 쉼표 구분 |
 | `TRADING_ADMIN_TOKEN` | 없음 | 설정하면 재가동·모드 변경에 `X-Admin-Token` 헤더 필수. 없으면 개발 모드로 누구나 가능하고 기록의 `role`이 `admin(dev, no token)`으로 남는다 |
 
-파일 mtime이 바뀌면 다음 요청에서 다시 읽는다(append-only라 안전).
+파일 mtime이 바뀌면 다음 요청에서 다시 읽는다(append-only라 안전). sqlite 저장소는 기록할 때마다 그 장부의 `audit/<시장>/<종류>.jsonl`을 **내용 없이 touch**만 해서 이 감시가 그대로 돈다(ponytail — api `feature/db-store-api`가 DB를 직접 감시하면 제거).
 
-## 기록 파일
+## 기록 저장소 (2026-11-14, db-store)
 
-시장마다 폴더 하나: `audit/KRX/`, `audit/US/`. 기록 모델(`DecisionRecord`·`OrderRecord`·`OperationRecord`·`RunRecord`)에 `market` 필드(`RunRecord`는 필수, 나머지는 기본 `"KRX"`)가 있고, `OperationRecord`에는 `scope`(정지·재가동의 요청 범위 `all`/`KRX`/`US`, 그 외 `null`)가 있다.
+**정본은 하나**: 기본 SQLite `TRADING_DATA_DIR/trading.db`(표준 `sqlite3`, 의존성 없음). `TRADING_STORE=jsonl`이면 이전처럼 JSONL 파일이 정본이고 DB는 쓰지 않는다 — 둘을 동시에 쓰는 경로는 없다. `audit.AuditLog`의 공개 함수(`record_*` · `screens/decisions/orders/operations/runs` · `market_audit` · `latest_orders` · `trading_state` · `decision_source`)는 그대로이고 내부 저장만 바뀐다(`agent_trading_core/store/`). `AuditLog.directory`(`audit/<시장>/`)는 sqlite에서도 남는다: 실행 잠금(`execution_lock`, `daily_loop_*`), 모델 원문(`agent_raw/`)이 거기 있다.
+
+| 테이블 | 종류(이전 파일) | 풀어 둔 조회 열 · 인덱스 |
+|---|---|---|
+| `screen_runs` | `ScreenRun`(`screens.jsonl`) | `run_id`, `as_of` · (market, as_of), (run_id) |
+| `screen_candidates` | 선별 후보 한 종목(`ScreenRun.candidates`) | `screen_id` → `screen_runs(id)` FK, `ticker`, `selected`, `rank`, `score` · (screen_id), (market, ticker). 선별과 한 트랜잭션, 읽기는 `screen_runs.payload`가 정본 |
+| `decisions` | `DecisionRecord` | `ticker`, `trade_date`, `rating`, `source`, `screen_run_id` · (market, trade_date), (market, ticker, trade_date), (screen_run_id) |
+| `orders` | `OrderRecord` | `order_id`, `ticker`, `trade_date`, `side`, `status`, `fill_date` · (market, trade_date), (market, status), (market, ticker, trade_date), (order_id) |
+| `operations` | `OperationRecord` | `kind`, `target`, `operator` · (market, recorded_at), (market, kind) |
+| `run_records` | `RunRecord`(`runs.jsonl`) | `stage`, `trade_date`, `status` · (market, stage, trade_date) |
+| `schema_version` | 1행(`version` 2 — 2: 코드가 쓴 기록은 `source_hash` NULL) | 코드가 읽는 버전과 다르면 연결 거부 → DB를 `data/backup/`으로 옮기고 처음부터 적재 |
+
+- **공통 열**: `id INTEGER PRIMARY KEY`(삽입 순서 = 재생 순서), `market`(시장 폴더 대신), `recorded_at`(기록 자신의 UTC 시각: screens·decisions `recorded_at`, orders `placed_at`, operations `at`, runs `ended_at`), `payload`(기록 JSON 원문 그대로 — 읽기·내보내기는 이 값), `source_hash` UNIQUE(`screen_candidates` 제외 — JSONL에서 적재한 줄의 키, 코드가 새로 쓴 기록은 NULL). 피크 재설정은 운영 기록(`resume`)을 재생해 얻으므로 `peak_resets` 테이블은 두지 않았다.
+- **append-only를 DB가 강제**: 모든 테이블(`schema_version` 포함)에 `BEFORE UPDATE` · `BEFORE DELETE` 트리거 `RAISE(ABORT, 'append-only')`. `INSERT OR REPLACE`(충돌 행을 지우고 넣음)도 막는다: 우리 연결은 `recursive_triggers`로 삭제 트리거가 걸리고, 그 밖의 클라이언트(sqlite3 CLI 등)에도 `BEFORE INSERT` 트리거가 있는 `id`로의 삽입은 거부(`*_no_replace`), 적재된 줄의 `source_hash`로의 삽입은 무시(`*_same_hash`, `RAISE(IGNORE)` — `ON CONFLICT DO NOTHING`과 같음)한다. 새 행 삽입만 된다. 상태 변경은 새 행(주문 open → filled는 같은 `order_id`의 새 행, `latest_orders`가 마지막 행을 고름). **상태 테이블은 없다** — 모드·정지·장부·모의 판정은 지금처럼 기록을 재생한다.
+- **쓰기**: 기록 1건 = 트랜잭션 1건(`BEGIN IMMEDIATE`, 선별은 후보까지 한 번에). WAL, `busy_timeout` 30초 — 스케줄러 · API · CLI가 같은 DB에 동시에 써도 줄을 서서 들어간다. 실행 잠금(`execution_lock`)은 그대로 유지(읽고 판단하고 쓰는 구간 전체를 묶는 용도).
+- **멱등은 적재에만**: 코드가 쓰는 기록은 바이트까지 같아도 매번 새 행이다(JSONL에 새 줄이 붙던 것과 같음 — 시각이 초 단위라 같은 초의 정지 → 재가동 → 정지가 같은 바이트일 수 있다). 재실행 중복은 지금처럼 기록의 키(선별 run id · 선별+종목별 결정 · `order_id` · `RunRecord`)가 막는다. 적재는 `source_hash`로 멱등(아래).
+- **DB 위치**: 감사 루트(`data/audit`)의 부모 폴더 `trading.db` = `TRADING_DATA_DIR/trading.db`. 시장마다 따로가 아니라 하나.
+- **적재 전 보호**: sqlite인데 DB 파일이 없고 감사 루트(루트 파일과 시장 폴더 전부 — 연 장부만이 아니다: 첫 장부를 읽는 순간 DB가 생겨 다음 장부의 보호가 꺼지므로)에 내용 있는 JSONL이 있으면 `AuditLog`가 `RuntimeError`("…migrate_jsonl_to_db.py로 먼저 적재") — 빈 장부로 시작해 주문이 겹치는 것을 막는다.
+- **Postgres 이식**: 타입은 TEXT · INTEGER · REAL · BOOLEAN, 시각은 ISO-8601 텍스트. 다른 점은 트리거 문법(plpgsql 함수)과 `INTEGER PRIMARY KEY` → `BIGINT GENERATED ALWAYS AS IDENTITY`뿐(`store/schema.sql` 머리 주석).
+
+**적재 · 백업 명령**
+
+```text
+.venv/Scripts/python scripts/migrate_jsonl_to_db.py --verify     # data/audit/** → data/trading.db, 재생 비교까지
+.venv/Scripts/python scripts/migrate_jsonl_to_db.py --verify-only
+.venv/Scripts/python scripts/export_db_to_jsonl.py               # → data/backup/jsonl-<UTC>/<시장>/<종류>.jsonl
+.venv/Scripts/python scripts/export_db_to_jsonl.py --out D:/backup/audit
+```
+
+- 적재 순서: 종류마다 루트(시장 축 이전, 국내) → `audit/KRX/` → `audit/US/`, 파일 안은 줄 순서 — JSONL 저장소가 읽는 순서와 같아 시장별 재생 순서가 보존된다. 줄 원문이 그대로 `payload`. 같은 줄이 여러 번 있으면 k번째는 `sha256(줄 + "#k")`로 행이 따로 남고, 다시 적재해도 새 행 0(멱등). JSON이 아니거나 기록 검증에 실패하거나 다른 시장 기록이 섞인 줄이 하나라도 있으면 **아무것도 적재하지 않고** 줄 위치를 출력, 종료 코드 4. JSONL 파일은 건드리지 않는다(백업으로 남김). 적재 전체가 트랜잭션 하나이고, 첫 적재는 `trading.db.loading`에 다 넣은 뒤 `trading.db`로 이름을 바꾼다 — DB 파일이 있으면 적재가 끝난 것이라 위 보호가 그때까지 유지되고, 중간에 멈추면 DB가 생기지 않는다(다음 실행이 남은 `.loading`을 지우고 처음부터). **적재 전에 스케줄러 · 백엔드를 멈춘다**(적재 중 쓰인 기록은 옛 줄보다 id가 앞선다). `--verify-only`는 DB가 없으면 종료 코드 2.
+- `--verify`: 시장마다 기록 · `latest_orders` · `trading_state` · `positions_view` · `paper_progress`를 두 저장소로 재생해 JSON으로 덤프하고 바이트 비교(다르면 종료 코드 5).
+- 내보내기: 테이블 → `<out>/<시장>/<종류>.jsonl`, 행마다 payload 한 줄(id 순). 적재한 줄과 바이트까지 같다(국내는 루트 줄 + `KRX/` 줄이 한 파일로). `<out>`은 `TRADING_STORE=jsonl`의 감사 루트로 그대로 읽힌다. 이미 있는 폴더에는 쓰지 않는다(종료 코드 2). `data/trading.db*` · `data/backup/`은 gitignore.
+- 저장소를 jsonl로 되돌리려면 export 결과를 감사 루트로 쓴다(sqlite 동안의 기록은 JSONL 파일에 없다 — touch만 됨). jsonl로 운영한 뒤 sqlite로 돌아오면 `trading.db`(`-wal` · `-shm` 포함)를 `data/backup/`으로 옮기고 `--verify`로 **처음부터** 적재한다(파일에 sqlite 기간 + jsonl 기간이 다 있다). 옛 DB 위에 다시 적재하면 export한 줄이 코드가 쓴 행과 겹치므로 적재가 그 줄들을 거부한다(종료 4, 아무것도 안 넣음).
+
+## 기록 종류
+
+시장마다 장부 하나: sqlite는 `market` 열, JSONL은 폴더 `audit/KRX/`, `audit/US/`(아래 파일 이름은 JSONL 저장소의 것, 테이블은 위 표). 기록 모델(`DecisionRecord`·`OrderRecord`·`OperationRecord`·`RunRecord`)에 `market` 필드(`RunRecord`는 필수, 나머지는 기본 `"KRX"`)가 있고, `OperationRecord`에는 `scope`(정지·재가동의 요청 범위 `all`/`KRX`/`US`, 그 외 `null`)가 있다.
 
 **호환 읽기(이전 기록):** 시장 축 이전의 `audit/*.jsonl`(루트)은 **국내 기록으로 읽고 옮기지 않는다**. 국내 장부는 루트 파일을 먼저, 그 뒤 `audit/KRX/`를 이어 읽고(`audit.market_audit`), 실행기·API가 쓰는 새 국내 기록은 `audit/KRX/`에만 append된다. 예외: `scripts/baseline_krx.py`(선별·결정)는 아직 루트 `audit/`에 쓰고, `scripts/build_mockup.py`는 루트만 읽는다(core 소유 스크립트, 후속). 읽기는 둘 다 이어 읽으므로 국내 장부는 섞이지 않는다. 루트 파일은 한 바이트도 바뀌지 않는다(옮기거나 다시 쓰면 append-only 감사 기록을 고치는 셈이라 택하지 않음). 미국 장부는 `audit/US/`만 읽는다.
 

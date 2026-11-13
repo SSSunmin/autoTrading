@@ -11,8 +11,9 @@ models are the contract between the screening/decision program and the UI:
 - ``DecisionRecord`` one agent decision: rating, evidence list, link to the memory log entry
 - ``RunRecord``      one stage of the daily loop (scripts/daily_loop.py): market, stage, start/end, result, error
 
-Records are appended as JSON lines so a run can be replayed and nothing is
-overwritten. The memory log stays the system of record for outcomes; a
+Records are appended, never changed, so a run can be replayed and nothing is
+overwritten: rows of one SQLite database (agent_trading_core/store/, the default) or
+JSON lines (``TRADING_STORE=jsonl``). The memory log stays the system of record for outcomes; a
 DecisionRecord points at its entry by (ticker, trade_date).
 """
 
@@ -25,9 +26,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from agent_trading_core.files import locked
 from agent_trading_core.rating import RATING_REVIEW, RATINGS_5_TIER
 from agent_trading_core.schemas import SellReason
+from agent_trading_core.store import DB_NAME, JsonlStore, SqliteStore, store_kind
 
 
 def _now() -> str:
@@ -252,19 +253,46 @@ def trading_state(operations: list[OperationRecord], default_mode: str = "paper"
     return state
 
 
+RECORD_NAMES = ("screens", "decisions", "orders", "operations", "runs")
+
+
+def _unloaded(root: Path) -> bool:
+    """Whether the audit root holds JSON lines (its own files or a market folder's) that a missing database has not
+    loaded: every book, not only the one opened — the first book read creates the database, and the next would
+    then start empty."""
+    dirs = [root, *(d for d in root.iterdir() if d.is_dir())] if root.is_dir() else []
+    return any((p := d / f"{n}.jsonl").exists() and p.stat().st_size > 0 for d in dirs for n in RECORD_NAMES)
+
+
 class AuditLog:
-    """Append-only JSON-lines files, one per record type, under ``directory``.
+    """Append-only records, one kind per record type: in the SQLite database (``store.SqliteStore``, the default) or
+    in JSON-lines files under ``directory`` (``TRADING_STORE=jsonl``, ``store.JsonlStore``).
 
     With ``market`` set it is one market's book: a record of another market is refused on write and on read
     (ValueError, like a broken line), so a default "KRX" never slips a line into the wrong book. ``legacy``: a
     directory read before ``directory`` and never written — the KRX files from before the market axis
-    (``market_audit``)."""
+    (``market_audit``). ``directory`` stays the book's folder either way: its locks (``execution.execution_lock``)
+    and the model's raw answers live there.
+
+    The database is ``trading.db`` beside the audit root (``data/audit`` -> ``data/trading.db``, the
+    ``TRADING_DATA_DIR``), one for every market: the root is ``legacy`` when there is one, the parent of a market's
+    ``directory`` (``market_audit``), else ``directory`` itself. A book with no ``market`` reads every market's rows,
+    as it read every line of its files."""
 
     def __init__(self, directory: str | Path, market: str | None = None, legacy: str | Path | None = None):
         self.directory = Path(directory)
         self.market = market
         self.legacy = Path(legacy) if legacy else None
         self.directory.mkdir(parents=True, exist_ok=True)
+        kind = store_kind()
+        if kind == "jsonl":
+            self.store = JsonlStore(self.directory, self.legacy)
+            return
+        root = self.legacy or (self.directory.parent if market else self.directory)
+        self.store = SqliteStore(root.parent / DB_NAME)
+        if not self.store.path.exists() and _unloaded(root):
+            raise RuntimeError(f"{self.store.path}가 없고 {root} 아래에 JSONL 기록이 있습니다 — "
+                               "scripts/migrate_jsonl_to_db.py로 먼저 적재하세요(빈 장부로 시작하면 주문이 겹칩니다)")
 
     def _check(self, record: BaseModel, where: str) -> None:
         got = getattr(record, "market", None)
@@ -273,18 +301,14 @@ class AuditLog:
 
     def _append(self, name: str, record: BaseModel) -> None:
         self._check(record, f"{name}.jsonl 쓰기")
-        path = self.directory / f"{name}.jsonl"
-        with locked(path), open(path, "a", encoding="utf-8") as f:
-            f.write(record.model_dump_json() + "\n")
+        self.store.append(name, record, getattr(record, "market", None) or self.market or "KRX")
+        if self.store.kind == "sqlite":
+            # ponytail: the backend reloads when a JSONL file's mtime changes (backend/main.py _Store._paths); touch
+            # the book's file, contents untouched, until it watches the database (api feature/db-store-api)
+            (self.directory / f"{name}.jsonl").touch()
 
     def _read(self, name: str, model):
-        rows = []
-        for d in ([self.legacy] if self.legacy else []) + [self.directory]:
-            path = d / f"{name}.jsonl"
-            if not path.exists():
-                continue
-            with open(path, encoding="utf-8") as f:
-                rows += [model.model_validate(json.loads(line)) for line in f if line.strip()]
+        rows = [model.model_validate(json.loads(line)) for line in self.store.read(name, self.market)]
         for r in rows:
             self._check(r, f"{name}.jsonl 읽기")
         return rows
