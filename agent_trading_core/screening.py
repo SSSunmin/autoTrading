@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 import numpy as np
@@ -53,6 +53,15 @@ class ScreenConfig:
         "price_min", "listed_days_min", "dollar_volume_top_n", "volatility_band",
         "range_stability_min", "sector_quota", "performance_filter", "momentum_top_k",
     ))
+
+
+# US preset: a $5 floor, the usual penny-stock cut (SEC Rule 3a51-1 treats stocks under $5 as penny stocks).
+# Every other rule keeps the KRX default on purpose: the US book is measured once with the same rules, not tuned.
+US_PRICE_MIN = 5.0
+
+
+def us_preset(cfg: ScreenConfig | None = None) -> ScreenConfig:
+    return replace(cfg or ScreenConfig(), price_min=US_PRICE_MIN)
 
 
 @dataclass
@@ -198,6 +207,8 @@ def screen(
             rank = {t: i + 1 for i, t in enumerate(ranked)}
             apply(rule, {t: FilterResult(rule=rule, value=rank[t], threshold=cfg.dollar_volume_top_n,
                                          passed=rank[t] <= cfg.dollar_volume_top_n,
+                                         # ponytail: KRW wording; a US run prints dollars ÷ 1e8 as 억원. Pass the
+                                         # currency in when US screen records are stored (execution layer, api).
                                          note=f"{cfg.dollar_volume_window}일 평균 거래대금 {feats[t].dollar_volume / 1e8:,.0f}억원")
                          for t in alive})
         elif rule == "volatility_band":

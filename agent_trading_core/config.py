@@ -29,12 +29,16 @@ DEFAULT_BENCHMARK_MAP = {
 }
 
 
-# Korean market rules the execution and backtest layers need. Verified 2026-11-13
-# against public sources (docs/01 §11-2). The static-VI reference price and the
-# tick table are not settled there; confirm against the KRX business regulations
-# before relying on them.
-# ponytail: a plain dict until a second market needs the same shape.
-KRX_MARKET = {
+# Market rules the execution and backtest layers need, one entry per market. The two books are run apart
+# (separate cash, separate limits, no FX). Keys shared by every entry: currency, benchmark, benchmark_key,
+# benchmark_name_ko, timezone, session, settlement, price_limit, halt_rules, sell_tax, trade_unit,
+# fractional_shares, pdt_rule. Market-only keys (KRX VI, US regulatory fees) stay in their own entry.
+#
+# KRX: verified 2026-11-13 against public sources (docs/01 §11-2). The static-VI reference price and the
+# tick table are not settled there; confirm against the KRX business regulations before relying on them.
+# US: verified 2026-11-13 (docs/01 §11-3).
+MARKETS: dict[str, dict] = {}
+MARKETS["KRX"] = {
     "price_limit": 0.30,                 # daily limit vs reference price, since 2015
     "vi_dynamic_kospi200": 0.03,         # dynamic volatility interruption, KOSPI200 names
     "vi_dynamic_other": 0.06,            # dynamic VI, other KOSPI and KOSDAQ names
@@ -47,6 +51,48 @@ KRX_MARKET = {
     "sell_tax_konex": 0.0010,
     "trade_unit": 1,
     "short_selling": "allowed_since_2025-03-31",
+    # common keys
+    "currency": "KRW",
+    "benchmark": "^KS11",
+    "benchmark_key": "kospi",
+    "benchmark_name_ko": "코스피",
+    "timezone": "Asia/Seoul",
+    "session": "09:00-15:30",
+    "settlement": "T+2",
+    "halt_rules": "VI 동적 3%/6%·정적 10% → 2분 단일가, 시장 서킷브레이커 8/15/20%",
+    # "sell_tax" (common key) is set from sell_tax_kospi below: the backtest universe is KOSPI
+    "fractional_shares": False,
+    "pdt_rule": "해당 없음",            # string, not None: the settings screen prints every value
+}
+# one number for the simulator (sell_tax) and paper fills (execution.py reads sell_tax_kospi)
+MARKETS["KRX"]["sell_tax"] = MARKETS["KRX"]["sell_tax_kospi"]
+KRX_MARKET = MARKETS["KRX"]              # backend/main.py imports this name
+
+MARKETS["US"] = {
+    "currency": "USD",
+    "benchmark": "^GSPC",
+    "benchmark_key": "sp500",
+    "benchmark_name_ko": "S&P 500",
+    "timezone": "America/New_York",
+    "session": "09:30-16:00",            # regular session only; pre/after-market not used
+    "settlement": "T+1",                 # since 2024-05-28 (SEC Rule 15c6-1 amendment)
+    "price_limit": None,                 # no daily limit; LULD bands instead
+    "halt_rules": "LULD Tier 1(S&P 500) $3 초과 ±5% 밴드 15초 이탈 → 5분 정지, 시장 서킷브레이커 7/13/20%",
+    "sell_tax": 0.0,                     # no transaction tax
+    # Regulatory fees on sells. Rates vary over the backtest window; one rate is applied throughout (below).
+    # SEC Section 31, the rate in force on 2026-11-13: $20.60 per $1M of sales from 2026-04-04 (FY2026 fee rate advisory, 2026-02-27; $0.00
+    # from 2025-05-14, $27.80 before). https://www.finra.org/rules-guidance/notices/information-notice-20260317
+    "sec_fee_rate": 20.60 / 1_000_000,
+    # FINRA TAF: $0.000195 per share sold, max $9.79 per trade — the regular 2026 rate. Unlike the SEC fee this is
+    # not the rate in force today: the 2026 Q4 fee holiday ($0) is not applied (set by
+    # SR-FINRA-2026-021). https://www.finra.org/rules-guidance/rulebooks/corporate-organization/section-1-member-regulatory-fees
+    "taf_per_share": 0.000195,
+    "taf_max": 9.79,
+    "trade_unit": 1,
+    "fractional_shares": True,           # brokers offer it; the paper book trades whole shares only
+    # The $25,000 pattern-day-trader minimum was replaced by intraday margin standards on 2026-06-04
+    # (SR-FINRA-2025-017, Regulatory Notice 26-10). The book holds overnight, so it does not bind either way.
+    "pdt_rule": "2026-06-04 폐지(FINRA 4210 일중 증거금 기준으로 대체), 이전: 마진 계좌 $25,000 미만 5영업일 내 데이트레이드 4회 제한",
 }
 
 
