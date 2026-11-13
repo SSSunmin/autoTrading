@@ -299,7 +299,7 @@ def test_halt_cancels_the_open_orders_in_the_orders_log(executed):
 
 
 @pytest.mark.unit
-def test_halt_with_keep_exits_leaves_open_sells_and_a_broken_orders_log_still_halts(executed, tmp_path):
+def test_halt_with_keep_exits_leaves_open_sells_and_a_broken_orders_log_still_halts(jsonl_store, executed, tmp_path):
     from agent_trading_core.audit import OrderRecord
     audit = market_audit(tmp_path / "data" / "audit", "KRX")
     audit.record_order(OrderRecord(order_id="s1", ticker="005930.KS", trade_date="2026-06-05", side="Sell",
@@ -333,7 +333,7 @@ def test_leaving_paper_mode_cancels_the_open_paper_orders(executed, monkeypatch)
 
 
 @pytest.mark.unit
-def test_resume_cancels_open_orders_a_broken_log_kept_through_the_halt(executed, tmp_path):
+def test_resume_cancels_open_orders_a_broken_log_kept_through_the_halt(jsonl_store, executed, tmp_path):
     path = tmp_path / "data" / "audit" / "orders.jsonl"
     good = path.read_text(encoding="utf-8")
     path.write_text(good + '{"order_id": "cut', encoding="utf-8")

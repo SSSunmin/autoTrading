@@ -9,7 +9,13 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from agent_trading_core.audit import CandidateRecord, DecisionRecord, ScreenRun, baseline_summary_path
+from agent_trading_core.audit import (
+    CandidateRecord,
+    DecisionRecord,
+    ScreenRun,
+    baseline_summary_path,
+    market_audit,
+)
 from agent_trading_core.screening import ScreenConfig, us_preset
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,7 +81,7 @@ def _fake_run(monkeypatch, captured):
     ("US", "^GSPC", "baseline_us_v1", "USD"),
     ("KRX", "^KS11", "baseline_krx_v2", "KRW"),
 ])
-def test_a_run_writes_only_its_own_book(tmp_path, monkeypatch, market, benchmark, run_id, currency):
+def test_a_run_writes_only_its_own_book(jsonl_store, tmp_path, monkeypatch, market, benchmark, run_id, currency):
     captured: dict = {}
     _fake_run(monkeypatch, captured)
     # the KRX book from before the market axis, straight under data/audit/: read as KRX, never written
@@ -141,8 +147,7 @@ def test_the_llm_decider_asks_only_about_survivors_up_to_the_cap_then_falls_back
     monkeypatch.setattr(bk.agent, "make_client", lambda: SimpleNamespace(messages=SimpleNamespace(create=create)))
     monkeypatch.setitem(bk.LLM, "max_calls_per_run", 5)
     assert bk.main(["--market", "US", "--dates", "2", "--decider", "llm"], data=tmp_path) == 0
-    decisions = [DecisionRecord.model_validate_json(line) for line in
-                 (tmp_path / "audit" / "US" / "decisions.jsonl").read_text(encoding="utf-8").splitlines()]
+    decisions = market_audit(tmp_path / "audit", "US").decisions()
     assert all(d.screen_run_id.startswith("baseline_us_v1_llm_") for d in decisions)    # apart from the rule run
     agent_made = [d for d in decisions if d.settings["decider"] == "claude-opus-5-5"]
     fallback = [d for d in decisions if d.settings.get("fallback") == "rule"]
