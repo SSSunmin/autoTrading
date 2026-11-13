@@ -46,7 +46,11 @@ class RiskConfig:
     daily_loss_limit: float = -0.02      # equity change in one session
     dd_halve: float = -0.10              # drawdown from peak → new sizing × 0.5
     dd_stop: float = -0.20               # drawdown from peak → liquidate, lock
-    dd_stop_lock_days: int = 20          # trading days before re-entry at half size is allowed
+    dd_stop_lock_days: int = 20          # trading days with no new buys after the stop
+    # after the lock: "reset_peak" = the executor's rule (execution.py, admin resume after a −20% stop): the peak
+    # becomes that close's equity and sizing is normal from it. "half_size" = the backtest rule before 2026-11-13
+    # (reset, then half weight until back within dd_halve of the old peak), kept to reproduce earlier numbers.
+    dd_stop_recovery: Literal["reset_peak", "half_size"] = "reset_peak"
     # Protections (freqtrade names)
     stoploss_guard_n: int = 3
     stoploss_guard_lookback_days: int = 10

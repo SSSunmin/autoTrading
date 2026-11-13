@@ -5,6 +5,8 @@ Run:  .venv/Scripts/python scripts/paper_tables.py [--us data/results/paper_us/s
 Prints the variant table, the window table and the worst trades for the US book, then the KRX-vs-US comparison.
 With --universe <constituents summary.json> (docs/09) it prints the fixed-40 vs point-in-time table instead, the
 fixed side read from --fixed (default: the --us file).
+With --dd-old <summary.json> --dd-new <summary.json> it prints the −20%-stop recovery comparison (docs/05 §7-1:
+half_size before, reset_peak after); with --grid-old / --grid-new the same for the 27-cell grid.
 """
 
 from __future__ import annotations
@@ -103,13 +105,63 @@ def universe_facts(pit: dict) -> str:
             f"마지막 시세까지로 읽음 {len(pit['read_to_last_bar'])}")
 
 
+def dd_counts(events: list[dict]) -> tuple[int, int]:
+    """(−20% stops, re-entries after one): a re-entry is a ``peak_reset`` event or the half_size rule's 재가동 line."""
+    stops = sum(1 for e in events if e["kind"] == "guard" and e["text"].startswith("MaxDrawdown"))
+    resets = sum(1 for e in events if e["kind"] == "peak_reset" or (e["kind"] == "guard" and e["text"].startswith("재가동")))
+    return stops, resets
+
+
+def dd_table(old: dict, new: dict) -> str:
+    rows = ["| | 최대 드로다운 (전 → 후) | 수익 (전 → 후) | 거래 (전 → 후) | −20% 발동 (전 → 후) | 피크 재설정 (전 → 후) | "
+            "피크 재설정 날짜 (후) |", "|---|---|---|---|---|---|---|"]
+    for key, label in VARIANTS.items():
+        o, n = old["variants"][key], new["variants"][key]
+        (os_, or_), (ns, nr) = dd_counts(o["events"]), dd_counts(n["events"])
+        dates = ", ".join(e["date"] for e in n["events"] if e["kind"] == "peak_reset") or "—"
+        rows.append(f"| {label} | {pct(o['metrics']['max_drawdown'])} → {pct(n['metrics']['max_drawdown'])} | "
+                    f"{pct(o['metrics']['total_return'])} → {pct(n['metrics']['total_return'])} | {o['trades']} → {n['trades']} | "
+                    f"{os_} → {ns} | {or_} → {nr} | {dates} |")
+    return "\n".join(rows)
+
+
+def grid_dd_table(old: dict, new: dict) -> str:
+    rows = ["| 손절 | 비중 | 트레일링 | 최대 드로다운 (전 → 후) | 수익 (전 → 후) | 거래 (전 → 후) | −20% 발동 (전 → 후) | "
+            "피크 재설정 (후) | 같음 |", "|---|---|---|---|---|---|---|---|---|"]
+    same = 0
+    for o, n in zip(old["cells"], new["cells"], strict=True):
+        assert (o["stop_loss_pct"], o["max_position_pct"], o["trailing_pct"]) == \
+               (n["stop_loss_pct"], n["max_position_pct"], n["trailing_pct"])
+        eq = (o["max_drawdown"], o["total_return"], o["trades"]) == (n["max_drawdown"], n["total_return"], n["trades"])
+        same += eq
+        rows.append(f"| {pct(o['stop_loss_pct'], 0)} | {o['max_position_pct']:.0%} | {o['trailing_pct']:.0%} | "
+                    f"{pct(o['max_drawdown'])} → {pct(n['max_drawdown'])} | {pct(o['total_return'])} → {pct(n['total_return'])} | "
+                    f"{o['trades']} → {n['trades']} | {o['stop_outs']} → {n['stop_outs']} | {n['peak_resets']} | "
+                    f"{'같음' if eq else '다름'} |")
+    stopped = sum(1 for o in old["cells"] if o["stop_outs"])
+    rows.append(f"\n27칸 중 수치가 같은 칸 {same}, 옛 규칙에서 −20%가 발동한 칸 {stopped}.")
+    return "\n".join(rows)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--us", default=str(ROOT / "data" / "results" / "paper_us" / "summary.json"))
     parser.add_argument("--krx", default=str(ROOT / "data" / "results" / "paper" / "summary.json"))
     parser.add_argument("--universe", help="constituents summary.json (docs/09)")
     parser.add_argument("--fixed", help="fixed-40 summary.json for --universe (default: --us)")
+    parser.add_argument("--dd-old", help="summary.json under the half_size rule (docs/05 §7-1)")
+    parser.add_argument("--dd-new", help="summary.json under the reset_peak rule")
+    parser.add_argument("--grid-old", help="grid_half_size.json")
+    parser.add_argument("--grid-new", help="grid.json")
     args = parser.parse_args()
+    if args.dd_old and args.dd_new:
+        old, new = (json.loads(Path(x).read_text(encoding="utf-8")) for x in (args.dd_old, args.dd_new))
+        print(dd_table(old, new))
+        return 0
+    if args.grid_old and args.grid_new:
+        old, new = (json.loads(Path(x).read_text(encoding="utf-8")) for x in (args.grid_old, args.grid_new))
+        print(grid_dd_table(old, new))
+        return 0
     if args.universe:
         pit = json.loads(Path(args.universe).read_text(encoding="utf-8"))
         fixed = json.loads(Path(args.fixed or args.us).read_text(encoding="utf-8"))

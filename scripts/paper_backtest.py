@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from functools import cache
 from pathlib import Path
 
@@ -163,9 +163,13 @@ def main() -> int:
     parser.add_argument("--universe", default="fixed40", choices=["fixed40", "constituents"])
     parser.add_argument("--start", default="2024-01-02")
     parser.add_argument("--end", default="2026-11-12")
+    parser.add_argument("--dd-recovery", default="reset_peak", choices=["reset_peak", "half_size"],
+                        help="after a −20%% stop (RiskConfig.dd_stop_recovery); half_size = the rule before 2026-11-13, "
+                             "written next to the default output as <dir>_half_size/")
     args = parser.parse_args()
     setup, market = SETUPS[args.market], MARKETS[args.market]
     out, windows, index_symbol = setup["out"], setup["windows"], market["benchmark"]
+    risk = replace(RiskConfig(), dd_stop_recovery=args.dd_recovery)
     cache_dir = str(DATA / "cache")
 
     names, history, universe_on = setup["universe"], None, None
@@ -184,6 +188,8 @@ def main() -> int:
                 seen[d] = members_on(history, d)
             return seen[d]
         print(f"{args.market} constituents: {len(names)} unique tickers in {path.name}")
+    if args.dd_recovery != "reset_peak":
+        out = out.with_name(f"{out.name}_{args.dd_recovery}")
     out.mkdir(parents=True, exist_ok=True)
 
     frames, failed, downloaded, cut = {}, [], 0, {}
@@ -207,8 +213,8 @@ def main() -> int:
     common = {"initial_cash": setup["initial_cash"], "commission": setup["commission"], "market": args.market}
     variants = [
         SimConfig(args.start, args.end, label="rules_off", **common),
-        SimConfig(args.start, args.end, label="rules_on", risk=RiskConfig(), **common),
-        SimConfig(args.start, args.end, label="rules_on_regime", risk=RiskConfig(), regime_filter=True, **common),
+        SimConfig(args.start, args.end, label="rules_on", risk=risk, **common),
+        SimConfig(args.start, args.end, label="rules_on_regime", risk=risk, regime_filter=True, **common),
     ]
     results = {}
     for cfg in variants:

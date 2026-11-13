@@ -289,20 +289,32 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
                 if sig:
                     pending_sells[t] = sig
                 pos.high_water = max(pos.high_water, close)
+            if risk.dd_stop_recovery == "reset_peak" and old_peak is not None and i >= stop_lock_until:
+                # lock expired after a stop-out: the executor's admin resume (execution.peak_base / _peak: the last
+                # close's equity, then the highest close after it), assumed unattended at the end of the lock. It
+                # resets whatever is still held and wherever the liquidating open left the book; this close's buys
+                # are sized at normal weight from the new peak and fill at the next open, like any decision
+                events.append({"date": date.strftime("%Y-%m-%d"), "kind": "peak_reset",
+                               "text": f"재가동: 기준 피크를 {old_peak:,.0f} → {equity:,.0f}(그날 종가 평가액)으로 재설정, "
+                                       f"정상 비중", "peak_before": old_peak, "peak_after": equity})
+                peak, old_peak = equity, None
             scale, why = drawdown_scale(equity, peak, risk)
             if scale == 0.0 and i >= stop_lock_until and positions:
                 for t in positions:
                     pending_sells.setdefault(t, ExitSignal(t, "force", why or "MaxDrawdown"))
                 stop_lock_until = i + risk.dd_stop_lock_days
                 old_peak = peak
-                event(date, "guard", f"{why} · {risk.dd_stop_lock_days}거래일 잠금 후 기준 피크 재설정, 절반 비중으로 재가동")
+                event(date, "guard", f"{why} · {risk.dd_stop_lock_days}거래일 잠금 후 기준 피크 재설정, " +
+                      ("절반 비중으로 재가동" if risk.dd_stop_recovery == "half_size" else "정상 비중으로 재가동"))
             elif scale == 0.0 and i >= stop_lock_until and not positions and old_peak is not None:
-                # lock expired after a stop-out: reset the reference and come back at half size
+                # half_size (the rule before 2026-11-13): lock expired, reset to this close's equity, half size until
+                # back within dd_halve of the old peak. Kept as it was so earlier numbers reproduce
                 peak = equity
                 scale = 0.5
                 event(date, "guard", f"재가동: 기준 피크를 {equity:,.0f}으로 재설정, 이전 피크 {old_peak:,.0f} 대비 "
                                      f"{equity / old_peak - 1:+.1%} 회복까지 절반 비중")
-            elif old_peak is not None and equity >= old_peak * (1 + risk.dd_halve):
+            elif (old_peak is not None and risk.dd_stop_recovery == "half_size"
+                  and equity >= old_peak * (1 + risk.dd_halve)):
                 event(date, "guard", f"회복: 이전 피크 대비 {equity / old_peak - 1:+.1%}, 정상 비중 복귀")
                 old_peak = None
             if old_peak is not None and scale > 0:
