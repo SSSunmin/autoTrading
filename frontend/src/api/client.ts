@@ -1,6 +1,6 @@
 import type {
-  Decision, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
-  ResumeResult, RulesSettings, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
+  BookEvents, Decision, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
+  ResumePreview, ResumeResult, RulesSettings, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
 } from './types'
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
@@ -59,6 +59,8 @@ export const api = {
   paper: (market: Market) => get<PaperSummary>('/api/paper', { market }),
   paperProgress: (market: Market) => get<PaperProgress>('/api/paper/progress', { market }),
   positions: (market: Market, params?: { as_of?: string }) => get<Positions>('/api/positions', { ...params, market }),
+  events: (market: Market, limit = 50) => get<BookEvents>('/api/events', { market, limit }),
+  resumePreview: (market: Market, resetPeak: boolean) => get<ResumePreview>('/api/trading/resume-preview', { market, reset_peak: resetPeak }),
   rules: (market: Market) => get<RulesSettings>('/api/settings/rules', { market }),
   mode: (market: Market) => get<TradingState>('/api/trading/mode', { market }),
   halt: (body: { operator: string; reason: string; keep_exits: boolean; scope: 'all' | Market }) => post<HaltResult>('/api/trading/halt', body),

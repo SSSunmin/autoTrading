@@ -5,6 +5,7 @@ import { money, utc } from '../api/client'
 import type { Decision } from '../api/types'
 import { useMarketPath } from '../hooks/useMarket'
 import { ExecStatus, Pct, RatingBadge, TickerCell } from './common'
+import { FillTime } from './risk'
 
 /** One decision as the plan's card (docs/02 v0.3 화면 3): rating, action, confidence, the thesis as the manager wrote it,
  *  evidence with source and as-of, the execution strip (filled / blocked / exception) joined from the orders log,
@@ -34,7 +35,7 @@ export function DecisionCard({ d }: { d: Decision }) {
           <span>{o.side_ko} {o.filled_quantity || o.quantity}주{o.filled_price != null ? ` · ${amt(o.filled_price)} · ${amt(o.amount)}` : ''}</span>
           {o.reason && <span className="muted">{o.reason}</span>}
           {o.rules_applied.map((r) => <AgentChip key={r} variant="hot">{r}</AgentChip>)}
-          <span className="muted num" style={{ marginLeft: 'auto' }}>{utc(o.placed_at)}</span>
+          <span className="muted num" style={{ marginLeft: 'auto' }} title={`주문 기록 ${utc(o.placed_at)}`}><FillTime o={o} market={o.market} /></span>
         </div>
       )) : d.tradeable && (
         <div className="exec none muted">주문 기록 없음 · 아직 모의 실행 전 (결정은 다음 거래일 시가에 주문됩니다)</div>

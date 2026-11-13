@@ -181,3 +181,9 @@ PAPER_STATUS_KO: dict[str, str] = {"met": "충족", "unmet": "미충족", "in_pr
 PAPER_VIOLATION_KO: dict[str, str] = {"review": "REVIEW", "daily_loss": "일일 손실 한도", "dd_stop": "−20% 정지",
                                       "unexplained_order": "결정 없는 주문"}
 PAPER_NOTE_KO: dict[str, str] = {"order_exception": "주문 예외", "stop_loss": "손절"}
+
+# US exception kinds (risk-panels): data_delayed is raised by the executor; luld_halt / pdt_blocked need a live data layer.
+EXCEPTION_KIND_KO |= {"data_delayed": "데이터 지연", "luld_halt": "LULD 거래 정지", "pdt_blocked": "PDT 제한"}
+# The guard / lock history on screen 5 (execution.book_events).
+BOOK_EVENT_KO: dict[str, str] = {"guard": "가드", "lock": "잠금", "protections": "Protections", "intervention": "개입",
+                                 "peak_reset": "피크 재설정"}

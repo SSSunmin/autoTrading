@@ -291,10 +291,20 @@ def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: s
 
 
 def _protections(closed: list[ClosedTrade], calendar: list[str], risk: RiskConfig) -> Protections:
+    return _replay_protections(closed, calendar, risk)[0]
+
+
+def _replay_protections(closed: list[ClosedTrade], calendar: list[str],
+                        risk: RiskConfig) -> tuple[Protections, list[tuple[str, str, str]]]:
+    """The Protections after ``closed``, and every lock a close set as (exit date, ticker, text): Cooldown on each
+    close, StoplossGuard and LowProfit when they fire."""
     p = Protections(risk)
+    fired: list[tuple[str, str, str]] = []
     for t in sorted(closed, key=lambda t: t.exit_date):
-        p.record(TradeOutcome(t.ticker, _day_index(calendar, t.exit_date), t.reason, t.pnl_pct))
-    return p
+        texts = p.record(TradeOutcome(t.ticker, _day_index(calendar, t.exit_date), t.reason, t.pnl_pct))
+        fired.append((t.exit_date, t.ticker, f"Cooldown: {t.ticker} 청산 후 {risk.cooldown_days}거래일 재진입 금지"))
+        fired += [(t.exit_date, t.ticker, x) for x in texts]
+    return p, fired
 
 
 def peak_base(operations: list[OperationRecord], date: str) -> tuple[str, float] | None:
@@ -457,9 +467,9 @@ def effective_state(operations: list[OperationRecord], calendar: list[str], mark
     its next run (``_auto_resume``, the same day in ``effective_from``). Only when every standing halt is that one: a
     person's halt and the −20% stop wait for an admin. ``auto_resume_at``: when the standing daily-loss halt ends (ISO,
     market time); ``auto_resumed``: it has, with no resume line yet."""
-    state = trading_state(operations, default_mode=AUTO_EXECUTION["default_mode"]) | {"auto_resume_at": None,
-                                                                                    "auto_resumed": False}
     halts = standing_halts(operations)
+    state = trading_state(operations, default_mode=AUTO_EXECUTION["default_mode"]) | {
+        "auto_resume_at": None, "auto_resumed": False, "halt_scope": halts[-1].scope if halts else None}
     if state["running"] or not halts or any(h.operator != "system" or h.target != "daily_loss" for h in halts):
         return state
     halted_on = halts[-1].after.get("date")
@@ -471,7 +481,7 @@ def effective_state(operations: list[OperationRecord], calendar: list[str], mark
     if now < at:
         return state
     return state | {"running": True, "halted_at": None, "halted_by": None, "halt_reason": None, "halt_target": None,
-                    "auto_resumed": True}
+                    "halt_scope": None, "auto_resumed": True}
 
 
 def _auto_resume(audit: AuditLog, date: str, calendar: list[str], cfg: PaperConfig) -> bool:
@@ -645,7 +655,14 @@ def _fill(pending: list[OrderRecord], current: dict[str, OrderRecord], prices: P
         cash = book.cash
         for o in sorted(by_day[day], key=lambda o: o.side != "Sell"):
             px_open = prices.open_on(o.ticker, day)
-            if px_open is None:
+            last = prices.frame(o.ticker).index.max() if px_open is None and len(prices.frame(o.ticker)) else None
+            prev = calendar[bisect.bisect_left(calendar, day) - 1] if bisect.bisect_left(calendar, day) > 0 else None
+            if px_open is None and last is not None and prev is not None and prev <= last < day:
+                # the index has the fill day and this ticker's cache stops one session short: late, not missing.
+                # A cache that stopped sessions earlier (a long trading halt, a delisting) stays vendor_unavailable
+                new = o.model_copy(update={"status": "exception", "exception_kind": "data_delayed",
+                                           "reason": f"체결일 {day} 시세가 캐시에 아직 없음 (마지막 {last}) — 데이터 지연, 주문하지 않았습니다"})
+            elif px_open is None:
                 new = o.model_copy(update={"status": "exception", "exception_kind": "vendor_unavailable",
                                            "reason": f"체결일 {day} 시가 없음 (거래정지 또는 데이터 공백) — 주문하지 않았습니다"})
             elif o.side == "Sell":
@@ -817,10 +834,27 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         sig = signals.get(r["ticker"])
         r["exit_signal"] = {"reason": sig.reason, "note": sig.note} if sig else None
     scale, why = drawdown_scale(equity, peak, risk)
-    protections = _protections(book.closed, calendar, risk)
+    protections, fired = _replay_protections(book.closed, calendar, risk)
 
     def until(i: int) -> str | None:
         return calendar[i] if 0 <= i < len(calendar) else None
+
+    def recent(dates: list[str], n: int) -> int:
+        """How many of ``dates`` fall in the last ``n`` trading days up to as_of (as_of included); a date before the
+        calendar is outside it."""
+        start = calendar[max(day - n + 1, 0)] if calendar else as_of
+        return sum(1 for d in dates if start <= d <= as_of)
+
+    lookback = {
+        "StoplossGuard": (risk.stoploss_guard_lookback_days,
+                          recent([t.exit_date for t in book.closed if t.reason == "stop_loss"], risk.stoploss_guard_lookback_days)),
+        "MaxDrawdown": (risk.dd_stop_lock_days,
+                        recent([op.after.get("date") or op.at[:10] for op in operations or []
+                              if op.kind == "halt" and op.target == "dd_stop"], risk.dd_stop_lock_days)),
+        "Cooldown": (risk.cooldown_days, recent([t.exit_date for t in book.closed], risk.cooldown_days)),
+        "LowProfit": (risk.low_profit_lookback_days,
+                      recent([d for d, _, x in fired if x.startswith("LowProfit")], risk.low_profit_lookback_days)),
+    }
 
     locked_tickers = {t: protections.locked_ticker(t, day) for t in protections.ticker_lock_until}
     guards = [
@@ -833,6 +867,8 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         for kind in ("Cooldown", "LowProfit")
         for hits in [[(t, r) for t, r in locked_tickers.items() if r and r.startswith(kind)]]
     ]
+    for g in guards:
+        g["lookback_days"], g["lookback_hits"] = lookback[g["id"]]
     index_closes = prices.frame(cfg.index)["Close"]
     index_closes = index_closes[index_closes.index <= as_of]
     closed_today = [t for t in book.closed if t.exit_date == as_of]
@@ -871,6 +907,63 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
                 "평가 금액·드로다운은 수수료·세금 포함. 룰 판정(손절·트레일링·만료·DD 정지)은 실행기가 그날 종가로 "
                 "규칙 청산 결정을 기록하고 다음 거래일 시가에 매도합니다.",
     }
+
+
+LOCK_RULES = ("dd_stop", "daily_loss_limit", "regime", "StoplossGuard")          # a lock on every new buy
+TICKER_LOCK_RULES = ("Cooldown", "LowProfit")                                     # a lock on one name
+INTERVENTION_RULES = ("max_position_pct", "sector_cap", "max_gross_pct", "dd_halve")
+
+
+def book_events(orders: list[OrderRecord], operations: list[OperationRecord], prices: Prices, *,
+                risk: RiskConfig | None = None, cfg: PaperConfig | None = None) -> list[dict]:
+    """The guard / lock history of one book (screen 5), newest first, each ``{date, kind, ticker, text}``:
+    ``guard`` the system halts (daily loss, −20% stop) and each day the drawdown first crossed dd_halve;
+    ``lock`` buys a lock refused (one line per decision day and lock set; a name's own lock per order);
+    ``protections`` a lock a close newly set (Cooldown on every close, StoplossGuard / LowProfit when they fire);
+    ``intervention`` a buy whose size a cap or the dd_halve scale cut; ``peak_reset`` an admin resume that reset the
+    drawdown peak. Read from the records only, nothing stored."""
+    risk, cfg = risk or RiskConfig(), cfg or PaperConfig()
+    calendar = prices.calendar(cfg.index)
+    book = replay(orders, prices, cfg, until=calendar[-1] if calendar else "9999-12-31")
+    out: list[dict] = []
+
+    def add(date: str, kind: str, text: str, ticker: str | None = None) -> None:
+        out.append({"date": date, "kind": kind, "ticker": ticker, "text": text})
+
+    for op in operations:
+        if op.kind == "halt" and op.operator == "system" and op.target in ("daily_loss", "dd_stop"):
+            add(op.after.get("date") or op.at[:10], "guard", op.reason)
+        elif op.kind == "resume" and op.after.get("peak_reset_to") is not None:
+            add(op.after.get("peak_reset_at") or op.at[:10], "peak_reset",
+                f"피크 {fmt_money(op.after.get('peak_before') or 0.0, cfg.market)} → "
+                f"{fmt_money(op.after['peak_reset_to'], cfg.market)} · {op.operator}: {op.reason}")
+    # the peak as _peak keeps it, walked day by day: a reset starts it again from its own value
+    base, peak, halved = None, cfg.initial_cash, False
+    for d, e in book.equity:
+        if (b := peak_base(operations, d)) != base:
+            base, peak = b, b[1] if b else cfg.initial_cash
+        if base is None or d > base[0]:
+            peak = max(peak, e)
+        scale, why = drawdown_scale(e, peak, risk)
+        if scale == 0.5 and not halved:
+            add(d, "guard", why or "")
+        halved = scale < 1.0
+    locks: dict[tuple[str, tuple[str, ...]], list[OrderRecord]] = {}
+    for o in latest_orders(orders).values():
+        if o.side != "Buy":
+            continue
+        if o.status == "blocked" and (rules := tuple(r for r in o.rules_applied if r in LOCK_RULES)):
+            locks.setdefault((o.trade_date, rules), []).append(o)
+        elif o.status == "blocked" and any(r in TICKER_LOCK_RULES for r in o.rules_applied):
+            add(o.trade_date, "lock", f"{o.ticker} 신규 매수 차단 · {o.reason}", o.ticker)
+        elif cuts := [r for r in o.rules_applied if r in INTERVENTION_RULES]:
+            parts = [s for s in o.reason.split(" · ") if s.split(":")[0] in INTERVENTION_RULES or s.startswith("가드 스케일")]
+            add(o.trade_date, "intervention", f"{o.ticker} 비중 축소 · {' · '.join(parts) or ', '.join(cuts)}", o.ticker)
+    for (date, _), group in locks.items():
+        add(date, "lock", f"신규 매수 {len(group)}건 차단 ({', '.join(o.ticker for o in group)}) · {group[0].reason}")
+    for date, ticker, text in _replay_protections(book.closed, calendar, risk)[1]:
+        add(date, "protections", text, ticker)
+    return sorted(out, key=lambda e: e["date"], reverse=True)       # stable: one day's lines keep their order
 
 
 # --- the paper-trading gate (screen 8, docs/05 §4) ---------------------------------------------------------

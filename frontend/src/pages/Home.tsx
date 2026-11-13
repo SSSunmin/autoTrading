@@ -2,13 +2,14 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AgentAlert, AgentKpiCard, AgentSectionPanel, Grid } from '@bv-ds/ui'
 
 import { api, money, pct, stockName, utc } from '../api/client'
-import type { Market, MarketFlow, MarketSummary } from '../api/types'
+import type { Market, MarketFlow, MarketSummary, Order, TradingState } from '../api/types'
 import { useApi } from '../hooks/useApi'
 import { useLabels } from '../hooks/useLabels'
 import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { useStateTick } from '../hooks/useTradingState'
 import { ExecStatus, Loaded, ModeBadge, Pct, RatingBadge, TickerCell } from '../components/common'
 import { AsOfStamp, PageHeader, RegimeBadge, RiskGauges } from '../components/parts'
+import { FillTime, HaltBand, HaltedChip } from '../components/risk'
 
 /** 1 (v0.3): portfolio state, what ran automatically today, and the exceptions a human must look at.
  *  The two market cards (/api/markets) are the one place both books show side by side, each in its own currency
@@ -36,6 +37,8 @@ export default function Home() {
   const nOrders = (s: string) => orders.data?.filter((o) => o.status === s).length ?? 0
   const b = book.data
   const flow = markets.data?.find((m) => m.market === market)?.flow ?? null
+  const halted = b && !b.mode.running ? b.mode : null
+  const nearStop = b?.positions.filter((r) => r.near_stop) ?? []
   const kpis = [
     { label: '평가 금액', value: b ? amt(b.equity) : '–', delta: b ? `현금 + 보유 평가액 · ${b.as_of} 종가` : '현금 + 보유 평가액' },
     { label: '오늘 실현 손익', value: b ? amt(b.realized_today) : '–', delta: b ? `누적 ${amt(b.realized_pnl)} · 체결가 기준` : '당일 체결 기준' },
@@ -45,6 +48,21 @@ export default function Home() {
     { label: '오늘 주문 금액', value: b ? `매수 ${amt(b.today_buy_amount)} · 매도 ${amt(b.today_sell_amount)}` : '–',
       delta: b ? `일일 상한 ${amt(b.limits.auto_daily_order_cap)}의 ${pct(b.today_buy_cap_used).replace('+', '')}(매수만) · ${b.today_session ?? '다음 거래일'} 시가` : '일일 상한은 매수만' },
   ]
+
+  const orderTable = (rows: Order[]) => (
+    <div className="matrix"><table>
+      <thead><tr><th>체결 시각</th><th>종목</th><th>방향</th><th className="r">수량</th><th className="r">체결가</th><th className="r">금액</th><th>상태</th><th>사유 · 적용 룰</th></tr></thead>
+      <tbody>{halted && b && <HaltRows state={halted} held={b.positions.length} signals={b.positions.filter((r) => r.exit_signal).length} />}{rows.map((o) => (
+        <tr key={o.order_id} className="click" onClick={() => navigate(to(`/tickers/${encodeURIComponent(o.ticker)}`))}>
+          <td className="num" title={`주문 기록 ${utc(o.placed_at)}`}><FillTime o={o} market={market} /></td><td><TickerCell ticker={o.ticker} name={o.name} /></td>
+          <td className={o.side === 'Buy' ? 'up' : 'down'}>{o.side_ko}</td>
+          <td className="r num">{o.filled_quantity || o.quantity}</td><td className="r num">{amt(o.filled_price)}</td><td className="r num">{amt(o.amount)}</td>
+          <td><ExecStatus status={o.status} label={o.status_ko} /></td>
+          <td className="wrap muted">{o.reason} {o.rules_applied.join(', ')}</td>
+        </tr>
+      ))}</tbody>
+    </table></div>
+  )
 
   return (
     <>
@@ -56,6 +74,8 @@ export default function Home() {
           {(rows) => <>{rows.map((m) => <MarketCard key={m.market} m={m} current={m.market === market} />)}</>}
         </Loaded>
       </div>
+
+      {halted && <HaltBand state={halted} market={market} />}
 
       <p className="page-sub section"><b>{info?.label_ko ?? market} 장부</b> · 아래는 상단바에서 고른 시장 기준입니다(금액 {info?.currency ?? ""}).</p>
       <Grid columns={6} gap="1.2rem">
@@ -74,25 +94,15 @@ export default function Home() {
       )}
 
       <div className="section">
-        <AgentSectionPanel title="오늘 자동 실행"
+        <AgentSectionPanel title="오늘 자동 실행" action={halted ? <HaltedChip state={halted} /> : undefined}
           description={latestDate ? `결정 ${latestDate} → 다음 거래일 시가 주문${info ? ` (${info.session.split('-')[0]} 현지)` : ''} · 선별 ${latest ? `${latest.universe_size} → ${latest.selected_count}` : '–'} · 결정 ${today.data?.length ?? '–'} · 체결 ${nOrders('filled')} · 차단 ${nOrders('blocked')} · 예외 ${exceptions.data?.length ?? '–'}` : undefined}>
-          <Loaded state={orders} empty="오늘 주문 기록이 없습니다"
-            emptyDescription="모의 실행(scripts/paper_execute.py)이 이 결정일을 처리하면 결정마다 방향·수량·체결가·상태·적용 룰이 여기에 기록됩니다.">
-            {(rows) => (
-              <div className="matrix"><table>
-                <thead><tr><th>체결일</th><th>종목</th><th>방향</th><th className="r">수량</th><th className="r">체결가</th><th className="r">금액</th><th>상태</th><th>사유 · 적용 룰</th></tr></thead>
-                <tbody>{rows.map((o) => (
-                  <tr key={o.order_id} className="click" onClick={() => navigate(to(`/tickers/${encodeURIComponent(o.ticker)}`))}>
-                    <td className="num" title={`주문 기록 ${utc(o.placed_at)}`}>{o.fill_date ?? '–'}</td><td><TickerCell ticker={o.ticker} name={o.name} /></td>
-                    <td className={o.side === 'Buy' ? 'up' : 'down'}>{o.side_ko}</td>
-                    <td className="r num">{o.filled_quantity || o.quantity}</td><td className="r num">{amt(o.filled_price)}</td><td className="r num">{amt(o.amount)}</td>
-                    <td><ExecStatus status={o.status} label={o.status_ko} /></td>
-                    <td className="wrap muted">{o.reason} {o.rules_applied.join(', ')}</td>
-                  </tr>
-                ))}</tbody>
-              </table></div>
-            )}
-          </Loaded>
+          {/* halted: the halt rows stand even on a day with no orders (the empty state would hide them) */}
+          {halted && orders.data?.length === 0 ? orderTable([]) : (
+            <Loaded state={orders} empty="오늘 주문 기록이 없습니다"
+              emptyDescription="모의 실행(scripts/paper_execute.py)이 이 결정일을 처리하면 결정마다 방향·수량·체결가·상태·적용 룰이 여기에 기록됩니다.">
+              {orderTable}
+            </Loaded>
+          )}
         </AgentSectionPanel>
       </div>
 
@@ -109,9 +119,11 @@ export default function Home() {
             {(p) => (
               <div className="matrix"><table><tbody>
                 {p.protections.map((g) => (
-                  <tr key={g.id}><td className="num">{g.id}</td><td className={g.active ? 'alert-t' : 'muted'}>{g.active ? '● 발동' : '○ 정상'}</td><td className="wrap muted">{g.detail ?? ''}</td></tr>
+                  <tr key={g.id}><td className="num">{g.id}</td><td className={g.active ? 'alert-t' : 'muted'}>{g.active ? '● 발동' : '○ 정상'}</td>
+                    <td className="wrap muted">{g.detail ? `${g.detail} · ` : ''}{g.until ? `해제 ${g.until} · ` : ''}lookback {g.lookback_days}거래일 내 트리거 {g.lookback_hits}건</td></tr>
                 ))}
-                <tr><td>손절선 {pct(p.limits.near_stop_pct, 0).replace('+', '')} 이내</td><td className="num">{p.near_stop_count}</td><td className="muted">보유 {p.positions.length}종목</td></tr>
+                <tr><td>손절선 {pct(p.limits.near_stop_pct, 0).replace('+', '')} 이내</td><td className="num">{p.near_stop_count}</td>
+                  <td className="wrap muted">{nearStop.length ? nearStop.map((r) => `${stockName(r.ticker, r.name, market)} 손절까지 ${pct(r.stop_gap).replace('+', '')}`).join(' · ') : `보유 ${p.positions.length}종목 중 없음`}</td></tr>
               </tbody></table></div>
             )}
           </Loaded>
@@ -141,6 +153,21 @@ export default function Home() {
 }
 
 const MARKET_KO: Record<Market, string> = { KRX: '국내', US: '미국' }
+
+/** While halted, the two rows on top of today's orders (mockup MainHalted): the halt itself, and the exits still
+ *  watched (keep_exits) — the held names and how many carry a rule-exit verdict now (the server's per-row verdict). */
+function HaltRows({ state, held, signals }: { state: TradingState; held: number; signals: number }) {
+  return (
+    <>
+      <tr className="halt-row"><td className="num">{utc(state.halted_at)}</td><td colSpan={5}>자동 실행 정지 · {state.halt_target_ko ?? state.halted_by_ko}</td>
+        <td><span className="st halt">정지</span></td><td className="wrap muted">{state.halt_reason}</td></tr>
+      {state.keep_exits && (
+        <tr className="halt-row"><td>감시 중</td><td className="muted">보유 {held}종목</td><td className="down">청산 매도</td><td colSpan={3} />
+          <td><span className="st wait">대기</span></td><td className="wrap muted">손절·트레일링 조건 충족 시에만 매도 주문 · 지금 해당 {signals}종목</td></tr>
+      )}
+    </>
+  )
+}
 
 /** Four cards from screening to holdings (mockup v0.6 홈 흐름 카드), each a link to its screen; counts from /api/markets. */
 function FlowCards({ flow, asOf, to }: { flow: MarketFlow; asOf: string | undefined; to: (path: string) => string }) {
@@ -179,7 +206,8 @@ function MarketCard({ m, current }: { m: MarketSummary; current: boolean }) {
         <tr><td>오늘 손익</td><td className="r"><Pct value={m.day_return} digits={2} /></td><td className="muted">전일 종가 평가 대비</td></tr>
         <tr><td>드로다운</td><td className="r"><Pct value={m.drawdown} /></td><td className="muted">피크 대비</td></tr>
         <tr><td>운용</td><td className="r"><ModeBadge state={m.state} /></td><td className="muted">{m.state?.running ? '' : m.state?.halt_reason}</td></tr>
-        <tr><td>다음 실행</td><td className="r num">{m.next_run_label_ko}</td><td className="muted">정규장 {m.session_kst} KST · 마감 5분 뒤</td></tr>
+        <tr><td>다음 실행</td><td className="r num">{m.next_run_label_ko}</td>
+          <td className="muted">{m.state && !m.state.running ? (m.state.keep_exits ? '결정만 기록 · 청산 매도만' : '결정만 기록 · 주문 없음') : `정규장 ${m.session_kst} KST · 마감 5분 뒤`}</td></tr>
       </tbody></table></div>}
     </AgentSectionPanel>
   )

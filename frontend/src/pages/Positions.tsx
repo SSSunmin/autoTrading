@@ -7,6 +7,7 @@ import { useLabels } from '../hooks/useLabels'
 import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded, Pct, TickerCell } from '../components/common'
 import { AsOfStamp, ExitReasonBadge, PageHeader, RegimeBadge, RiskGauges } from '../components/parts'
+import { EventList, ExitBar, ProtectionCards } from '../components/risk'
 
 /** 5: the paper book replayed from the orders log — holdings with their stop line, trailing high and expiry,
  *  the risk limits, the four Protections, and how positions were closed. Rule verdicts are shown, not acted on. */
@@ -19,6 +20,7 @@ export default function Positions() {
   const exitKo = labels?.exit_reason_ko
   const amt = (v: number | null | undefined) => money(v, market)
   const book = useApi(() => api.positions(market), [market])
+  const events = useApi(() => api.events(market), [market])
   return (
     <>
       <PageHeader title="포지션·리스크" description={`${info?.label_ko ?? market} 모의투자 장부: 그 시장의 체결 기록(orders.jsonl)을 캐시 종가로 재생한 값입니다. 따로 저장한 상태는 없고, 다른 시장과 섞지 않습니다.`}
@@ -51,26 +53,19 @@ export default function Positions() {
               </AgentSectionPanel>
             </div>
             <div className="cards section">
-              <AgentSectionPanel title="리스크 게이지" description={`피크 ${amt(b.peak)} · 실현 손익 ${amt(b.realized_pnl)}(시작 자본 ${amt(b.initial_cash)}) · 섹터 노출은 섹터 정보 연결 뒤`}
+              <AgentSectionPanel title="리스크 게이지" description={`피크 ${amt(b.peak)} · 실현 손익 ${amt(b.realized_pnl)}(시작 자본 ${amt(b.initial_cash)})`}
                 action={<AsOfStamp asOf={b.as_of} />}>
                 <RiskGauges p={b} amt={amt} />
+                {b.sector_exposure == null && <p className="sector-off"><span>섹터 노출</span><span className="muted">미연결 · 섹터 정보가 아직 없습니다</span></p>}
               </AgentSectionPanel>
               <AgentSectionPanel title="Protections" description="StoplossGuard · MaxDrawdown · Cooldown · LowProfit 상태와 해제일"
                 action={<RegimeBadge on={b.regime_on} gap={b.regime_gap} index={info?.benchmark_name_ko ?? '지수'} days={b.limits.regime_ma_days} />}>
-                <div className="matrix"><table><tbody>
-                  {b.protections.map((g) => (
-                    <tr key={g.id}>
-                      <td className="num">{g.id}</td><td className={g.active ? 'alert-t' : 'muted'}>{g.active ? '● 발동' : '○ 정상'}</td>
-                      <td className="wrap muted">{g.detail ?? ''}{g.tickers.length > 0 ? ` · ${g.tickers.map((t) => `${t.ticker}(${t.until ?? '–'}까지)`).join(', ')}` : ''}{g.until ? ` · ${g.until}까지` : ''}</td>
-                    </tr>
-                  ))}
-                </tbody></table></div>
+                <ProtectionCards items={b.protections} />
               </AgentSectionPanel>
             </div>
             <div className="section">
               <AgentSectionPanel title="청산 사유 분포 · 청산 기록" description="청산 사유는 룰의 판정입니다(결정 카드의 에이전트 매도 사유와 다름)">
-                <p className="toolbar">{Object.keys(b.exits_by_reason).length === 0 ? <span className="muted">청산 없음</span>
-                  : Object.entries(b.exits_by_reason).map(([k, n]) => <span key={k}><ExitReasonBadge reason={k} labels={exitKo} /> <b className="tnum">{n}</b>건</span>)}</p>
+                <ExitBar exits={b.exits_by_reason} labels={exitKo} />
                 {b.closed.length > 0 && (
                   <div className="matrix"><table>
                     <thead><tr><th>종목</th><th>사유</th><th>진입</th><th>청산</th><th className="r">수량</th><th className="r">진입가</th><th className="r">청산가</th><th className="r">손익</th><th className="r">수익률</th></tr></thead>
@@ -83,6 +78,14 @@ export default function Positions() {
                     ))}</tbody>
                   </table></div>
                 )}
+              </AgentSectionPanel>
+            </div>
+            <div className="section">
+              <AgentSectionPanel title="가드·잠금 이력" description="주문·운영 기록에서 모은 가드 · 잠금 · Protections · 개입 · 피크 재설정, 최신순">
+                <Loaded state={events} empty="가드·잠금 이력이 없습니다" emptyDescription="한도·잠금이 주문을 막거나 비중을 자르면 여기에 남습니다.">
+                  {(e) => <EventList data={e} />}
+                </Loaded>
+                <p className="muted ev-foot">가드 = 일일 손실 한도·드로다운 반감/정지, 잠금 = 그날 신규 매수를 막은 것, Protections = 잠금을 새로 건 판정, 개입 = 비중을 자른 것.</p>
               </AgentSectionPanel>
             </div>
           </>

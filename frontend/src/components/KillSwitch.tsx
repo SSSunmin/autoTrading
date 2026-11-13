@@ -8,7 +8,7 @@ const MARKET_KO: Record<Market, string> = { KRX: '국내', US: '미국' }
 
 /** Emergency stop (docs/02 v0.3 화면 3, docs/08 §4 Q2): button in the status bar → confirm modal → POST /api/trading/halt.
  *  Scope: every market by default, or only the one on screen. Effects are spelled out before confirming; the reason
- *  goes to each market's operations log. Resume is admin-only, in Settings, with the same scope choice. */
+ *  goes to each market's operations log. Resume is admin-only, in the resume modal (risk.tsx), with the same scope choice. */
 export function KillSwitch({ state, market }: { state: TradingState | null; market: Market }) {
   const [open, setOpen] = useState(false)
   const [operator, setOperator] = useState('')
@@ -44,7 +44,7 @@ export function KillSwitch({ state, market }: { state: TradingState | null; mark
   return (
     <>
       <AgentButton variant="primary" size="sm" disabled={!state} onClick={openModal}
-        title={state && !state.running ? `${MARKET_KO[market]}은 이미 정지된 상태입니다(${state.halt_target_ko ?? state.halted_by_ko ?? ''}). 전체 정지는 아직 실행 중인 시장만 멈춥니다.` : undefined}>
+        title={state && !state.running ? `이미 정지된 시장: ${MARKET_KO[market]}(${state.halt_target_ko ?? state.halted_by_ko ?? ''}). 전체 정지는 아직 실행 중인 시장만 멈춥니다.` : undefined}>
         긴급 정지
       </AgentButton>
       {done && <span className="muted">{done}</span>}
@@ -66,7 +66,7 @@ export function KillSwitch({ state, market }: { state: TradingState | null; mark
           <ul className="effects">
             <li>미체결 주문을 취소합니다. 건수는 실행 후 시장마다 기록에 남습니다.</li>
             <li>보유 포지션은 그대로 둡니다.</li>
-            <li>다시 켜기는 관리자만 할 수 있습니다. 설정·감사 로그에서 정지 시각과 사유를 확인할 수 있습니다.</li>
+            <li>다시 켜기는 관리자만 할 수 있습니다(홈 정지 띠·설정의 재가동). 일일 손실 자동 정지만 다음 거래일 개장 때 스스로 풀립니다.</li>
           </ul>
           <AgentCheckbox label="손절·트레일링 청산은 계속 작동" description="끄면 보유 종목이 손절선을 깨도 자동으로 팔지 않습니다"
             checked={keepExits} onChange={(e) => setKeepExits(e.target.checked)} />

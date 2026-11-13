@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { AgentAlert, AgentButton, AgentCheckbox, AgentRadio, AgentRadioGroup, AgentSectionPanel, AgentSegmentedControl, AgentTextField } from '@bv-ds/ui'
+import { AgentAlert, AgentButton, AgentSectionPanel, AgentSegmentedControl, AgentTextField } from '@bv-ds/ui'
 
 import { announceStateChange, api, money, utc } from '../api/client'
-import { resumePlan } from '../api/resumePlan'
 import type { Market, Mode, OperationRow, RuleRow, RulesSettings, TradingState } from '../api/types'
 import { useApi } from '../hooks/useApi'
 import { MARKETS, useMarket } from '../hooks/useMarket'
 import { ModeBadge, Loaded } from '../components/common'
+import { ResumeButton } from '../components/risk'
 
 const MODES: { value: Mode; label: string; desc: string }[] = [
   { value: 'auto', label: '자동', desc: '결정 후 다음 거래일 시가에 자동 주문. 예외(REVIEW · 한도 초과 · 벤더 장애)는 주문하지 않고 예외 큐로.' },
@@ -102,14 +102,6 @@ export default function Settings() {
 
 function ModePanel({ market, state, onChanged }: { market: Market; state: TradingState; onChanged: (msg?: string) => void }) {
   const [mode, setMode] = useState<Mode>(state.mode)
-  const [scope, setScope] = useState<'all' | 'market'>('all')
-  const [resetPeak, setResetPeak] = useState(true)
-  // the book the server resets the peak from; read only while a −20% stop stands
-  const book = useApi(() => (state.dd_stop ? api.positions(market) : Promise.resolve(null)), [market, state.dd_stop])
-  // the all-markets resume reaches the other markets too: their −20% stops are offered here as well
-  const markets = useApi(() => (state.running ? Promise.resolve([]) : api.markets()), [market, state.running])
-  const others = scope === 'all' ? (markets.data ?? []).filter((x) => x.market !== market && x.state?.dd_stop).map((x) => x.label_ko) : []
-  const plan = resumePlan(state, book.data, resetPeak, market, others)
   const [operator, setOperator] = useState('')
   const [reason, setReason] = useState('')
   const [token, setToken] = useState('')
@@ -133,7 +125,9 @@ function ModePanel({ market, state, onChanged }: { market: Market; state: Tradin
         {!state.running && (
           <AgentAlert tone="warning" title={`정지됨 · ${utc(state.halted_at)} · ${state.halt_target_ko ?? state.halted_by_ko ?? state.halted_by}`}>
             사유: {state.halt_reason} · 손절·트레일링 청산 {state.keep_exits ? '계속 작동' : '중단'}.{' '}
-            {state.halt_target === 'daily_loss' ? '다음 거래일 실행기가 자동으로 다시 켭니다(관리자가 먼저 켤 수도 있습니다).' : '다시 켜기는 관리자만 할 수 있습니다.'}
+            {state.auto_resume_label_ko ? `${state.auto_resume_label_ko} 개장 때 자동 해제됩니다.` : '다시 켜기는 관리자만 할 수 있습니다.'}
+            <div style={{ marginTop: '0.8rem' }}><ResumeButton state={state} market={market}
+              label={state.auto_resume_label_ko ? `${state.auto_resume_label_ko} 자동 해제 · 재가동 불필요` : undefined} /></div>
           </AgentAlert>
         )}
         <AgentSegmentedControl size="sm" value={mode} onChange={(v) => setMode(v as Mode)} options={MODES.map((m) => ({ value: m.value, label: m.label }))} />
@@ -145,27 +139,7 @@ function ModePanel({ market, state, onChanged }: { market: Market; state: Tradin
             onClick={() => run(async () => { await api.setMode({ operator: operator.trim(), mode, reason: reason.trim(), market }, token || undefined) })}>
             {mode === state.mode ? '현재 모드' : `${MODES.find((m) => m.value === mode)?.label} 모드로 전환`}
           </AgentButton>
-          {!state.running && (
-            <AgentButton size="sm" variant="secondary" disabled={!ready}
-              onClick={() => run(async () => {
-                const r = await api.resume({ operator: operator.trim(), reason: reason.trim(), scope: scope === 'all' ? 'all' : market, ...plan.body }, token || undefined)
-                const resets = Object.entries(r.peak_resets).map(([m, x]) => `${MARKET_KO[m as Market]} 피크 재설정 ${money(x.to, m as Market)}(${x.at} 종가)`)
-                return (`${r.scope_ko}: ${[...r.resumed.map((m) => `${MARKET_KO[m]} 재가동`), ...resets, ...r.skipped.map((x) => `${MARKET_KO[x.market]} 건너뜀(${x.reason})`)].join(' / ')}`)
-              })}>
-              {scope === 'all' ? '전체 시장 다시 켜기' : `${MARKET_KO[market]}만 다시 켜기`}
-            </AgentButton>
-          )}
         </div>
-        {!state.running && (
-          <AgentRadioGroup label="재가동 범위" value={scope} onChange={(e) => setScope(e.target.value as 'all' | 'market')}>
-            <AgentRadio value="all" label="전체 시장 (정지된 시장만 다시 켭니다)" />
-            <AgentRadio value="market" label={`이 시장만 (${MARKET_KO[market]}) — 다른 시장은 그대로 둡니다`} />
-          </AgentRadioGroup>
-        )}
-        {plan.offerReset && (
-          <AgentCheckbox label="피크 재설정 (−20% 드로다운 정지 뒤)" description={plan.preview ?? undefined}
-            checked={resetPeak} onChange={(e) => setResetPeak(e.target.checked)} />
-        )}
         {error && <AgentAlert tone="error" title="실패">{error}</AgentAlert>}
       </div>
     </AgentSectionPanel>
