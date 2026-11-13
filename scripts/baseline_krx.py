@@ -28,6 +28,7 @@ from agent_trading_core.audit import (
     BASELINE_DECIDER,
     DecisionRecord,
     EvidenceItem,
+    ScreenRun,
     baseline_summary_path,
     market_audit,
     stage_counts,
@@ -102,6 +103,47 @@ def rating_for(rank: int | None, n_ranked: int) -> str:
     return "Hold"
 
 
+def screen_day(market: str, date: str, *, cache_dir: str, run_id: str, load=None) -> ScreenRun:
+    """The market's screen as of ``date`` (``run_id_date``), candidates named. ``load``: the OHLCV loader
+    (default ``screen``'s Yahoo one; the daily loop passes the KIS one)."""
+    setup = SETUPS[market]
+    run = screen(setup["universe"], date, setup["screen"], cache_dir=cache_dir, universe_label=setup["label"],
+                 sector_of=sector_of, run_id=f"{run_id}_{date}", **({"load": load} if load else {}))
+    for c in run.candidates:
+        c.name = korean_name(c.ticker) or name_of(c.ticker)
+    return run
+
+
+def decide_from_screen(market: str, run: ScreenRun, ticker: str, date: str) -> tuple[Decision, DecisionRecord | None]:
+    """The rule decision for ``ticker`` from the day's screen, and its audit record (None for Hold: not recorded)."""
+    cand = next(c for c in run.candidates if c.ticker == ticker)
+    ranked = [c for c in run.candidates if c.rank is not None]
+    # Rank every survivor of the absolute filters by momentum, not only the top_k.
+    rank = cand.rank
+    rating = rating_for(rank, len(ranked))
+    failed = cand.failed_rules
+    mom = next((f.note for f in cand.filters if f.rule == "momentum_top_k"), "")
+    text = (f"**Rating**: {rating}\n\n**근거**: 규칙 전용 모멘텀 베이스라인. "
+            + (f"모멘텀 순위 {rank}/{len(ranked)} ({mom})." if rank else
+               f"순위 없음: {', '.join(RULE_KO.get(r, r) for r in failed) or '규칙'} 탈락, 의견 없음."))
+    record = None
+    if rating != "Hold":
+        record = DecisionRecord(
+            market=market, ticker=ticker, trade_date=date, screen_run_id=run.run_id, rating=rating,
+            action="Buy" if rating in ("Buy", "Overweight") else "Sell",
+            confidence={"Buy": 0.8, "Overweight": 0.5, "Underweight": 0.5, "Sell": 0.8}[rating],
+            thesis=text,
+            evidence=[EvidenceItem(source="market", summary=f"모멘텀 순위 {rank}/{len(ranked)}, {mom}", as_of=date,
+                                   ref=run.run_id)],
+            # ponytail: stored as source "agent" — the paper executor (execution.py) places and explains only
+            # agent decisions; audit.decision_source reads the decider as "baseline". Write source="baseline"
+            # once the executor accepts it (stage 4).
+            settings={"decider": BASELINE_DECIDER,
+                      "screen": SETUPS[market]["screen_note"]},
+        )
+    return Decision(text, rating), record
+
+
 def rating_table(by_rating: dict) -> str:
     """docs/03 §2 · §6 table from the summary's by_rating, in tier order."""
     rows = ["| 등급 | n | 방향 적중률 | 평균 알파 |", "|---|---:|---:|---:|"]
@@ -141,42 +183,17 @@ def main(argv: list[str] | None = None, data: Path = DATA) -> int:
 
     def screen_for(date: str):
         if date not in screens:
-            run = screen(universe, date, setup["screen"], cache_dir=cfg["data_cache_dir"], universe_label=setup["label"],
-                         sector_of=sector_of, run_id=f"{run_id}_{date}")
-            for c in run.candidates:
-                c.name = korean_name(c.ticker) or name_of(c.ticker)
+            run = screen_day(args.market, date, cache_dir=cfg["data_cache_dir"], run_id=run_id)
             audit.record_screen(run)
             screens[date] = run
             print(f"  screen {date}: {run.universe_size} -> {stage_counts(run)}")
         return screens[date]
 
     def decide(ticker: str, date: str) -> Decision:
-        run = screen_for(date)
-        cand = next(c for c in run.candidates if c.ticker == ticker)
-        ranked = [c for c in run.candidates if c.rank is not None]
-        # Rank every survivor of the absolute filters by momentum, not only the top_k.
-        rank = cand.rank
-        rating = rating_for(rank, len(ranked))
-        failed = cand.failed_rules
-        mom = next((f.note for f in cand.filters if f.rule == "momentum_top_k"), "")
-        text = (f"**Rating**: {rating}\n\n**근거**: 규칙 전용 모멘텀 베이스라인. "
-                + (f"모멘텀 순위 {rank}/{len(ranked)} ({mom})." if rank else
-                   f"순위 없음: {', '.join(RULE_KO.get(r, r) for r in failed) or '규칙'} 탈락, 의견 없음."))
-        if rating != "Hold":
-            audit.record_decision(DecisionRecord(
-                market=args.market, ticker=ticker, trade_date=date, screen_run_id=run.run_id, rating=rating,
-                action="Buy" if rating in ("Buy", "Overweight") else "Sell",
-                confidence={"Buy": 0.8, "Overweight": 0.5, "Underweight": 0.5, "Sell": 0.8}[rating],
-                thesis=text,
-                evidence=[EvidenceItem(source="market", summary=f"모멘텀 순위 {rank}/{len(ranked)}, {mom}", as_of=date,
-                                       ref=run.run_id)],
-                # ponytail: stored as source "agent" — the paper executor (execution.py) places and explains only
-                # agent decisions; audit.decision_source reads the decider as "baseline". Write source="baseline"
-                # once the executor accepts it (stage 4).
-                settings={"decider": BASELINE_DECIDER,
-                          "screen": setup["screen_note"]},
-            ))
-        return Decision(text, rating)
+        decision, record = decide_from_screen(args.market, screen_for(date), ticker, date)
+        if record is not None:
+            audit.record_decision(record)
+        return decision
 
     result = run_backtest(universe, dates, decide, cfg, reflector=RuleReflector(), run_id=run_id,
                           progress=lambda i, n, t, d: None)
