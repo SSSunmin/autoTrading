@@ -2,7 +2,8 @@
 
 export type Rating = 'Buy' | 'Overweight' | 'Hold' | 'Underweight' | 'Sell' | 'REVIEW'
 export type Mode = 'auto' | 'manual' | 'paper'
-export type OrderStatus = 'filled' | 'partial' | 'open' | 'blocked' | 'rejected' | 'exception'
+export type OrderStatus = 'filled' | 'partial' | 'open' | 'blocked' | 'rejected' | 'exception' | 'cancelled'
+export type ExceptionKind = 'review' | 'cap_exceeded' | 'order_rejected' | 'vendor_unavailable'
 
 export interface FilterResult {
   rule: string
@@ -56,7 +57,7 @@ export interface Outcome {
   reflection: string
 }
 
-/** One order the execution layer placed or refused (docs/02 v0.3 §9). Empty until that layer exists. */
+/** One order the paper execution layer placed or refused (docs/02 v0.3 §9), in its current state. */
 export interface Order {
   order_id: string
   ticker: string
@@ -69,9 +70,11 @@ export interface Order {
   limit_price: number | null
   filled_quantity: number
   filled_price: number | null
+  fill_date: string | null
   amount: number | null
   status: OrderStatus
   status_ko: string
+  exception_kind: ExceptionKind | null
   reason: string
   rules_applied: string[]
 }
@@ -100,7 +103,7 @@ export interface Decision {
 
 /** Exception queue item: a REVIEW decision or a refused order a human must look at. */
 export interface ExceptionItem {
-  kind: 'review' | 'cap_exceeded' | 'order_rejected' | 'vendor_unavailable'
+  kind: ExceptionKind
   kind_ko: string
   ticker: string
   name: string | null
@@ -125,7 +128,7 @@ export interface TradingState {
 
 export interface HaltResult {
   state: TradingState
-  effects: { new_orders: string; open_orders_cancelled: number; positions: string; exits_active: boolean; note: string }
+  effects: { new_orders: string; open_orders_cancelled: number | null; positions: string; exits_active: boolean; note: string }
 }
 
 export interface TickerRow {
@@ -303,4 +306,71 @@ export interface PaperSummary {
   variants: Record<string, PaperVariant>
   caveats: string[]
   criteria: Criterion[]
+}
+
+/** 5 and the home KPIs: the paper book replayed from the orders log (agent_trading_core/execution.positions_view). */
+export interface PositionRow {
+  ticker: string
+  name: string | null
+  quantity: number
+  avg_price: number
+  entry_date: string
+  last_price: number | null
+  last_date: string | null
+  market_value: number | null
+  unrealized: number | null
+  unrealized_pct: number | null
+  weight: number | null
+  stop_price: number
+  trailing_active: boolean
+  trailing_high: number
+  trailing_stop_price: number | null
+  holding_days: number
+  expiry_date: string | null
+  exit_signal: { reason: string; note: string } | null
+}
+
+export interface ProtectionState {
+  id: 'StoplossGuard' | 'MaxDrawdown' | 'Cooldown' | 'LowProfit'
+  label_ko: string
+  active: boolean
+  detail: string | null
+  until: string | null
+  tickers: { ticker: string; until: string | null }[]
+}
+
+export interface ClosedTrade {
+  ticker: string
+  name: string | null
+  entry_date: string
+  exit_date: string
+  quantity: number
+  entry_price: number
+  exit_price: number
+  pnl: number
+  pnl_pct: number
+}
+
+export interface Positions {
+  as_of: string
+  initial_cash: number
+  cash: number
+  holdings_value: number
+  equity: number
+  peak: number
+  drawdown: number
+  gross_exposure: number
+  realized_pnl: number
+  realized_today: number
+  unrealized_pnl: number
+  regime_on: boolean | null
+  positions: PositionRow[]
+  protections: ProtectionState[]
+  exits_by_reason: Record<string, number>
+  exits_by_reason_ko: Record<string, number>
+  closed: ClosedTrade[]
+  limits: { stop_loss_pct: number; dd_halve: number; dd_stop: number; max_position_pct: number; max_gross_pct: number;
+            daily_loss_limit: number; auto_daily_order_cap: number }
+  note: string
+  mode: TradingState
 }

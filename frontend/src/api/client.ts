@@ -1,5 +1,5 @@
 import type {
-  Decision, ExceptionItem, HaltResult, Health, Labels, Mode, Order, PaperSummary, Performance, RulesSettings, ScreenDetail,
+  Decision, ExceptionItem, HaltResult, Health, Labels, Mode, Order, PaperSummary, Performance, Positions, RulesSettings, ScreenDetail,
   ScreenSummary, TickerDetail, TickerRow, TradingState,
 } from './types'
 
@@ -52,6 +52,7 @@ export const api = {
   ticker: (ticker: string) => get<TickerDetail>(`/api/tickers/${encodeURIComponent(ticker)}`),
   performance: () => get<Performance>('/api/performance'),
   paper: () => get<PaperSummary>('/api/paper'),
+  positions: (params?: { as_of?: string }) => get<Positions>('/api/positions', params),
   rules: () => get<RulesSettings>('/api/settings/rules'),
   mode: () => get<TradingState>('/api/trading/mode'),
   halt: (body: { operator: string; reason: string; keep_exits: boolean }) => post<HaltResult>('/api/trading/halt', body),
@@ -73,7 +74,7 @@ export function pct(v: number | null | undefined, digits = 1): string {
 
 export function won(v: number | null | undefined): string {
   if (v == null) return '–'
-  return v.toLocaleString('ko-KR', { maximumFractionDigits: v < 1000 ? 2 : 0 })
+  return v.toLocaleString('ko-KR', { maximumFractionDigits: Math.abs(v) < 1000 ? 2 : 0 })
 }
 
 export function utc(iso: string | null | undefined): string {

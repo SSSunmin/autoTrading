@@ -20,7 +20,8 @@ export function KillSwitch({ state }: { state: TradingState | null }) {
     setBusy(true); setError(null)
     try {
       const r = await api.halt({ operator: operator.trim(), reason: reason.trim(), keep_exits: keepExits })
-      setDone(`정지됨. 미체결 주문 취소 ${r.effects.open_orders_cancelled}건 · 보유 포지션 유지 · 손절 청산 ${r.effects.exits_active ? '계속 작동' : '중단'}. ${r.effects.note}`)
+      const cancelled = r.effects.open_orders_cancelled == null ? '미체결 취소 못 함(재가동 때 정지 전 미체결을 취소합니다)' : `미체결 주문 취소 ${r.effects.open_orders_cancelled}건`
+      setDone(`정지됨. ${cancelled} · 보유 포지션 유지 · 손절 청산 ${r.effects.exits_active ? '계속 작동' : '중단'}. ${r.effects.note}`)
       setOpen(false)
       announceStateChange()
     } catch (e) {

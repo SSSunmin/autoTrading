@@ -113,7 +113,9 @@ class OrderRecord(BaseModel):
 
     Keyed to its decision by (ticker, trade_date). ``status`` is the dashboard's execution strip:
     filled / partial / open are real orders; blocked means a hard rule shrank it to zero; rejected and
-    exception were never sent and land in the exception queue.
+    exception were never sent and land in the exception queue; cancelled was open when the loop halted.
+    The log stays append-only: an open order that later fills or is cancelled gets a new line with the
+    same ``order_id``, and the last line for an id is its current state (``latest_orders``).
     """
 
     order_id: str
@@ -125,7 +127,9 @@ class OrderRecord(BaseModel):
     limit_price: float | None = None
     filled_quantity: int = Field(default=0, ge=0)
     filled_price: float | None = None
-    status: Literal["filled", "partial", "open", "blocked", "rejected", "exception"]
+    status: Literal["filled", "partial", "open", "blocked", "rejected", "exception", "cancelled"]
+    fill_date: str | None = Field(default=None, description="Trading day the fill happened (next open), YYYY-MM-DD")
+    exception_kind: Literal["review", "cap_exceeded", "order_rejected", "vendor_unavailable"] | None = None
     reason: str = Field(default="", description="Fill note, or why it was blocked / rejected / exceptional")
     rules_applied: list[str] = Field(default_factory=list,
                                      description="Hard-rule and auto-execution rule ids that touched this order")
@@ -133,6 +137,15 @@ class OrderRecord(BaseModel):
     @property
     def amount(self) -> float | None:
         return self.filled_price * self.filled_quantity if self.filled_price is not None else None
+
+
+def latest_orders(orders: list[OrderRecord]) -> dict[str, OrderRecord]:
+    """The current state of each order: the last line written for its ``order_id``, in log order."""
+    out: dict[str, OrderRecord] = {}
+    for o in orders:
+        out.pop(o.order_id, None)
+        out[o.order_id] = o
+    return out
 
 
 class OperationRecord(BaseModel):

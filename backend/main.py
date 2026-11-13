@@ -35,10 +35,19 @@ from agent_trading_core.audit import (
     OperationRecord,
     OrderRecord,
     ScreenRun,
+    latest_orders,
     stage_counts,
     trading_state,
 )
 from agent_trading_core.config import AUTO_EXECUTION, KRX_MARKET, PAPER_TRADING
+from agent_trading_core.execution import (
+    Prices,
+    cancel_orders,
+    check_date,
+    execution_lock,
+    open_orders,
+    positions_view,
+)
 from agent_trading_core.krx_names import (
     AUTO_RULE_KO,
     EXCEPTION_KIND_KO,
@@ -87,6 +96,7 @@ class _Store:
         self.operations: list[OperationRecord] = []
         self.memory: list[dict] = []
         self.summary: dict = {}
+        self.prices = Prices(DATA_DIR / "cache")
 
     @property
     def audit(self) -> AuditLog:
@@ -119,7 +129,8 @@ class _Store:
         audit = self.audit
         self.screens = sorted(audit.screens(), key=lambda s: s.as_of, reverse=True)
         self.decisions = sorted(audit.decisions(), key=lambda d: (d.trade_date, d.ticker), reverse=True)
-        self.orders = sorted(audit.orders(), key=lambda o: o.placed_at, reverse=True)
+        # an order that filled or was cancelled after it was placed has later lines; serve its current state
+        self.orders = sorted(latest_orders(audit.orders()).values(), key=lambda o: (o.placed_at, o.order_id), reverse=True)
         self.operations = audit.operations()
         log = self.memory_log_path()
         self.memory = TradingMemoryLog({"memory_log_path": str(log)}).load_entries() if log else []
@@ -193,8 +204,8 @@ def _orders_by_key() -> dict:
     return by
 
 
-def _state_out() -> dict:
-    st = STORE.state()
+def _state_out(st: dict | None = None) -> dict:
+    st = st or STORE.state()
     mode_ko = MODE_KO.get(st["mode"], st["mode"])
     label = f"정지됨 · {st['halted_at'][:16].replace('T', ' ')} UTC" if not st["running"] else (
         "자동 매매 실행 중" if st["mode"] == "auto" else f"{mode_ko} 모드")
@@ -202,7 +213,9 @@ def _state_out() -> dict:
 
 
 def _exception_kind(o: OrderRecord) -> str:
-    # ponytail: inferred from the rule ids and the reason text until the execution layer tags its own kind.
+    if o.exception_kind:
+        return o.exception_kind
+    # records written before the execution layer tagged its own kind: inferred from the rule ids and the reason
     if any(r.startswith("auto_") for r in o.rules_applied):
         return "cap_exceeded"
     if "vendor" in o.reason.lower():
@@ -219,7 +232,8 @@ def _exceptions(date: str | None) -> list[dict]:
                           "name": _name(d.ticker, STORE.screens), "trade_date": d.trade_date,
                           "summary": "등급을 읽을 수 없어 주문하지 않았습니다", "detail": d.thesis, "ref": d.screen_run_id})
     for o in STORE.orders:
-        if o.status in ("rejected", "exception") and (date is None or o.trade_date == date):
+        # a REVIEW decision is listed above already; its exception order is the same item
+        if o.status in ("rejected", "exception") and o.exception_kind != "review" and (date is None or o.trade_date == date):
             kind = _exception_kind(o)
             items.append({"kind": kind, "kind_ko": EXCEPTION_KIND_KO[kind], "ticker": o.ticker,
                           "name": _name(o.ticker, STORE.screens), "trade_date": o.trade_date,
@@ -230,6 +244,15 @@ def _exceptions(date: str | None) -> list[dict]:
 def _latest_date() -> str | None:
     dates = [d.trade_date for d in STORE.decisions] + [o.trade_date for o in STORE.orders]
     return max(dates) if dates else None
+
+
+def _date_param(value: str | None, name: str = "date") -> str | None:
+    if value is None:
+        return None
+    try:
+        return check_date(value)
+    except ValueError:
+        raise HTTPException(400, f"{name}는 YYYY-MM-DD 형식이어야 합니다: {value!r}") from None
 
 
 def _require_admin(token: str | None) -> str:
@@ -318,7 +341,10 @@ def list_decisions(date: str | None = None, rating: str | None = None, review_on
 
 @app.get("/api/orders", tags=["execution"])
 def list_orders(date: str | None = None, status: str | None = None, ticker: str | None = None) -> list[dict]:
-    """주문·체결 기록(화면 1 '오늘 자동 실행', 화면 3 실행 상태 띠). 실행 레이어가 기록을 쓰기 전까지는 빈 목록."""
+    """주문·체결 기록(화면 1 '오늘 자동 실행', 화면 3 실행 상태 띠). 주문마다 현재 상태 한 줄(미체결 → 체결·취소는 마지막 기록)."""
+    _date_param(date)
+    if status is not None and status not in ORDER_STATUS_KO:
+        raise HTTPException(400, f"status는 {', '.join(ORDER_STATUS_KO)} 중 하나여야 합니다: {status!r}")
     STORE.refresh()
     rows = STORE.orders
     if date:
@@ -333,6 +359,7 @@ def list_orders(date: str | None = None, status: str | None = None, ticker: str 
 @app.get("/api/exceptions", tags=["execution"])
 def list_exceptions(date: str | None = None, all_dates: bool = False) -> list[dict]:
     """예외 큐: REVIEW 결정 + 거부·예외 주문. date 없으면 최신 결정일(기록상 '오늘')만, all_dates=true면 전부."""
+    _date_param(date)
     STORE.refresh()
     return _exceptions(None if all_dates else (date or _latest_date()))
 
@@ -440,9 +467,19 @@ def rules() -> dict:
             "mode": _state_out(), "change_history": history}
 
 
-@app.get("/api/positions", tags=["positions"], status_code=501)
-def positions() -> dict:
-    return {"implemented": False, "message": "포지션·리스크 레이어(보유·손절·트레일링·Protections)는 2차 범위입니다."}
+@app.get("/api/positions", tags=["positions"])
+def positions(as_of: str | None = None) -> dict:
+    """모의투자 장부(화면 5): orders.jsonl 체결 기록을 캐시 종가로 재생한 보유·평가·드로다운·가드 상태. 저장된 상태 없음."""
+    _date_param(as_of, "as_of")
+    STORE.refresh()
+    out = positions_view(STORE.audit.orders(), STORE.prices, as_of=as_of)
+    for r in out["positions"] + out["closed"]:
+        r["name"] = _name(r["ticker"], STORE.screens)
+    for g in out["protections"]:
+        g["label_ko"] = RISK_RULE_KO.get(g["id"], g["id"])
+    out["exits_by_reason_ko"] = {EXIT_REASON_KO.get(k, k): n for k, n in out["exits_by_reason"].items()}
+    out["mode"] = _state_out()
+    return out
 
 
 # --- write endpoints: the three the plan allows, each appended to the operations log ------
@@ -463,21 +500,30 @@ class HaltRequest(BaseModel):
 @app.post("/api/trading/halt", tags=["trading"])
 def halt(body: HaltRequest) -> dict:
     """긴급 정지(운영자 이상). 신규 주문 중단, 미체결 주문 취소, 보유 포지션 유지. 다시 켜기는 /resume(관리자)."""
-    STORE.refresh()
-    state = STORE.state()
-    if not state["running"]:
-        raise HTTPException(409, f"이미 정지된 상태입니다 ({state['halted_at']}, {state['halted_by']})")
-    open_orders = [o for o in STORE.orders if o.status in ("open", "partial")]
-    STORE.audit.record_operation(OperationRecord(
-        kind="halt", operator=body.operator, role="operator", reason=body.reason, target="running",
-        before={"running": True}, after={"running": False, "keep_exits": body.keep_exits,
-                                         "open_orders_cancelled": [o.order_id for o in open_orders]}))
-    STORE.refresh()
-    return {"state": _state_out(),
-            "effects": {"new_orders": "stopped", "open_orders_cancelled": len(open_orders),
+    # A human must always be able to stop the loop: the state comes from the operations log alone, and a broken
+    # orders log only skips the cancellations — the halt is recorded either way.
+    audit = STORE.audit
+    with execution_lock(audit.directory):            # no order lands between this check and the halt record
+        state = trading_state(audit.operations(), default_mode=AUTO_EXECUTION["default_mode"])
+        if not state["running"]:
+            raise HTTPException(409, f"이미 정지된 상태입니다 ({state['halted_at']}, {state['halted_by']})")
+        try:
+            pending, error = open_orders(audit, keep_sells=body.keep_exits), None
+        except ValueError as exc:                    # a cut-short line or an invalid record in orders.jsonl
+            pending, error = [], f"orders.jsonl을 읽지 못해 미체결 취소를 건너뜀: {type(exc).__name__}"
+        # halt first: while halted the executor fills nothing, so the cancellations after it are safe
+        audit.record_operation(OperationRecord(
+            kind="halt", operator=body.operator, role="operator", reason=body.reason + (f" ({error})" if error else ""),
+            target="running", before={"running": True},
+            after={"running": False, "keep_exits": body.keep_exits,
+                   "open_orders_cancelled": None if error else [o.order_id for o in pending]}))
+        cancelled = cancel_orders(audit, pending, f"긴급 정지 ({body.operator}: {body.reason})")
+        st = trading_state(audit.operations(), default_mode=AUTO_EXECUTION["default_mode"])
+    kept = "" if not body.keep_exits else " 청산(매도) 미체결은 유지합니다."
+    return {"state": _state_out(st),
+            "effects": {"new_orders": "stopped", "open_orders_cancelled": None if error else len(cancelled),
                         "positions": "kept", "exits_active": body.keep_exits,
-                        # ponytail: the execution layer will cancel the orders; today only the record is written.
-                        "note": "실행 레이어 연결 전: 기록만 남기고 실제 취소 주문은 보내지 않았습니다"}}
+                        "note": error or f"모의투자: 미체결 주문 {len(cancelled)}건을 취소 기록했습니다(orders.jsonl).{kept} 실제 증권사 주문은 없습니다"}}
 
 
 class ResumeRequest(BaseModel):
@@ -489,12 +535,18 @@ class ResumeRequest(BaseModel):
 def resume(body: ResumeRequest, x_admin_token: str | None = Header(default=None)) -> dict:
     """재가동. 관리자만(kill_switch_reset = admin)."""
     role = _require_admin(x_admin_token)
-    STORE.refresh()
-    state = STORE.state()
-    if state["running"]:
-        raise HTTPException(409, "이미 실행 중입니다")
-    STORE.audit.record_operation(OperationRecord(kind="resume", operator=body.operator, role=role, reason=body.reason,
-                                                 target="running", before={"running": False}, after={"running": True}))
+    with execution_lock(STORE.audit.directory):
+        STORE.refresh()
+        state = STORE.state()
+        if state["running"]:
+            raise HTTPException(409, "이미 실행 중입니다")
+        # a halt that could not read the orders log left its open orders standing; they must not fill at an old open
+        stale = [o for o in open_orders(STORE.audit, keep_sells=state["keep_exits"]) if o.placed_at <= state["halted_at"]]
+        STORE.audit.record_operation(OperationRecord(kind="resume", operator=body.operator, role=role, reason=body.reason,
+                                                     target="running", before={"running": False},
+                                                     after={"running": True} | ({"open_orders_cancelled": [o.order_id for o in stale]}
+                                                                                if stale else {})))
+        cancel_orders(STORE.audit, stale, f"정지 전 미체결 — 재가동 시 취소 ({body.operator})")
     STORE.refresh()
     return {"state": _state_out()}
 
@@ -509,12 +561,18 @@ class ModeRequest(BaseModel):
 def set_mode(body: ModeRequest, x_admin_token: str | None = Header(default=None)) -> dict:
     """운용 모드 전환(관리자). 자동 / 수동 승인 / 모의투자."""
     role = _require_admin(x_admin_token)
-    STORE.refresh()
-    state = STORE.state()
-    if state["mode"] == body.mode:
-        raise HTTPException(409, f"이미 {MODE_KO[body.mode]} 모드입니다")
-    STORE.audit.record_operation(OperationRecord(kind="mode_change", operator=body.operator, role=role, reason=body.reason,
-                                                 target="mode", before={"mode": state["mode"]}, after={"mode": body.mode}))
+    with execution_lock(STORE.audit.directory):      # the executor checks the mode under the same lock
+        STORE.refresh()
+        state = STORE.state()
+        if state["mode"] == body.mode:
+            raise HTTPException(409, f"이미 {MODE_KO[body.mode]} 모드입니다")
+        # paper orders do not outlive paper mode: left open they would fill at an old open when paper comes back
+        pending = open_orders(STORE.audit) if state["mode"] == "paper" else []
+        STORE.audit.record_operation(OperationRecord(kind="mode_change", operator=body.operator, role=role, reason=body.reason,
+                                                     target="mode", before={"mode": state["mode"]},
+                                                     after={"mode": body.mode} | ({"open_orders_cancelled": [o.order_id for o in pending]}
+                                                                                  if pending else {})))
+        cancel_orders(STORE.audit, pending, f"운용 모드 변경 paper → {body.mode} ({body.operator})")
     STORE.refresh()
     return {"state": _state_out()}
 

@@ -94,7 +94,9 @@ def test_performance_and_rules_and_stubs(client):
     assert perf["by_rating"]["Buy"]["rating_ko"] == "매수" and perf["per_date"][0]["long_mean_alpha"] == pytest.approx(0.012)
     rules = client.get("/api/settings/rules").json()
     assert rules["market"]["price_limit"] == 0.30 and rules["screen_rules"][0]["label_ko"] == "가격 하한"
-    assert client.get("/api/positions").status_code == 501
+    # no orders yet: an empty paper book at the initial cash, not 501 and not invented numbers
+    pos = client.get("/api/positions").json()
+    assert pos["positions"] == [] and pos["equity"] == pos["cash"] == pos["initial_cash"] and pos["drawdown"] == 0.0
     assert [r["id"] for r in rules["auto_rules"]][:2] == ["auto_daily_order_cap", "auto_daily_loss_limit"]
     assert rules["mode"]["mode"] == "paper" and rules["change_history"] == []
 
@@ -186,3 +188,117 @@ def test_admin_token_guards_resume_and_mode_when_configured(tmp_path, monkeypatc
     # halt stays operator-level: no token needed, so a human can always stop the loop.
     assert c.post("/api/trading/halt", json={"operator": "운영자", "reason": "급락"}).status_code == 200
     assert c.post("/api/trading/resume", json={"operator": "운영자", "reason": "r"}).status_code == 403
+
+
+def _cache(data, ticker, rows):
+    cache = data / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    lines = ["Date,Open,High,Low,Close,Volume"] + [f"{d} 00:00:00+09:00,{o},{o},{c},{c},1000" for d, o, c in rows]
+    (cache / f"{ticker}-YFin-data.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@pytest.fixture
+def executed(tmp_path, monkeypatch):
+    """A paper book: one buy filled at the next open, one buy still open (its next session is not in the data)."""
+    from agent_trading_core.execution import Prices, execute_date
+    from agent_trading_core.risk import RiskConfig
+
+    data = tmp_path / "data"
+    days = ["2026-06-01", "2026-06-02", "2026-06-04", "2026-06-05"]
+    _cache(data, "^KS11", [(d, 100 + i, 100 + i) for i, d in enumerate(days)])
+    _cache(data, "005930.KS", [(d, 10_000, 11_000) for d in days])
+    audit = AuditLog(data / "audit")
+    audit.record_decision(DecisionRecord(ticker="005930.KS", trade_date="2026-06-01", rating="Buy", thesis="b"))
+    audit.record_decision(DecisionRecord(ticker="000660.KS", trade_date="2026-06-05", rating="REVIEW", thesis="?"))
+    audit.record_decision(DecisionRecord(ticker="005380.KS", trade_date="2026-06-05", rating="Buy", thesis="b"))
+    _cache(data, "005380.KS", [(d, 20_000, 20_000) for d in days])
+    prices, risk = Prices(data / "cache"), RiskConfig(regime_ma_days=3)
+    execute_date(audit, "2026-06-01", prices, risk=risk)
+    execute_date(audit, "2026-06-05", prices, risk=risk)
+    monkeypatch.setenv("TRADING_DATA_DIR", str(data))
+    from backend import main
+    importlib.reload(main)
+    return TestClient(main.app)
+
+
+@pytest.mark.unit
+def test_orders_and_positions_serve_the_paper_book(executed):
+    rows = {o["ticker"]: o for o in executed.get("/api/orders").json()}
+    assert rows["005930.KS"]["status"] == "filled" and rows["005930.KS"]["fill_date"] == "2026-06-02"
+    assert rows["005930.KS"]["status_ko"] == "체결" and rows["005930.KS"]["amount"] == pytest.approx(908 * 10_005)  # sized from the 11,000 close, filled at the 10,000 open
+    assert rows["005380.KS"]["status"] == "open" and rows["000660.KS"]["exception_kind"] == "review"
+    assert executed.get("/api/health").json()["orders"] == 3
+
+    pos = executed.get("/api/positions").json()
+    assert pos["as_of"] == "2026-06-05" and pos["mode"]["mode"] == "paper"
+    (p,) = pos["positions"]
+    assert (p["ticker"], p["name"], p["quantity"], p["last_price"]) == ("005930.KS", "삼성전자", 908, 11_000)
+    assert {g["id"] for g in pos["protections"]} == {"StoplossGuard", "MaxDrawdown", "Cooldown", "LowProfit"}
+    # the decision card carries its order as the execution strip
+    d = executed.get("/api/decisions", params={"date": "2026-06-01"}).json()[0]
+    assert [o["status"] for o in d["orders"]] == ["filled"]
+    # the REVIEW decision is one exception item, not two (decision + its exception order)
+    assert [(x["kind"], x["ticker"]) for x in executed.get("/api/exceptions").json()] == [("review", "000660.KS")]
+
+
+@pytest.mark.unit
+def test_bad_query_parameters_are_400(executed):
+    assert executed.get("/api/orders", params={"date": "2026-13-01"}).status_code == 400
+    assert executed.get("/api/orders", params={"date": "2026-6-1"}).status_code == 400   # dates compare as strings
+    assert executed.get("/api/orders", params={"status": "done"}).status_code == 400
+    assert executed.get("/api/positions", params={"as_of": "yesterday"}).status_code == 400
+    assert executed.get("/api/exceptions", params={"date": "06/05/2026"}).status_code == 400
+    assert executed.get("/api/orders", params={"status": "cancelled"}).json() == []
+
+
+@pytest.mark.unit
+def test_halt_cancels_the_open_orders_in_the_orders_log(executed):
+    r = executed.post("/api/trading/halt", json={"operator": "운영자A", "reason": "점검"}).json()
+    assert r["effects"]["open_orders_cancelled"] == 1 and "취소 기록" in r["effects"]["note"]
+    rows = {o["ticker"]: o for o in executed.get("/api/orders").json()}
+    assert rows["005380.KS"]["status"] == "cancelled" and rows["005380.KS"]["status_ko"] == "취소"
+    assert rows["005930.KS"]["status"] == "filled"                             # fills are not touched
+    history = executed.get("/api/settings/rules").json()["change_history"]
+    assert history[0]["after"]["open_orders_cancelled"] == ["paper-2026-06-05-005380.KS"]
+
+
+@pytest.mark.unit
+def test_halt_with_keep_exits_leaves_open_sells_and_a_broken_orders_log_still_halts(executed, tmp_path):
+    from agent_trading_core.audit import OrderRecord
+    audit = AuditLog(tmp_path / "data" / "audit")
+    audit.record_order(OrderRecord(order_id="s1", ticker="005930.KS", trade_date="2026-06-05", side="Sell",
+                                   quantity=1, status="open"))
+    r = executed.post("/api/trading/halt", json={"operator": "운영자A", "reason": "점검", "keep_exits": True}).json()
+    assert r["effects"]["open_orders_cancelled"] == 1                          # the buy, not the exit
+    status = {o["order_id"]: o["status"] for o in executed.get("/api/orders").json()}
+    assert status["s1"] == "open" and status["paper-2026-06-05-005380.KS"] == "cancelled"
+
+    executed.post("/api/trading/resume", json={"operator": "관리자", "reason": "r"})
+    with open(audit.directory / "orders.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"order_id": "cut')                                            # a write cut short
+    r = executed.post("/api/trading/halt", json={"operator": "운영자B", "reason": "파손 중 정지"})
+    assert r.status_code == 200 and r.json()["state"]["running"] is False
+    assert r.json()["effects"]["open_orders_cancelled"] is None and "건너뜀" in r.json()["effects"]["note"]
+    assert audit.operations()[-1].kind == "halt"
+
+
+@pytest.mark.unit
+def test_leaving_paper_mode_cancels_the_open_paper_orders(executed):
+    r = executed.post("/api/trading/mode", json={"operator": "관리자", "mode": "manual", "reason": "수동 전환"})
+    assert r.status_code == 200
+    rows = {o["ticker"]: o["status"] for o in executed.get("/api/orders").json()}
+    assert rows["005380.KS"] == "cancelled"
+    history = executed.get("/api/settings/rules").json()["change_history"]
+    assert history[0]["after"]["open_orders_cancelled"] == ["paper-2026-06-05-005380.KS"]
+
+
+@pytest.mark.unit
+def test_resume_cancels_open_orders_a_broken_log_kept_through_the_halt(executed, tmp_path):
+    path = tmp_path / "data" / "audit" / "orders.jsonl"
+    good = path.read_text(encoding="utf-8")
+    path.write_text(good + '{"order_id": "cut', encoding="utf-8")
+    assert executed.post("/api/trading/halt", json={"operator": "운영자", "reason": "파손"}).json()["effects"]["open_orders_cancelled"] is None
+    path.write_text(good, encoding="utf-8")                                    # the admin repairs the log
+    assert executed.post("/api/trading/resume", json={"operator": "관리자", "reason": "복구"}).status_code == 200
+    rows = {o["ticker"]: o["status"] for o in executed.get("/api/orders").json()}
+    assert rows["005380.KS"] == "cancelled"
