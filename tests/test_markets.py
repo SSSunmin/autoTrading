@@ -14,7 +14,7 @@ from agent_trading_core.simulate import SimConfig, run_simulation, sell_proceeds
 from tests.test_simulate import DATES, _cfg, _frame, _index, _paths
 
 COMMON = {"currency", "benchmark", "benchmark_key", "benchmark_name_ko", "timezone", "session", "settlement",
-          "price_limit", "halt_rules", "sell_tax", "trade_unit", "fractional_shares", "pdt_rule"}
+          "price_limit", "halt_rules", "sell_tax", "trade_unit", "fractional_shares", "pdt_rule", "data_source_index", "data_source_equity"}
 # KRX keys before the axis (backend/main.py serves this dict as-is)
 KRX_KEYS_BEFORE = {"price_limit", "vi_dynamic_kospi200", "vi_dynamic_other", "vi_dynamic_close_kospi200",
                    "vi_dynamic_close_other", "vi_static", "vi_halt_minutes", "sell_tax_kospi", "sell_tax_kosdaq",

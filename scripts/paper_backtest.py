@@ -36,6 +36,7 @@ sys.path.insert(0, str(ROOT))
 from agent_trading_core.config import MARKETS
 from agent_trading_core.errors import NoMarketDataError
 from agent_trading_core.identity import resolve_instrument_identity
+from agent_trading_core.kis import KisClient, load_kis_ohlcv
 from agent_trading_core.krx_names import display_name, korean_name
 from agent_trading_core.risk import RiskConfig
 from agent_trading_core.simulate import SimConfig, run_simulation, window_metrics
@@ -164,6 +165,10 @@ def main() -> int:
     parser.add_argument("--universe", default="fixed40", choices=["fixed40", "constituents"])
     parser.add_argument("--start", default="2024-01-02")
     parser.add_argument("--end", default="2026-11-12")
+    parser.add_argument("--source", choices=["yahoo", "kis"],
+                        help="price source for the index and the stocks (default: MARKETS data_source_index / "
+                             "data_source_equity). kis: KRX fixed40 only, cached as <symbol>-KIS-data.csv, written to "
+                             "<dir>_kis/")
     parser.add_argument("--dd-recovery", default="reset_peak", choices=["reset_peak", "half_size"],
                         help="after a −20%% stop (RiskConfig.dd_stop_recovery); half_size = the rule before 2026-11-13, "
                              "written next to the default output as <dir>_half_size/")
@@ -172,6 +177,14 @@ def main() -> int:
     out, windows, index_symbol = setup["out"], setup["windows"], market["benchmark"]
     risk = replace(RiskConfig(), dd_stop_recovery=args.dd_recovery)
     cache_dir = str(DATA / "cache")
+    index_source = args.source or market["data_source_index"]
+    equity_source = args.source or market["data_source_equity"]
+    kis = None
+    if "kis" in (index_source, equity_source):
+        if args.market != "KRX" or args.universe != "fixed40":
+            parser.error("KIS 소스는 KRX fixed40만 지원한다(미국은 거래소 코드, 시점 구성은 상장폐지 처리가 아직 없다)")
+        kis = KisClient()
+        out = out.with_name(f"{out.name}_kis")
 
     names, history, universe_on = setup["universe"], None, None
     if args.universe == "constituents":
@@ -196,7 +209,12 @@ def main() -> int:
     frames, failed, downloaded, cut = {}, [], 0, {}
     for k, t in enumerate(names):
         try:
-            frames[t], fetched, cut_at = load_frame(t, args.end, cache_dir)
+            if equity_source == "kis":
+                calls = kis.stats["calls"]
+                frames[t], cut_at = load_kis_ohlcv(t, args.end, cache_dir, kis), None
+                fetched = kis.stats["calls"] > calls
+            else:
+                frames[t], fetched, cut_at = load_frame(t, args.end, cache_dir)
             downloaded += fetched
             if cut_at:
                 cut[t] = cut_at
@@ -205,7 +223,11 @@ def main() -> int:
             failed.append(t)
         if k % 50 == 49:
             print(f"  prices {k + 1}/{len(names)} (not cached today {downloaded}, failed {len(failed)})")
-    index = load_ohlcv(index_symbol, args.end, cache_dir=cache_dir)
+    index = (load_kis_ohlcv(index_symbol, args.end, cache_dir, kis) if index_source == "kis"
+             else load_ohlcv(index_symbol, args.end, cache_dir=cache_dir))
+    if kis:
+        print(f"KIS: token issued {kis.stats['token_issued']} · reused {kis.stats['token_reused']} · "
+              f"calls {kis.stats['calls']} · throttled {kis.stats['throttled']}")
     print(f"universe {len(frames)} tickers ({len(failed)} failed, {downloaded} not cached today), index {index_symbol} "
           f"{index['Date'].iloc[0].date()}..{index['Date'].iloc[-1].date()}")
     sectors = {t: sector_of(t) for t in frames}
@@ -253,6 +275,8 @@ def main() -> int:
     if args.market != "KRX" or history is not None:  # the fixed KRX file keeps its shape for GET /api/paper
         summary.update({"market": args.market, "currency": market["currency"], "initial_cash": setup["initial_cash"],
                         "commission": setup["commission"], "failed": failed, "sectors": sectors})
+    if kis:
+        summary.update({"source": "kis", "failed": failed, "kis_stats": kis.stats})
     if history is not None:
         end = pd.Timestamp(args.end)
         # a name whose first bar comes well after it joined the index: no usable history while a member (Yahoo keeps

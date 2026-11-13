@@ -63,6 +63,10 @@ MARKETS["KRX"] = {
     # "sell_tax" (common key) is set from sell_tax_kospi below: the backtest universe is KOSPI
     "fractional_shares": False,
     "pdt_rule": "해당 없음",            # string, not None: the settings screen prints every value
+    # where prices come from: "yahoo" (yfinance) or "kis" (agent_trading_core/kis.py, KIS Developers). Two scalar
+    # keys rather than one dict, because the settings screen prints every value with String(v)
+    "data_source_index": "yahoo",
+    "data_source_equity": "yahoo",
 }
 # one number for the simulator (sell_tax) and paper fills (execution.py reads sell_tax_kospi)
 MARKETS["KRX"]["sell_tax"] = MARKETS["KRX"]["sell_tax_kospi"]
@@ -93,6 +97,8 @@ MARKETS["US"] = {
     # The $25,000 pattern-day-trader minimum was replaced by intraday margin standards on 2026-06-04
     # (SR-FINRA-2025-017, Regulatory Notice 26-10). The book holds overnight, so it does not bind either way.
     "pdt_rule": "2026-06-04 폐지(FINRA 4210 일중 증거금 기준으로 대체), 이전: 마진 계좌 $25,000 미만 5영업일 내 데이트레이드 4회 제한",
+    "data_source_index": "yahoo",
+    "data_source_equity": "yahoo",
 }
 
 

@@ -37,6 +37,17 @@ uv pip install --python .venv -e ".[dev]"
 .venv\Scripts\python -m pytest -q
 ```
 
+### 환경변수 (KIS 시세, 선택)
+
+한국투자증권 KIS Developers 시세(`agent_trading_core/kis.py`, docs/01 §11-4-1)를 쓸 때만 필요하다. 환경변수나 저장소 루트 `.env`에 넣는다(`.env.example` 참고, `.env`는 git에 올리지 않는다). 없으면 yfinance만 쓴다.
+
+| 변수 | 내용 |
+|---|---|
+| `KIS_APP_KEY` | KIS Developers 앱 키(모의투자) |
+| `KIS_APP_SECRET` | 앱 시크릿 |
+| `KIS_ACCOUNT_NO` | 계좌번호 앞 8자리(CANO). 시세 조회에는 쓰지 않는다 |
+| `KIS_ENV` | `paper`만 지원(모의투자 서버). 다른 값이면 시작하지 않는다 |
+
 ## 사용 흐름
 
 ```python
