@@ -1,6 +1,6 @@
 """Rule-only baseline on KRX large caps: screen → momentum rank → rating, scored by realized alpha.
 
-No LLM anywhere. This is the bar an agent has to beat (docs/01 §11-3 step 1). It
+No LLM anywhere. This is the bar an agent has to beat (docs/01 §11-4 step 1). It
 also writes the screening and decision audit records the dashboard mock-up reads.
 
 Run:  .venv/Scripts/python scripts/baseline_krx.py [--dates 8] [--start 2026-06-05]

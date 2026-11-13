@@ -3,9 +3,11 @@
 Runs the same screen → quartile rating → target pipeline over a KRX large-cap book, 2024-01 → 2026-11,
 three ways: rules off, rules on, rules on + 200-day regime filter. The first metric is the maximum
 drawdown and how long it took to recover, inside the crash episodes especially; return comes second.
+``--market US`` runs the same three variants over a separate US large-cap book (3rd measurement, docs/07):
+own cash in USD, own benchmark, no FX, the same RiskConfig defaults measured once.
 
-Run:  .venv/Scripts/python scripts/paper_backtest.py [--start 2024-01-02] [--end 2026-11-12]
-Writes data/results/paper/summary.json and <variant>_equity.csv.
+Run:  .venv/Scripts/python scripts/paper_backtest.py [--market KRX|US] [--start 2024-01-02] [--end 2026-11-12]
+Writes data/results/paper/ (KRX) or data/results/paper_us/ (US): summary.json and <variant>_equity.csv.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from agent_trading_core.config import MARKETS
 from agent_trading_core.identity import resolve_instrument_identity
 from agent_trading_core.krx_names import korean_name
 from agent_trading_core.risk import RiskConfig
@@ -50,8 +53,56 @@ WINDOWS = {
     "2026 급등 국면": ("2026-04-01", "2026-11-12"),
 }
 
+# Forty S&P 500 large caps covering all 11 GICS sectors, fixed by sector and size before any run:
+# IT 6 · communication 4 · consumer discretionary 4 · staples 4 · health care 4 · financials 5 · industrials 4 ·
+# energy 3 · utilities 2 · real estate 2 · materials 2. Same survivorship bias as the KRX list: current members.
+US_UNIVERSE = [
+    "AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM",
+    "GOOGL", "META", "NFLX", "DIS",
+    "AMZN", "TSLA", "HD", "MCD",
+    "WMT", "COST", "PG", "KO",
+    "LLY", "JNJ", "UNH", "ABBV",
+    "BRK-B", "JPM", "V", "MA", "BAC",
+    "GE", "CAT", "RTX", "UNP",
+    "XOM", "CVX", "COP",
+    "NEE", "SO",
+    "PLD", "AMT",
+    "LIN", "SHW",
+]
+# Episodes read off the S&P 500 path alone (docs/07 §1): the KRX August window, the tariff shock from the
+# index's 2025-02-19 high, and 2026 from its 01-27 high (March correction, April rebound, the 11-05 −4.4% day).
+US_WINDOWS = {
+    "2024-08 급락 (엔 캐리 청산)": ("2024-07-01", "2024-09-30"),
+    "2025-04 관세 충격": ("2025-02-19", "2025-05-15"),
+    "2026 조정·반등": ("2026-01-27", "2026-11-12"),
+}
+
 DATA = ROOT / "data"
 OUT = DATA / "results" / "paper"
+
+SETUPS = {
+    "KRX": {"universe": UNIVERSE, "windows": WINDOWS, "out": OUT, "initial_cash": 100_000_000.0, "commission": 0.00015,
+            "caveats": [
+                "유니버스는 현재 KOSPI 대형주 40종목 고정: 생존 편향(2024년 이후 지수에서 빠진 종목 없음).",
+                "결정은 종가, 체결은 다음날 시가. 가격제한폭·VI·호가단위는 반영하지 않음(갭은 시가로 그대로 반영).",
+                "규칙 전용(LLM 없음). 에이전트가 들어오면 같은 격자에서 다시 측정.",
+                "거래비용: 수수료 0.015%/편도, 매도 거래세 0.20%, 슬리피지 0.05%/편도.",
+            ]},
+    # USD 100,000: about the scale of the KRX book's 1억원 (no FX conversion), and a 10% name cap ($10,000) still buys whole shares of
+    # the highest-priced names. Commission 0: the US online brokers' zero-commission norm.
+    "US": {"universe": US_UNIVERSE, "windows": US_WINDOWS, "out": DATA / "results" / "paper_us",
+           "initial_cash": 100_000.0, "commission": 0.0,
+           "caveats": [
+               "유니버스는 현재 S&P 500 대형주 40종목 고정(11개 GICS 섹터): 생존 편향(2024년 이후 지수에서 빠진 종목 없음).",
+               "규모 기준도 현재 시점이라 기간 중 크게 오른 종목이 많이 들어갔다(선정 편향). A가 지수를 이긴 것을 전략 성과로 읽지 않는다.",
+               "결정은 종가, 체결은 다음날 시가. LULD 정지·시장 서킷브레이커·프리/애프터마켓은 반영하지 않음(갭은 시가로 그대로 반영).",
+               "규칙 전용(LLM 없음). 에이전트가 들어오면 같은 격자에서 다시 측정.",
+               "거래비용: 수수료 0, 슬리피지 0.05%/편도, 매도 SEC fee $20.60/백만 달러 + FINRA TAF $0.000195/주(거래당 상한 $9.79). "
+               "SEC fee는 기간 중 $27.80 → $0 → $20.60으로 바뀌었지만 2026-11-13 현재 요율을 전 기간에 적용. "
+               "TAF는 2026 정규 요율(2026년 4분기 0 면제는 반영하지 않음).",
+               "USD 단독 포트폴리오: 환율·국내장과의 합산 없음.",
+           ]},
+}
 
 
 @cache
@@ -65,27 +116,33 @@ def sector_of(ticker: str) -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--market", default="KRX", choices=sorted(SETUPS))
     parser.add_argument("--start", default="2024-01-02")
     parser.add_argument("--end", default="2026-11-12")
     args = parser.parse_args()
-    OUT.mkdir(parents=True, exist_ok=True)
+    setup, market = SETUPS[args.market], MARKETS[args.market]
+    out, windows, index_symbol = setup["out"], setup["windows"], market["benchmark"]
+    out.mkdir(parents=True, exist_ok=True)
     cache_dir = str(DATA / "cache")
 
-    frames = {}
-    for t in UNIVERSE:
+    frames, failed = {}, []
+    for t in setup["universe"]:
         try:
             frames[t] = load_ohlcv(t, args.end, cache_dir=cache_dir)
         except Exception as exc:
             print(f"  skip {t}: {exc}")
-    index = load_ohlcv(INDEX, args.end, cache_dir=cache_dir)
-    print(f"universe {len(frames)} tickers, index {INDEX} {index['Date'].iloc[0].date()}..{index['Date'].iloc[-1].date()}")
-    for t in frames:
-        sector_of(t)
+            failed.append(t)
+    index = load_ohlcv(index_symbol, args.end, cache_dir=cache_dir)
+    print(f"universe {len(frames)} tickers ({len(failed)} failed), index {index_symbol} "
+          f"{index['Date'].iloc[0].date()}..{index['Date'].iloc[-1].date()}")
+    sectors = {t: sector_of(t) for t in frames}
+    print(f"sectors resolved {sum(1 for v in sectors.values() if v)}/{len(frames)}")
 
+    common = {"initial_cash": setup["initial_cash"], "commission": setup["commission"], "market": args.market}
     variants = [
-        SimConfig(args.start, args.end, label="rules_off"),
-        SimConfig(args.start, args.end, label="rules_on", risk=RiskConfig()),
-        SimConfig(args.start, args.end, label="rules_on_regime", risk=RiskConfig(), regime_filter=True),
+        SimConfig(args.start, args.end, label="rules_off", **common),
+        SimConfig(args.start, args.end, label="rules_on", risk=RiskConfig(), **common),
+        SimConfig(args.start, args.end, label="rules_on_regime", risk=RiskConfig(), regime_filter=True, **common),
     ]
     results = {}
     for cfg in variants:
@@ -97,15 +154,15 @@ def main() -> int:
         print(f"  return {m['total_return']:+.1%} (CAGR {m['cagr']:+.1%})  maxDD {m['max_drawdown']:+.1%} "
               f"{m['dd_peak']}→{m['dd_trough']} 회복 {m['dd_recovery'] or '미회복'}  worst day {m['worst_day']:+.1%} "
               f"{m['worst_day_date']}  vol {m['volatility']:.1%}  trades {len(r.trades)} {r.exits_by_reason()}")
-        windows = window_metrics(r.equity, WINDOWS)
-        bench_windows = window_metrics(r.benchmark, WINDOWS)
-        for name, w in windows.items():
-            print(f"    {name}: {w['return']:+.1%} / maxDD {w['max_drawdown']:+.1%}  (KOSPI {bench_windows[name]['return']:+.1%} / "
-                  f"{bench_windows[name]['max_drawdown']:+.1%})")
-        r.equity.to_frame().join(r.benchmark).join(r.exposure.rename("exposure")).to_csv(OUT / f"{cfg.label}_equity.csv")
+        win = window_metrics(r.equity, windows)
+        bench_windows = window_metrics(r.benchmark, windows)
+        for name, w in win.items():
+            print(f"    {name}: {w['return']:+.1%} / maxDD {w['max_drawdown']:+.1%}  ({market['benchmark_name_ko']} "
+                  f"{bench_windows[name]['return']:+.1%} / {bench_windows[name]['max_drawdown']:+.1%})")
+        r.equity.to_frame().join(r.benchmark).join(r.exposure.rename("exposure")).to_csv(out / f"{cfg.label}_equity.csv")
         results[cfg.label] = {
             "label": cfg.label, "risk": asdict(cfg.risk) if cfg.risk else None, "regime_filter": cfg.regime_filter,
-            "screen": asdict(cfg.screen), "rebalances": r.rebalances, "metrics": m, "windows": windows,
+            "screen": asdict(cfg.screen), "rebalances": r.rebalances, "metrics": m, "windows": win,
             "exits_by_reason": r.exits_by_reason(), "trades": len(r.trades),
             "win_rate": sum(1 for t in r.trades if t.pnl_pct > 0) / len(r.trades) if r.trades else None,
             "mean_exposure": float(r.exposure.mean()),
@@ -116,17 +173,15 @@ def main() -> int:
 
     summary = {
         "start": args.start, "end": args.end, "universe": list(frames),
-        "universe_ko": {t: korean_name(t) for t in frames}, "index": INDEX, "windows": WINDOWS,
+        "universe_ko": {t: korean_name(t) for t in frames}, "index": index_symbol, "windows": windows,
         "benchmark": bench, "variants": results,
-        "caveats": [
-            "유니버스는 현재 KOSPI 대형주 40종목 고정: 생존 편향(2024년 이후 지수에서 빠진 종목 없음).",
-            "결정은 종가, 체결은 다음날 시가. 가격제한폭·VI·호가단위는 반영하지 않음(갭은 시가로 그대로 반영).",
-            "규칙 전용(LLM 없음). 에이전트가 들어오면 같은 격자에서 다시 측정.",
-            "거래비용: 수수료 0.015%/편도, 매도 거래세 0.20%, 슬리피지 0.05%/편도.",
-        ],
+        "caveats": setup["caveats"],
     }
-    (OUT / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-    print(f"\nwrote {OUT / 'summary.json'}")
+    if args.market != "KRX":  # the KRX file keeps its shape for GET /api/paper
+        summary.update({"market": args.market, "currency": market["currency"], "initial_cash": setup["initial_cash"],
+                        "commission": setup["commission"], "failed": failed, "sectors": sectors})
+    (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    print(f"\nwrote {out / 'summary.json'}")
     return 0
 
 

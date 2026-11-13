@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pandas as pd
 
+from agent_trading_core.config import MARKETS
 from agent_trading_core.risk import (
     ExitSignal,
     Position,
@@ -30,7 +31,7 @@ from agent_trading_core.risk import (
     regime_on,
     size_targets,
 )
-from agent_trading_core.screening import ScreenConfig, screen
+from agent_trading_core.screening import ScreenConfig, screen, us_preset
 
 
 def rating_for(rank: int | None, n_ranked: int) -> str:
@@ -58,12 +59,22 @@ class SimConfig:
     initial_cash: float = 100_000_000.0
     rebalance_every: int = 5             # trading days
     commission: float = 0.00015          # per side
-    sell_tax: float = 0.0020             # KRX 2026 (config.KRX_MARKET)
+    sell_tax: float | None = None        # None → config.MARKETS[market]["sell_tax"] (KRX 2026: 0.20%)
     slippage: float = 0.0005             # per side
-    screen: ScreenConfig = field(default_factory=lambda: ScreenConfig(dollar_volume_top_n=30, top_k=8, sector_max=3,
-                                                                       volatility_min=0.10))
+    screen: ScreenConfig | None = None   # None → the large-cap book below; US gets the $5 price floor. An explicit
+                                         # screen is used as given: a US run must set price_min itself (us_preset)
     risk: RiskConfig | None = None       # None → no hard rules: equal weight, fully invested, exits only on Sell/Underweight
     regime_filter: bool = False          # needs risk
+    market: str = "KRX"                  # config.MARKETS key: sell tax, sell-side regulatory fees, benchmark name
+
+    def __post_init__(self) -> None:
+        mkt = MARKETS[self.market]
+        if self.sell_tax is None:
+            self.sell_tax = mkt["sell_tax"]
+        if self.screen is None:
+            self.screen = ScreenConfig(dollar_volume_top_n=30, top_k=8, sector_max=3, volatility_min=0.10)
+            if self.market == "US":
+                self.screen = us_preset(self.screen)
 
 
 @dataclass
@@ -144,6 +155,15 @@ def window_metrics(equity: pd.Series, windows: dict[str, tuple[str, str]]) -> di
     return out
 
 
+def sell_proceeds(quantity: int, px: float, cfg: SimConfig) -> float:
+    """Cash from a sell at ``px`` (slippage already in it): commission, sell tax, and on US books the SEC
+    Section 31 fee (fraction of the sale) and FINRA TAF (per share, capped per trade). KRX has neither fee."""
+    mkt = MARKETS[cfg.market]
+    sec_fee = mkt.get("sec_fee_rate", 0.0)
+    taf = min(quantity * mkt.get("taf_per_share", 0.0), mkt.get("taf_max", 0.0))
+    return quantity * px * (1 - cfg.commission - cfg.sell_tax - sec_fee) - taf
+
+
 # --- simulation -----------------------------------------------------------------------------
 
 def _panel(frames: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, col: str) -> pd.DataFrame:
@@ -161,6 +181,7 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
     """``frames``: full OHLCV history per ticker (Date naive, ascending). ``index_frame``: the benchmark index OHLCV,
     which also sets the trading calendar and feeds the regime filter."""
     risk = cfg.risk
+    mkt = MARKETS[cfg.market]
     idx = index_frame.set_index("Date")["Close"].sort_index()
     idx = idx[~idx.index.duplicated(keep="last")]
     dates = idx.loc[cfg.start:cfg.end].index
@@ -207,7 +228,7 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
             if math.isnan(px):
                 positions[t] = pos
                 continue
-            proceeds = pos.quantity * px * (1 - cfg.commission - cfg.sell_tax)
+            proceeds = sell_proceeds(pos.quantity, px, cfg)
             cash += proceeds
             pnl = px / pos.entry_price - 1
             trades.append(Trade(t, dates[pos.entry_day].strftime("%Y-%m-%d"), date.strftime("%Y-%m-%d"), pos.entry_price,
@@ -298,7 +319,7 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
                 if g:
                     locks.append(g)
                 if cfg.regime_filter and not regime_on(idx.loc[:date], risk):
-                    locks.append(f"국면 필터: KOSPI가 {risk.regime_ma_days}일선 아래, 신규 매수 없음")
+                    locks.append(f"국면 필터: {mkt['benchmark_name_ko']} 종가가 {risk.regime_ma_days}일선 아래, 신규 매수 없음")
             new = []
             for t, w in weights.items():
                 if t in positions or t in pending_sells:
@@ -320,6 +341,6 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
                 event(date, "lock", l)
 
     equity_s = pd.Series(eq_hist, index=dates, name="equity")
-    bench = (idx.loc[dates] / float(idx.loc[dates].iloc[0]) * cfg.initial_cash).rename("kospi")
+    bench = (idx.loc[dates] / float(idx.loc[dates].iloc[0]) * cfg.initial_cash).rename(mkt["benchmark_key"])
     return SimResult(cfg.label, equity_s, bench, pd.Series(exp_hist, index=dates), trades, events, rebalances,
                      metrics(equity_s), metrics(bench))
