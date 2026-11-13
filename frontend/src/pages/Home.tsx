@@ -2,12 +2,13 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AgentAlert, AgentKpiCard, AgentSectionPanel, Grid } from '@bv-ds/ui'
 
 import { api, money, pct, stockName, utc } from '../api/client'
-import type { Market, MarketSummary } from '../api/types'
+import type { Market, MarketFlow, MarketSummary } from '../api/types'
 import { useApi } from '../hooks/useApi'
 import { useLabels } from '../hooks/useLabels'
 import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { useStateTick } from '../hooks/useTradingState'
 import { ExecStatus, Loaded, ModeBadge, Pct, RatingBadge, TickerCell } from '../components/common'
+import { AsOfStamp, PageHeader, RegimeBadge, RiskGauges } from '../components/parts'
 
 /** 1 (v0.3): portfolio state, what ran automatically today, and the exceptions a human must look at.
  *  The two market cards (/api/markets) are the one place both books show side by side, each in its own currency
@@ -34,20 +35,21 @@ export default function Home() {
   const first = exceptions.data?.[0]
   const nOrders = (s: string) => orders.data?.filter((o) => o.status === s).length ?? 0
   const b = book.data
-  const orderAmount = orders.data?.reduce((sum, o) => sum + (o.amount ?? 0), 0) ?? null
+  const flow = markets.data?.find((m) => m.market === market)?.flow ?? null
   const kpis = [
     { label: '평가 금액', value: b ? amt(b.equity) : '–', delta: b ? `현금 + 보유 평가액 · ${b.as_of} 종가` : '현금 + 보유 평가액' },
     { label: '오늘 실현 손익', value: b ? amt(b.realized_today) : '–', delta: b ? `누적 ${amt(b.realized_pnl)} · 체결가 기준` : '당일 체결 기준' },
     { label: '미실현 손익', value: b ? amt(b.unrealized_pnl) : '–', delta: '보유 평단 대비' },
     { label: '드로다운', value: b ? pct(b.drawdown) : '–', delta: b ? `피크 대비 · 한도 ${pct(b.limits.dd_halve, 0)} 축소 / ${pct(b.limits.dd_stop, 0)} 정지` : '피크 대비' },
     { label: '그로스 노출 · 현금', value: b ? `${pct(b.gross_exposure).replace('+', '')} · ${amt(b.cash)}` : '–', delta: '포트폴리오 대비' },
-    { label: '오늘 주문 금액', value: amt(orderAmount), delta: b ? `결정 ${latestDate ?? '–'} 체결분 · 일일 상한 ${amt(b.limits.auto_daily_order_cap)}` : '자동 실행 일일 상한 대비' },
+    { label: '오늘 주문 금액', value: b ? `매수 ${amt(b.today_buy_amount)} · 매도 ${amt(b.today_sell_amount)}` : '–',
+      delta: b ? `일일 상한 ${amt(b.limits.auto_daily_order_cap)}의 ${pct(b.today_buy_cap_used).replace('+', '')}(매수만) · ${b.today_session ?? '다음 거래일'} 시가` : '일일 상한은 매수만' },
   ]
 
   return (
     <>
-      <h1 className="page-title">오늘 요약</h1>
-      <p className="page-sub">지금 포트폴리오가 어떤 상태이고, 시스템이 오늘 무엇을 자동으로 실행했고, 사람이 봐야 할 예외가 있는지. 숫자는 전부 기록에서 읽고 화면에서 재계산하지 않습니다.</p>
+      <PageHeader title="오늘 요약" description="지금 포트폴리오가 어떤 상태이고, 시스템이 오늘 무엇을 자동으로 실행했고, 사람이 봐야 할 예외가 있는지. 숫자는 전부 기록에서 읽고 화면에서 재계산하지 않습니다."
+        updated={b ? `${b.as_of} 종가 기준` : undefined} />
 
       <div className="cards">
         <Loaded state={markets} empty="시장 요약이 없습니다">
@@ -59,6 +61,8 @@ export default function Home() {
       <Grid columns={6} gap="1.2rem">
         {kpis.map((k) => <AgentKpiCard key={k.label} label={k.label} value={k.value} delta={book.error ?? k.delta} />)}
       </Grid>
+
+      {flow && <FlowCards flow={flow} asOf={b?.as_of} to={to} />}
 
       {exceptions.data && exceptions.data.length > 0 && first && (
         <div className="section">
@@ -93,28 +97,21 @@ export default function Home() {
       </div>
 
       <div className="cards section">
-        <AgentSectionPanel title="리스크 한도" description="드로다운 · 일일 손실 · 오늘 주문 금액 · 섹터 노출을 한도선과 함께" action={<Link to={to('/positions')}>포지션·리스크 →</Link>}>
-          <p className="muted">한도를 넘으면 자동 매매가 신규 주문을 멈추고 예외 큐와 알림으로 알립니다.</p>
+        <AgentSectionPanel title="리스크 한도" description="검은 선은 한도, 빨간 선은 드로다운 정지. 한도를 넘으면 신규 주문을 멈추고 예외 큐로 알립니다"
+          action={<span className="toolbar" style={{ marginBottom: 0 }}><AsOfStamp asOf={b?.as_of} /><Link to={to('/positions')}>포지션·리스크 →</Link></span>}>
           <Loaded state={book}>
-            {(p) => (
-              <div className="matrix"><table><tbody>
-                <tr><td>드로다운</td><td className={`r num ${p.drawdown <= p.limits.dd_halve ? 'down' : ''}`}>{pct(p.drawdown)}</td><td className="muted">한도 {pct(p.limits.dd_halve, 0)} 축소 · {pct(p.limits.dd_stop, 0)} 정지</td></tr>
-                <tr><td>그로스 노출</td><td className="r num">{pct(p.gross_exposure).replace('+', '')}</td><td className="muted">한도 {pct(p.limits.max_gross_pct, 0).replace('+', '')}</td></tr>
-                <tr><td>오늘 주문 금액</td><td className="r num">{amt(orderAmount)}</td><td className="muted">일일 상한 {amt(p.limits.auto_daily_order_cap)}</td></tr>
-                <tr><td>종목당 최대 비중</td><td className="r num">{pct(Math.max(0, ...p.positions.map((r) => r.weight ?? 0))).replace('+', '')}</td><td className="muted">한도 {pct(p.limits.max_position_pct, 0).replace('+', '')}</td></tr>
-                <tr><td>국면 ({info?.benchmark_name_ko ?? '지수'} vs 200일선)</td><td className="r">{p.regime_on == null ? '–' : p.regime_on ? '매수 가능' : '신규 매수 없음'}</td><td className="muted">{p.as_of} 기준</td></tr>
-              </tbody></table></div>
-            )}
+            {(p) => <RiskGauges p={p} amt={amt} />}
           </Loaded>
         </AgentSectionPanel>
-        <AgentSectionPanel title="Protections · 손절 근접" description="4종 상태와 손절선 2% 이내 종목 수">
+        <AgentSectionPanel title="Protections · 손절 근접" description="4종 상태와 손절선 근접 종목 수"
+          action={b ? <RegimeBadge on={b.regime_on} gap={b.regime_gap} index={info?.benchmark_name_ko ?? '지수'} days={b.limits.regime_ma_days} /> : undefined}>
           <Loaded state={book}>
             {(p) => (
               <div className="matrix"><table><tbody>
                 {p.protections.map((g) => (
-                  <tr key={g.id}><td className="num">{g.id}</td><td className={g.active ? 'down' : 'muted'}>{g.active ? '발동' : '정상'}</td><td className="wrap muted">{g.detail ?? ''}</td></tr>
+                  <tr key={g.id}><td className="num">{g.id}</td><td className={g.active ? 'alert-t' : 'muted'}>{g.active ? '● 발동' : '○ 정상'}</td><td className="wrap muted">{g.detail ?? ''}</td></tr>
                 ))}
-                <tr><td>손절선 2% 이내</td><td className="num">{p.positions.filter((r) => r.last_price != null && r.last_price <= r.stop_price * 1.02).length}</td><td className="muted">보유 {p.positions.length}종목</td></tr>
+                <tr><td>손절선 {pct(p.limits.near_stop_pct, 0).replace('+', '')} 이내</td><td className="num">{p.near_stop_count}</td><td className="muted">보유 {p.positions.length}종목</td></tr>
               </tbody></table></div>
             )}
           </Loaded>
@@ -144,6 +141,32 @@ export default function Home() {
 }
 
 const MARKET_KO: Record<Market, string> = { KRX: '국내', US: '미국' }
+
+/** Four cards from screening to holdings (mockup v0.6 홈 흐름 카드), each a link to its screen; counts from /api/markets. */
+function FlowCards({ flow, asOf, to }: { flow: MarketFlow; asOf: string | undefined; to: (path: string) => string }) {
+  const join = (m: Record<string, number>) => Object.entries(m).map(([k, n]) => `${k} ${n}`).join(' · ')
+  const { screen, decisions, exceptions, holdings } = flow
+  return (
+    <nav className="flow section" aria-label="오늘 흐름">
+      <Link className="flow-card" to={to('/screens')}>
+        <span className="hd"><span className="k">선별 후보</span><span className="v tnum">{screen ? screen.selected_count : '–'}</span></span>
+        <span className="s">{screen ? <>유니버스 {screen.universe_size}종목 중 · <AsOfStamp asOf={screen.as_of} expected={asOf} /></> : '선별 실행 없음'}</span>
+      </Link>
+      <Link className="flow-card" to={to('/decisions')}>
+        <span className="hd"><span className="k">오늘 결정{decisions.date ? ` · ${decisions.date}` : ''}</span><span className="v tnum">{decisions.total}</span></span>
+        <span className="s">{[join(decisions.by_rating_ko), decisions.rule ? `규칙 청산 ${decisions.rule}` : ''].filter(Boolean).join(' · ') || '결정 없음'}</span>
+      </Link>
+      <Link className="flow-card" to={to('/decisions?tab=exceptions')}>
+        <span className="hd"><span className="k">예외</span><span className={`v tnum ${exceptions.total > 0 ? 'alert' : ''}`}>{exceptions.total}</span></span>
+        <span className="s">{join(exceptions.by_kind_ko) || '확인할 예외 없음'}</span>
+      </Link>
+      <Link className="flow-card" to={to('/positions')}>
+        <span className="hd"><span className="k">보유 종목</span><span className="v tnum">{holdings.count}</span></span>
+        <span className="s">손절 근접 {holdings.near_stop} · Protections {holdings.protections_active}건 발동</span>
+      </Link>
+    </nav>
+  )
+}
 
 /** One book on the home screen: value in its own currency, today, drawdown, mode and the next run in KST. */
 function MarketCard({ m, current }: { m: MarketSummary; current: boolean }) {

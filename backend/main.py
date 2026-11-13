@@ -42,6 +42,7 @@ from agent_trading_core.audit import (
     OperationRecord,
     OrderRecord,
     ScreenRun,
+    baseline_summary_path,
     latest_orders,
     market_audit,
     stage_counts,
@@ -128,21 +129,24 @@ class _Store:
         audit = self.audit
         dirs = ([audit.legacy] if audit.legacy else []) + [audit.directory]
         paths = [d / n for d in dirs for n in ("screens.jsonl", "decisions.jsonl", "orders.jsonl", "operations.jsonl")]
-        if self.market == "KRX":
-            paths.append(DATA_DIR / "baseline_summary.json")
-            log = self.memory_log_path()
-            if log:
-                paths.append(log)
+        paths.append(self.summary_path())
+        log = self.memory_log_path()
+        if log:
+            paths.append(log)
         return paths
 
+    def summary_path(self) -> Path:
+        """The market's rule-only decision baseline summary (scripts/baseline_krx.py --market): KRX at the data root
+        as before the market axis, any other market under data/audit/<market>/."""
+        return baseline_summary_path(DATA_DIR, self.market)
+
     def memory_log_path(self) -> Path | None:
-        """The memory log and the backtest summary are the KRX baseline's (scripts/baseline_krx.py); US has none yet."""
-        if self.market != "KRX":
-            return None
+        """The market's memory log, named by its baseline summary (``log_path``). TRADING_MEMORY_LOG stays the KRX
+        override it was before the market axis."""
         env = os.environ.get("TRADING_MEMORY_LOG")
-        if env:
+        if env and self.market == "KRX":
             return Path(env)
-        summary = DATA_DIR / "baseline_summary.json"
+        summary = self.summary_path()
         if summary.exists():
             try:
                 return Path(json.loads(summary.read_text(encoding="utf-8"))["log_path"])
@@ -162,8 +166,8 @@ class _Store:
         self.operations = audit.operations()
         log = self.memory_log_path()
         self.memory = TradingMemoryLog({"memory_log_path": str(log)}).load_entries() if log else []
-        summary = DATA_DIR / "baseline_summary.json"
-        self.summary = json.loads(summary.read_text(encoding="utf-8")) if self.market == "KRX" and summary.exists() else {}
+        summary = self.summary_path()
+        self.summary = json.loads(summary.read_text(encoding="utf-8")) if summary.exists() else {}
         self._stamp = stamp
         return self
 
@@ -245,7 +249,7 @@ def _screen_summary(s: ScreenRun) -> dict:
     counts = stage_counts(s)
     return {"run_id": s.run_id, "as_of": s.as_of, "recorded_at": s.recorded_at, "universe": s.universe,
             "universe_size": s.universe_size, "selected_count": counts[-1] if counts else 0,
-            "rules": s.rules, "rules_ko": [RULE_KO.get(r, r) for r in s.rules], "stage_counts": counts}
+            "rules": s.rules, "rule_count": len(s.rules), "rules_ko": [RULE_KO.get(r, r) for r in s.rules], "stage_counts": counts}
 
 
 def _orders_by_key(st: _Store) -> dict:
@@ -307,6 +311,30 @@ def _exceptions(st: _Store, date: str | None) -> list[dict]:
                           "name": _name(o.ticker, st.screens), "trade_date": o.trade_date,
                           "summary": o.reason or ORDER_STATUS_KO[o.status], "detail": ", ".join(o.rules_applied), "ref": o.order_id})
     return sorted(items, key=lambda x: (x["trade_date"], x["ticker"]), reverse=True)
+
+
+def _flow(st: _Store, book: dict) -> dict:
+    """Home flow cards (screen 1): the latest screen, the latest decision day by rating, that day's exception queue
+    by kind, the holdings. Counted here so the screen shows numbers it does not add up itself (docs/02 §0)."""
+    latest = st.screens[0] if st.screens else None
+    day = max((d.trade_date for d in st.decisions), default=None)
+    # rule exits (stop-loss, trailing, …) are not agent judgments (docs/04 /api/decisions): counted apart
+    by_rating = Counter(d.rating for d in st.decisions if d.trade_date == day and d.source == "agent")
+    rule = sum(d.trade_date == day and d.source == "rule" for d in st.decisions)
+    ratings = [r for r in [*RATINGS_5_TIER, RATING_REVIEW] if by_rating[r]]
+    exc_day = _latest_date(st)
+    by_kind = Counter(x["kind"] for x in _exceptions(st, exc_day))
+    return {
+        "screen": {"run_id": latest.run_id, "as_of": latest.as_of, "universe": latest.universe,
+                   "universe_size": latest.universe_size, "selected_count": _screen_summary(latest)["selected_count"]}
+        if latest else None,
+        "decisions": {"date": day, "total": sum(by_rating.values()), "by_rating": {r: by_rating[r] for r in ratings},
+                      "by_rating_ko": {RATING_KO.get(r, r): by_rating[r] for r in ratings}, "rule": rule},
+        "exceptions": {"date": exc_day, "total": sum(by_kind.values()), "by_kind": dict(by_kind),
+                       "by_kind_ko": {EXCEPTION_KIND_KO[k]: n for k, n in by_kind.items()}},
+        "holdings": {"count": len(book["positions"]), "near_stop": book["near_stop_count"],
+                     "protections_active": book["protections_active"]},
+    }
 
 
 def _latest_date(st: _Store) -> str | None:
@@ -407,9 +435,10 @@ def markets() -> list[dict]:
             book = positions_view(st.audit.orders(), PRICES, cfg=paper_config(m), operations=st.operations)
             card |= {"as_of": book["as_of"], "equity": book["equity"], "initial_cash": book["initial_cash"],
                      "day_return": book["day_return"], "drawdown": book["drawdown"], "positions": len(book["positions"]),
-                     "state": _state_out(m), "error": None}
+                     "state": _state_out(m), "flow": _flow(st, book), "error": None}
         except ValueError as exc:                    # a cut-short line, or another market's record, in that book
-            card |= dict.fromkeys(("as_of", "equity", "initial_cash", "day_return", "drawdown", "positions", "state")) | {
+            card |= dict.fromkeys(("as_of", "equity", "initial_cash", "day_return", "drawdown", "positions", "state",
+                                   "flow")) | {
                 "error": f"{MARKET_KO[m]} 기록을 읽지 못함: {type(exc).__name__}"}
         out.append(card)
     return out
@@ -544,7 +573,8 @@ def performance(market: str | None = MarketQuery) -> dict:
     s = st.summary
     if not s:
         raise HTTPException(404, "백테스트 요약 없음: scripts/baseline_krx.py를 먼저 실행" if st.market == "KRX" else
-                            f"{MARKET_KO.get(st.market, st.market)} 결정 성과 요약 없음: 결정 베이스라인은 아직 국내(baseline_krx)만 있음")
+                            f"{MARKET_KO.get(st.market, st.market)} 결정 성과 요약 없음: "
+                            f"scripts/baseline_krx.py --market {st.market}를 먼저 실행")
     direction = {"Buy": 1, "Overweight": 1, "Hold": 0, "Underweight": -1, "Sell": -1}
     resolved = [e for e in st.memory if not e["pending"] and _pct(e.get("alpha")) is not None]
     per_date = []

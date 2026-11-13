@@ -360,3 +360,155 @@ def test_a_rule_exit_is_served_as_its_own_decision_with_its_own_order(tmp_path, 
     assert [d["source"] for d in c.get("/api/decisions", params={"source": "agent", "rating": "Sell"}).json()] == ["agent"]
     assert c.get("/api/decisions", params={"source": "robot"}).status_code == 422
     assert c.get("/api/health").json()["decisions_by_source"] == {"agent": 2, "rule": 1}
+
+
+# --- screen 1 · 5 fields (ui-foundation): the numbers the screens show, counted by the server -------------------
+
+SLIP, COMM = 0.0005, 0.00015
+
+
+@pytest.fixture
+def same_session(tmp_path, monkeypatch):
+    """005930 bought 06-01 (fills 06-02). On 06-04 one sell (005930), one buy (005380) and one REVIEW: the sell and the
+    buy both fill at the 06-05 open. 005380 closes 06-05 at 18,500, 0.5% above its stop line."""
+    from agent_trading_core.execution import Prices, execute_date
+    from agent_trading_core.risk import RiskConfig
+
+    data = tmp_path / "data"
+    days = ["2026-06-01", "2026-06-02", "2026-06-04", "2026-06-05"]
+    _cache(data, "^KS11", [(d, 100 + i, 100 + i) for i, d in enumerate(days)])
+    _cache(data, "005930.KS", [(d, 10_000, 11_000) for d in days])
+    _cache(data, "005380.KS", [(d, 20_000, 20_000) for d in days[:-1]] + [("2026-06-05", 20_000, 18_500)])
+    audit = AuditLog(data / "audit")
+    audit.record_decision(DecisionRecord(ticker="005930.KS", trade_date="2026-06-01", rating="Buy", thesis="b"))
+    for t, r in (("005930.KS", "Sell"), ("005380.KS", "Buy"), ("000660.KS", "REVIEW")):
+        audit.record_decision(DecisionRecord(ticker=t, trade_date="2026-06-04", rating=r, thesis=r))
+    prices, risk = Prices(data / "cache"), RiskConfig(regime_ma_days=3)
+    for d in ("2026-06-01", "2026-06-04", "2026-06-05"):
+        execute_date(audit, d, prices, risk=risk)
+    monkeypatch.setenv("TRADING_DATA_DIR", str(data))
+    from backend import main
+    importlib.reload(main)
+    return TestClient(main.app), prices
+
+
+def _hand():
+    q1 = 908                                                       # 10M // (11,000 × 1.0005 × 1.00015)
+    cash = 100_000_000 - q1 * 10_000 * (1 + SLIP) * (1 + COMM)
+    equity_0604 = cash + q1 * 11_000
+    q2 = int(0.10 * equity_0604 // (20_000 * (1 + SLIP) * (1 + COMM)))
+    return q1, q2
+
+
+@pytest.mark.unit
+def test_the_session_amounts_split_buys_and_sells_and_only_buys_count_against_the_cap(same_session):
+    client, _ = same_session
+    from agent_trading_core.config import auto_execution
+
+    q1, q2 = _hand()
+    assert q2 == 504                                               # 0.1 × 100,902,097 // 20,013.0
+    pos = client.get("/api/positions", params={"as_of": "2026-06-04"}).json()
+    # both orders decided 06-04 fill at 06-05's open: buy at 20,000 × 1.0005, sell at 10,000 × 0.9995
+    assert pos["today_session"] == "2026-06-05"
+    assert pos["today_buy_amount"] == pytest.approx(q2 * 20_010)
+    assert pos["today_sell_amount"] == pytest.approx(q1 * 9_995)
+    cap = auto_execution("KRX")["auto_daily_order_cap"]
+    assert pos["today_buy_cap_used"] == pytest.approx(q2 * 20_010 / cap)
+    # the 06-01 buy filled at another session (06-02): not today's
+    early = client.get("/api/positions", params={"as_of": "2026-06-01"}).json()
+    assert (early["today_session"], early["today_buy_amount"], early["today_sell_amount"]) == ("2026-06-02", pytest.approx(q1 * 10_005), 0)
+
+
+@pytest.mark.unit
+def test_near_stop_max_weight_and_active_guards_are_counted_by_the_server(same_session):
+    client, _ = same_session
+    _, q2 = _hand()
+    pos = client.get("/api/positions").json()                       # as of 06-05: only 005380 is held
+    (p,) = pos["positions"]
+    stop = 20_010 * 0.92                                           # the fill average, not the decision close (docs/10 D3)
+    assert p["stop_price"] == pytest.approx(stop) and p["stop_gap"] == pytest.approx(18_500 / stop - 1)
+    assert p["near_stop"] is True and pos["near_stop_count"] == 1 and pos["limits"]["near_stop_pct"] == 0.02
+    assert pos["max_position_ticker"] == "005380.KS"
+    assert pos["max_position_weight"] == pytest.approx(q2 * 18_500 / pos["equity"])
+    # 005930 was sold at the 06-05 open: its Cooldown is the one active guard; nothing was locked on 06-04
+    assert pos["protections_active"] == 1 and [g["id"] for g in pos["protections"] if g["active"]] == ["Cooldown"]
+    assert client.get("/api/positions", params={"as_of": "2026-06-04"}).json()["protections_active"] == 0
+    # 4 bars < the 200-day window: no distance to show (the filter reads the regime as on)
+    assert pos["regime_gap"] is None and pos["limits"]["regime_ma_days"] == 200
+
+
+@pytest.mark.unit
+def test_the_regime_gap_is_the_last_index_close_against_its_average(same_session):
+    from agent_trading_core.execution import positions_view
+    from agent_trading_core.risk import RiskConfig
+
+    _, prices = same_session
+    view = positions_view([], prices, as_of="2026-06-05", risk=RiskConfig(regime_ma_days=3))
+    assert view["regime_gap"] == pytest.approx(103 / 102 - 1)       # closes 101, 102, 103
+    assert view["regime_on"] is True
+    assert positions_view([], prices, as_of="2026-06-02", risk=RiskConfig(regime_ma_days=3))["regime_gap"] is None
+
+
+@pytest.mark.unit
+def test_the_home_flow_cards_are_counted_per_market(same_session, tmp_path):
+    client, _ = same_session
+    # a rule exit on the same day is not an agent judgment: counted apart, not as a Sell
+    AuditLog(tmp_path / "data" / "audit").record_decision(
+        DecisionRecord(ticker="000270.KS", trade_date="2026-06-04", rating="Sell", thesis="손절", source="rule"))
+    krx, us = client.get("/api/markets").json()
+    flow = krx["flow"]
+    assert flow["screen"] is None                                   # no screening run in this book
+    assert flow["decisions"] == {"date": "2026-06-04", "total": 3, "by_rating": {"Buy": 1, "Sell": 1, "REVIEW": 1},
+                                 "by_rating_ko": {"매수": 1, "매도": 1, "검토 필요": 1}, "rule": 1}
+    assert flow["exceptions"] == {"date": "2026-06-04", "total": 1, "by_kind": {"review": 1},
+                                  "by_kind_ko": {"등급 읽기 실패 (REVIEW)": 1}}
+    assert flow["holdings"] == {"count": 1, "near_stop": 1, "protections_active": 1}   # 005930's Cooldown
+    # the US book is empty and separate
+    assert us["flow"]["decisions"]["total"] == 0 and us["flow"]["holdings"]["count"] == 0
+
+
+@pytest.mark.unit
+def test_a_screen_summary_counts_its_rules(client):
+    (s,) = client.get("/api/screens").json()[:1]
+    assert s["rule_count"] == len(s["rules"]) > 0
+
+
+# --- /api/performance per market (the US baseline summary under data/audit/US/) -------------------------------
+
+@pytest.mark.unit
+def test_us_performance_is_404_without_its_summary_and_reads_its_own_summary_and_log(client, tmp_path):
+    data = tmp_path / "data"
+    krx_before = client.get("/api/performance").content
+    r = client.get("/api/performance", params={"market": "US"})
+    assert r.status_code == 404 and "baseline_krx.py --market US" in r.json()["detail"]
+
+    log_path = data / "us_memory.md"
+    log = TradingMemoryLog({"memory_log_path": str(log_path)})
+    log.store_decision("AAPL", "2026-06-05", "**Rating**: Sell\n\nx", rating="Sell")
+    log.update_with_outcome("AAPL", "2026-06-05", -0.04, -0.021, 5, "미국 규칙 베이스라인.", "2026-06-12")
+    (data / "audit" / "US").mkdir(parents=True, exist_ok=True)
+    (data / "audit" / "US" / "baseline_summary.json").write_text(json.dumps({
+        "run_id": "us1", "log_path": str(log_path), "cells_run": 1, "resolved": 1, "pending": 0, "unscored": 0,
+        "by_rating": {"Sell": {"count": 1, "hit_rate": 1.0, "mean_alpha": -0.021}}, "holding": "5 trading days",
+        "dates": ["2026-06-05"], "universe": ["AAPL"], "market": "US", "currency": "USD", "benchmark": "^GSPC"}),
+        encoding="utf-8")
+
+    us = client.get("/api/performance", params={"market": "US"})
+    assert us.status_code == 200
+    body = us.json()
+    assert set(body) == {"run_id", "cells_run", "resolved", "pending", "unscored", "holding", "dates", "universe",
+                         "by_rating", "per_date", "reflections", "caveat"}
+    assert body["run_id"] == "us1" and body["by_rating"]["Sell"]["rating_ko"] == "매도"
+    # a Sell's alpha counts on the short side; the reflection is the US log's, not the KRX one
+    assert body["per_date"] == [{"date": "2026-06-05", "resolved": 1, "long_mean_alpha": None, "short_mean_alpha": pytest.approx(-0.021)}]
+    assert [(x["ticker"], x["reflection"]) for x in body["reflections"]] == [("AAPL", "미국 규칙 베이스라인.")]
+    # the KRX answer is byte for byte what it was before the US summary existed
+    assert client.get("/api/performance").content == krx_before
+
+
+@pytest.mark.unit
+def test_the_memory_log_override_stays_krx_only(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRADING_MEMORY_LOG", str(tmp_path / "nowhere.md"))
+    from backend import main
+    assert main._Store("US").memory_log_path() is None                 # no US summary: no log, override ignored
+    assert main._Store("KRX").memory_log_path() == tmp_path / "nowhere.md"

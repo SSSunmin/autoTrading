@@ -22,6 +22,24 @@
   --app-surface: var(--bv-color-common-100);
   --app-surface-2: var(--bv-color-cool-neutral-98);
   --app-line: var(--bv-line-neutral);
+
+  /* v0.6 mockup meanings the aliases above lack. The mockup writes hex inline (no variables); each points at the
+     nearest @bv-ds/tokens value when one is close (ΔRGB < 15), else keeps the mockup hex (noted). */
+  --app-warn: #7a5200;                          /* mockup 경고·차단 text; nearest token yellow-20 #663a00 is browner */
+  --app-warn-bg: var(--bv-color-orange-95);     /* mockup #FFF4DE (Δ 6.7) */
+  --app-warn-line: #e9c77a;                     /* mockup; nearest orange-80 #ffb86c is another hue */
+  --app-example: #8a5a00;                       /* mockup .ex 예시·실측·제안 badge text; nearest orange-30 #913500 is red-brown */
+  --app-example-line: #c99a2e;                  /* mockup .ex border; no amber token */
+  --app-trailing: #e08a2e;                      /* mockup 트레일링 swatch; nearest yellow-39 #cf8216 Δ 30 */
+  --app-trailing-fg: #8a4b00;                   /* mockup 트레일링 badge text */
+  --app-trailing-bg: var(--bv-color-orange-95); /* mockup #FFF1E0 (Δ 5.8) */
+  --app-forced: var(--bv-color-cool-neutral-30);/* mockup 정지 청산 #3B4656 (Δ 14.9) */
+  --app-gauge: var(--bv-color-navy-40);         /* mockup gauge fill #1F5F8B (Δ 30, same navy family: kept to the DS) */
+  --app-gauge-track: var(--app-surface-2);      /* mockup #EEF0F4 */
+  /* text on white or on its own tint at 4.5:1 or more (measured): the -fail/-pass/-down aliases above are 3.3–4.2 */
+  --app-fail-strong: var(--bv-color-red-30);    /* 5.88 on white, 4.89 on red-95 */
+  --app-pass-strong: var(--bv-color-green-20);  /* 4.86 on green-95 */
+  --app-down-strong: var(--bv-color-blue-40);   /* 6.61 on blue-95 */
 }
 
 body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: var(--bv-font-family); }
@@ -29,6 +47,7 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .muted { color: var(--app-fg-3); font-size: var(--bv-font-size-caption-1); }
 .up { color: var(--app-up); }
 .down { color: var(--app-down); }
+.alert-t { color: var(--app-fail-strong); } /* alert text on white: .up (red-50) is 3.4:1 */
 .page-title { font-size: var(--bv-font-size-heading-2); font-weight: var(--bv-font-weight-semibold); margin: 0 0 0.4rem; }
 .page-sub { color: var(--app-fg-2); margin: 0 0 1.6rem; max-width: 70ch; font-size: var(--bv-font-size-body-2-normal); }
 
@@ -76,8 +95,6 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .cards { display: grid; gap: 1.4rem; grid-template-columns: repeat(auto-fit, minmax(32rem, 1fr)); }
 .card { border: 1px solid var(--app-line); border-radius: var(--bv-radius-200); background: var(--app-surface); padding: 1.2rem 1.4rem; display: grid; gap: 0.8rem; }
 .card .hd { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; justify-content: space-between; }
-.card .tk { font-weight: var(--bv-font-weight-semibold); }
-.card .nm { color: var(--app-fg-2); margin-left: 0.6rem; }
 .evidence { display: grid; gap: 0.4rem; font-size: var(--bv-font-size-body-3-normal); }
 .evidence div { display: grid; grid-template-columns: 8.4rem 1fr auto; gap: 0.8rem; align-items: baseline; }
 .src { font-size: var(--bv-font-size-caption-2); text-transform: uppercase; letter-spacing: 0.05em; color: var(--bv-color-blue-50); font-weight: var(--bv-font-weight-semibold); }
@@ -103,11 +120,7 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
   .main { padding: 1.6rem; }
 }
 
-/* v0.3 additions: 2-line instrument cell, execution strip, exception badge in the nav, kill-switch effects. */
-.tkr { display: inline-flex; flex-direction: column; line-height: 1.3; vertical-align: middle; }
-.tkr .code { font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); color: var(--app-fg-2); background: var(--app-surface-2); border-radius: var(--bv-radius-100); padding: 0 0.4rem; align-self: flex-start; }
-.tkr .name { font-weight: var(--bv-font-weight-medium); color: var(--app-fg); }
-.tkr.lg .name { font-size: var(--bv-font-size-title-2); font-weight: var(--bv-font-weight-semibold); }
+/* v0.3 additions: execution strip, exception badge in the nav, kill-switch effects. */
 .exec { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; padding: 0.6rem 0.8rem; border-radius: var(--bv-radius-150); background: var(--app-surface-2); font-size: var(--bv-font-size-body-3-normal); border-left: 3px solid var(--app-line); }
 .exec.filled, .exec.partial { border-left-color: var(--app-up); }
 .exec.blocked, .exec.rejected, .exec.exception { border-left-color: var(--app-fail); background: var(--app-fail-bg); }
@@ -118,3 +131,62 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .nav-badge { font-size: var(--bv-font-size-caption-2); font-weight: var(--bv-font-weight-semibold); color: var(--bv-color-common-100); background: var(--app-fail); border-radius: var(--bv-radius-500); padding: 0 0.6rem; line-height: 1.8; }
 .statusbar-right { display: inline-flex; gap: 0.8rem; align-items: center; margin-left: auto; }
 .effects { margin: 0; padding-left: 1.6rem; display: grid; gap: 0.4rem; font-size: var(--bv-font-size-body-3-normal); color: var(--app-fg-2); }
+
+/* v0.6 common parts (ui-foundation): page header, limit gauge, exit-reason / regime / source badges, as-of stamp,
+   2-line instrument cell, home flow cards, the status-bar Protections chip. Mockup classes .tk .tag .ex .pill. */
+.tnum { font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 0.95em; }
+.page-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 1.2rem; margin-bottom: 1.8rem; }
+.page-head h1 { margin: 0; font-size: 2.6rem; /* mockup 26px: between title-3 and title-2 */ font-weight: 700; letter-spacing: -0.02em; }
+.page-head p { margin: 0.4rem 0 0; color: var(--app-fg-2); max-width: 72ch; font-size: var(--bv-font-size-body-3-normal); }
+.page-head .meta-r { display: inline-flex; gap: 0.8rem; align-items: center; font-size: var(--bv-font-size-caption-1); color: var(--app-fg-2); }
+
+.gauges { display: grid; gap: 1rem; }
+.gauge { display: grid; grid-template-columns: 13rem minmax(0, 1fr) 14rem; gap: 1.2rem; align-items: center; font-size: var(--bv-font-size-label-2); }
+.gauge .track { position: relative; height: 1.2rem; background: var(--app-gauge-track); border-radius: 0.3rem; }
+.gauge .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0.3rem; background: var(--app-gauge); }
+.gauge .line { position: absolute; top: -0.4rem; bottom: -0.4rem; width: 2px; margin-left: -1px; background: var(--app-fg); }
+.gauge .line.stop { background: var(--app-fail); }
+.gauge .val { text-align: right; font-weight: var(--bv-font-weight-semibold); }
+.gauge .val .lim { font-weight: var(--bv-font-weight-regular); color: var(--app-fg-2); }
+.gauge.near .fill { background: var(--app-warn-line); }
+.gauge.near .val { color: var(--app-warn); }
+.gauge.over .fill { background: var(--app-fail); }
+.gauge.over .lbl, .gauge.over .val { color: var(--app-fail-strong); font-weight: 700; }
+
+.xr { display: inline-block; font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); padding: 0.1rem 0.8rem; border-radius: var(--bv-radius-100); line-height: 1.6; white-space: nowrap; }
+.xr.stop_loss { background: var(--app-up-bg); color: var(--app-fail-strong); }
+.xr.trailing { background: var(--app-trailing-bg); color: var(--app-trailing-fg); }
+.xr.expired { background: var(--app-surface-2); color: var(--app-fg-2); }
+.xr.exit_signal { background: var(--app-down-bg); color: var(--app-down-strong); }
+.xr.force { background: var(--app-forced); color: var(--bv-color-common-100); }
+
+.regime { display: inline-flex; align-items: center; gap: 0.6rem; font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); padding: 0.2rem 1rem; border-radius: var(--bv-radius-500); border: 1px solid transparent; white-space: nowrap; }
+.regime.on { background: var(--app-pass-bg); color: var(--app-pass-strong); border-color: var(--app-pass-strong); }
+.regime.off { background: var(--app-warn-bg); color: var(--app-warn); border-color: var(--app-warn-line); }
+.regime.none { background: var(--app-surface-2); color: var(--app-fg-2); border-color: var(--app-line); }
+
+.ex { display: inline-block; font-size: var(--bv-font-size-caption-2); font-weight: 700; color: var(--app-example); border: 1px solid var(--app-example-line); border-radius: var(--bv-radius-100); padding: 0 0.6rem; line-height: 1.6; white-space: nowrap; }
+.asof { font-size: var(--bv-font-size-caption-1); color: var(--app-fg-2); white-space: nowrap; }
+.asof.stale { color: var(--app-warn); font-weight: var(--bv-font-weight-semibold); }
+
+.tk { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 0.3rem; line-height: 1.3; vertical-align: middle; }
+.tk .tk-n { font-weight: var(--bv-font-weight-semibold); color: var(--app-fg); }
+.tk.lg .tk-n { font-size: var(--bv-font-size-title-3); }
+.tag { display: inline-block; font-size: var(--bv-font-size-caption-2); font-weight: var(--bv-font-weight-semibold); color: var(--app-fg-2); background: var(--app-surface-2); border: 1px solid var(--app-line); border-radius: var(--bv-radius-100); padding: 0 0.6rem; line-height: 1.6; }
+
+.flow { display: grid; gap: 1.2rem; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+.flow-card { display: flex; flex-direction: column; gap: 0.2rem; min-height: 4.4rem; padding: 1rem 1.6rem; border: 1px solid var(--app-line); border-radius: var(--bv-radius-200); background: var(--app-surface); color: var(--app-fg); text-decoration: none; }
+.flow-card:hover, .flow-card:focus-visible { border-color: var(--app-gauge); background: var(--app-surface-2); }
+.flow-card .hd { display: flex; justify-content: space-between; align-items: baseline; gap: 0.8rem; }
+.flow-card .k { font-size: var(--bv-font-size-caption-1); color: var(--app-fg-2); font-weight: var(--bv-font-weight-semibold); }
+.flow-card .v { font-size: var(--bv-font-size-heading-2); font-weight: 700; letter-spacing: -0.02em; }
+.flow-card .v.alert { color: var(--app-fail-strong); }
+.flow-card .s { font-size: var(--bv-font-size-caption-1); color: var(--app-fg-2); }
+
+/* a small chip with a 44px hit area (WCAG 2.5.5) that does not grow the status bar */
+.prot-chip { position: relative; display: inline-flex; align-items: center; padding: 0.3rem 1rem; border-radius: var(--bv-radius-500); font-weight: var(--bv-font-weight-semibold); text-decoration: none; border: 1px solid transparent; }
+.prot-chip::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 4.4rem; transform: translateY(-50%); }
+.prot-chip.on { background: var(--app-fail-strong); color: var(--bv-color-common-100); }
+.prot-chip.ok { background: var(--app-pass-bg); color: var(--app-pass-strong); border-color: var(--app-pass-strong); }
+.prot-chip.unknown { background: var(--app-surface-2); color: var(--app-fg-2); border-color: var(--app-line); }

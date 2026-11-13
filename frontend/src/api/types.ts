@@ -36,6 +36,7 @@ export interface ScreenSummary {
   selected_count: number
   rules: string[]
   rules_ko: string[]
+  rule_count: number
   stage_counts: number[]
 }
 
@@ -247,6 +248,9 @@ export interface Labels {
   mode_ko: Record<string, string>
   order_status_ko: Record<string, string>
   exception_kind_ko: Record<string, string>
+  /** the rule's exit reasons (stop_loss · trailing · expired · exit_signal · force), not the agent's sell reasons */
+  exit_reason_ko: Record<string, string>
+  halt_target_ko: Record<string, string>
   market_ko: Record<Market, string>
   halt_scope_ko: Record<string, string>
   markets: Record<Market, MarketInfo>
@@ -277,9 +281,20 @@ export interface MarketSummary extends MarketInfo {
   drawdown: number | null
   positions: number | null
   state: TradingState | null
+  /** home flow cards, counted by the server; null with ``error`` */
+  flow: MarketFlow | null
   error: string | null
   next_run_kst: string
   next_run_label_ko: string
+}
+
+export interface MarketFlow {
+  screen: { run_id: string; as_of: string; universe: string; universe_size: number; selected_count: number } | null
+  /** the latest decision day, by rating (5 tiers then REVIEW, only those present) */
+  decisions: { date: string | null; total: number; by_rating: Record<string, number>; by_rating_ko: Record<string, number>; rule: number }
+  /** that day's exception queue (/api/exceptions default), by kind */
+  exceptions: { date: string | null; total: number; by_kind: Record<string, number>; by_kind_ko: Record<string, number> }
+  holdings: { count: number; near_stop: number; protections_active: number }
 }
 
 export interface RuleRow {
@@ -401,6 +416,10 @@ export interface PositionRow {
   unrealized_pct: number | null
   weight: number | null
   stop_price: number
+  /** last close vs the stop line (0.004 = 0.4% above it); null without a close */
+  stop_gap: number | null
+  /** within limits.near_stop_pct of the stop line */
+  near_stop: boolean
   trailing_active: boolean
   trailing_high: number
   trailing_stop_price: number | null
@@ -449,13 +468,25 @@ export interface Positions {
   realized_today: number
   unrealized_pnl: number
   regime_on: boolean | null
+  /** the index's last close vs its limits.regime_ma_days average; null with fewer bars than the window */
+  regime_gap: number | null
   positions: PositionRow[]
   protections: ProtectionState[]
+  protections_active: number
+  near_stop_count: number
+  max_position_weight: number
+  max_position_ticker: string | null
+  /** the session orders decided on as_of fill at (null: not in the data yet) and every order filling there */
+  today_session: string | null
+  today_buy_amount: number
+  today_sell_amount: number
+  /** buys against the daily cap (the cap counts buys only) */
+  today_buy_cap_used: number | null
   exits_by_reason: Record<string, number>
   exits_by_reason_ko: Record<string, number>
   closed: (ClosedTrade & { reason: string })[]
   limits: { stop_loss_pct: number; dd_halve: number; dd_stop: number; max_position_pct: number; max_gross_pct: number;
-            daily_loss_limit: number; auto_daily_order_cap: number }
+            daily_loss_limit: number; auto_daily_order_cap: number; near_stop_pct: number; regime_ma_days: number }
   note: string
   mode: TradingState
 }

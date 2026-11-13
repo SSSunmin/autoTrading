@@ -8,6 +8,7 @@ import { useTradingState } from './hooks/useTradingState'
 import { api, utc } from './api/client'
 import { MarketToggle, ModeBadge, SessionChip } from './components/common'
 import { KillSwitch } from './components/KillSwitch'
+import { ProtectionsChip } from './components/parts'
 import Home from './pages/Home'
 import Screens from './pages/Screens'
 import ScreenDetail from './pages/ScreenDetail'
@@ -37,6 +38,7 @@ export default function App() {
   const screens = useApi(() => api.screens(market), [market])
   const dates = useApi(() => api.decisionDates(market), [market])
   const exceptions = useApi(() => api.exceptions(market), [market])
+  const book = useApi(() => api.positions(market), [market])
   const mode = useTradingState(market)
   const latest = screens.data?.[0]
   const nException = exceptions.data?.length ?? 0
@@ -69,7 +71,7 @@ export default function App() {
           <span>기준일 <b className="num">{latest?.as_of ?? '–'}</b></span>
           <span>마지막 선별 <b className="num">{utc(latest?.recorded_at)}</b></span>
           <span>마지막 결정 <b className="num">{dates.data?.[0] ?? '–'}</b></span>
-          <AgentChip variant="neutral">Protections 미연결</AgentChip>
+          <ProtectionsChip active={book.data?.protections_active ?? null} failed={!!book.error} to={to('/positions')} />
           <span className="statusbar-right">
             <ModeBadge state={mode.data} />
             <KillSwitch state={mode.data} market={market} />
