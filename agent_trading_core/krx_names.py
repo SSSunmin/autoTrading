@@ -113,3 +113,41 @@ HALT_SCOPE_KO: dict[str, str] = {"all": "전체 시장", "KRX": "국내만", "US
 
 HALT_TARGET_KO: dict[str, str] = {"manual": "운영자 긴급 정지", "daily_loss": "시스템 · 일일 손실 정지",
                                   "dd_stop": "시스템 · 드로다운 정지"}
+# Korean names for every listed KRX company, read at run time from the KIND 상장법인목록 download
+# (data/external/kind_corplist_*.xls, an HTML table in cp949; docs/09, data/external/SOURCES.md). NAMES_KO wins;
+# a delisted company is not in the current list and falls back to its ticker at the call site.
+_KIND_SUFFIX = {"유가": ".KS", "코스닥": ".KQ", "코넥스": ".KN"}
+_listed: dict[str, str] | None = None
+
+EXIT_REASON_KO["delisted"] = "상장폐지 청산"
+
+
+def load_listed_names(path=None) -> dict[str, str]:
+    """``{"005930.KS": "삼성전자", ...}`` from a KIND 상장법인목록 file (default: the newest in data/external/);
+    ``{}`` when there is none."""
+    import re
+    from pathlib import Path
+
+    if path is None:
+        files = sorted((Path(__file__).resolve().parents[1] / "data" / "external").glob("kind_corplist_*.xls"))
+        if not files:
+            return {}
+        path = files[-1]
+    html = Path(path).read_bytes().decode("cp949")
+    out = {}
+    for row in re.findall(r"<tr>(.*?)</tr>", html, re.DOTALL):
+        cells = [re.sub(r"<[^>]+>", "", c).strip() for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)]
+        if len(cells) >= 3 and cells[1] in _KIND_SUFFIX:
+            out[cells[2].zfill(6) + _KIND_SUFFIX[cells[1]]] = cells[0]
+    return out
+
+
+def display_name(ticker: str) -> str | None:
+    """``NAMES_KO`` first, then the KIND list (loaded once)."""
+    global _listed
+    name = korean_name(ticker)
+    if name:
+        return name
+    if _listed is None:
+        _listed = load_listed_names()
+    return _listed.get(ticker.upper())

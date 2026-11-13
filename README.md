@@ -24,6 +24,7 @@ LLM 에이전트가 판단하는 자동매매 시스템을 만들 때 필요한 
 | `schemas.SellReview` | **신규.** 보유 종목 매도 검토: 논지 깨짐 조건 체크 + 매도 사유 7종. 사유 없는 Exit·체크 충족 시 thesis_broken 누락·목표 없는 Trim은 거부 | "가격 떨어져서 판다" |
 | `risk` | **신규.** 하드 룰: 손절 → 트레일링 → 기간 만료, 포트폴리오 DD −10% 반감 / −20% 정지, 일일 손실 한도, Protections 4종(StoplossGuard·MaxDrawdown·Cooldown·LowProfit), 200일선 국면 필터, 종목·섹터·총 노출 사이징. 전부 순수 함수, 발동 사유를 한글 문구로 반환 | 한 종목·한 날에 책이 무너짐 |
 | `simulate` | **신규.** 책 전체를 날마다 돌리는 시뮬레이션(종가 결정·다음 시가 체결·KRX 비용). 지표는 최대 드로다운·회복·최악의 날. 하드 룰 끔/켬/국면 필터 비교 | "잘 되는 것 같다"를 드로다운 없이 말함 |
+| `universe` | 시점 지수 구성: 시작 구성 + 날짜별 편입·편출 이력에서 그날의 구성(`members_on`). `simulate(universe_on=...)`의 후보 집합, 시세가 끊긴 보유 종목은 마지막 종가로 상장폐지 청산 | 지금 남아 있는 종목만으로 과거를 돌리는 생존 편향 |
 | `config.MARKETS` | 시장별 설정(KRX · US): 통화 · 벤치마크 · 세션 · 결제 · 가격제한/LULD · 거래세 · SEC fee · TAF. 두 시장은 별도 포트폴리오, `KRX_MARKET`은 별칭 | 국내 규칙을 미국 종목에 그대로 적용 |
 | `audit.OrderRecord` · `OperationRecord` · `trading_state` | **신규(기획서 v0.3).** 주문·체결 기록, 운영 기록(긴급 정지·재가동·모드 변경·규칙 변경), 기록을 재생해 만든 현재 운용 상태 | 상태와 감사 이력이 어긋남, 누가 왜 멈췄는지 모름 |
 
@@ -128,7 +129,8 @@ cd frontend && npm install && npm run dev
 
 ## 스크립트와 시안
 
-- `scripts/paper_backtest.py`: 2차 실측. 하드 룰 끔/켬/국면 필터 3개 변형 → `data/results/paper/summary.json`.
+- `scripts/paper_backtest.py`: 2차 실측. 하드 룰 끔/켬/국면 필터 3개 변형 → `data/results/paper/summary.json`. `--universe constituents`는 4차 실측(시점 구성) → `data/results/paper_universe/<market>/summary.json`.
+- `scripts/build_universe.py`: `data/external/`의 원본(출처 `SOURCES.md`)에서 `data/universe/sp500_history.csv`(KOSPI200은 KRX 파일이 있을 때만)를 만든다.
 - `scripts/baseline_krx.py`: 규칙 전용 베이스라인 백테스트. 선별 → 등급 → 메모리 로그 → 정산 → 요약, 감사 로그 기록.
 - `scripts/build_mockup.py`: 감사 로그·메모리 로그·요약을 `mockup/dashboard.template.html`에 주입해 `mockup/dashboard.html` 생성.
 - `mockup/`: 초기 HTML 시안(아티팩트). 디자인 시안은 디자이너 세션이 별도로 작업 중이며, 실제 화면은 `frontend/`다.

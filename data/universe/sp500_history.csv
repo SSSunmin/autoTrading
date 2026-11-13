@@ -1,0 +1,614 @@
+date,ticker,action,name
+2024-01-02,A,start,Agilent Technologies
+2024-01-02,AAL,start,American Airlines Group
+2024-01-02,AAPL,start,Apple Inc.
+2024-01-02,ABBV,start,AbbVie
+2024-01-02,ABNB,start,Airbnb
+2024-01-02,ABT,start,Abbott
+2024-01-02,ACGL,start,Arch Capital Group
+2024-01-02,ACN,start,Accenture
+2024-01-02,ADBE,start,Adobe Inc.
+2024-01-02,ADI,start,Analog Devices
+2024-01-02,ADM,start,Archer-Daniels-Midland
+2024-01-02,ADP,start,Automated Data Processing
+2024-01-02,ADSK,start,Autodesk
+2024-01-02,AEE,start,Ameren
+2024-01-02,AEP,start,American Electric Power
+2024-01-02,AES,start,AES Corporation
+2024-01-02,AFL,start,Aflac
+2024-01-02,AIG,start,American International Group
+2024-01-02,AIZ,start,Assurant
+2024-01-02,AJG,start,Arthur J. Gallagher & Co.
+2024-01-02,AKAM,start,Akamai
+2024-01-02,ALB,start,Albemarle Corporation
+2024-01-02,ALGN,start,Align Technology
+2024-01-02,ALL,start,Allstate
+2024-01-02,ALLE,start,Allegion
+2024-01-02,AMAT,start,Applied Materials
+2024-01-02,AMCR,start,Amcor
+2024-01-02,AMD,start,Advanced Micro Devices
+2024-01-02,AME,start,Ametek
+2024-01-02,AMGN,start,Amgen
+2024-01-02,AMP,start,Ameriprise Financial
+2024-01-02,AMT,start,American Tower
+2024-01-02,AMZN,start,Amazon
+2024-01-02,ANET,start,Arista Networks
+2024-01-02,ANSS,start,Ansys
+2024-01-02,AON,start,Aon
+2024-01-02,AOS,start,A. O. Smith
+2024-01-02,APA,start,APA Corporation
+2024-01-02,APD,start,Air Products and Chemicals
+2024-01-02,APH,start,Amphenol
+2024-01-02,APTV,start,Aptiv
+2024-01-02,ARE,start,Alexandria Real Estate Equities
+2024-01-02,ATO,start,Atmos Energy
+2024-01-02,AVB,start,AvalonBay Communities
+2024-01-02,AVGO,start,Broadcom Inc.
+2024-01-02,AVY,start,Avery Dennison
+2024-01-02,AWK,start,American Water Works
+2024-01-02,AXON,start,Axon Enterprise
+2024-01-02,AXP,start,American Express
+2024-01-02,AZO,start,AutoZone
+2024-01-02,BA,start,Boeing
+2024-01-02,BAC,start,Bank of America
+2024-01-02,BALL,start,Ball Corporation
+2024-01-02,BAX,start,Baxter International
+2024-01-02,BBWI,start,"Bath & Body Works, Inc."
+2024-01-02,BBY,start,Best Buy
+2024-01-02,BDX,start,Becton Dickinson
+2024-01-02,BEN,start,Franklin Templeton
+2024-01-02,BF-B,start,Brown–Forman
+2024-01-02,BG,start,Bunge Global SA
+2024-01-02,BIIB,start,Biogen
+2024-01-02,BIO,start,Bio-Rad
+2024-01-02,BKNG,start,Booking Holdings
+2024-01-02,BKR,start,Baker Hughes
+2024-01-02,BLDR,start,Builders FirstSource
+2024-01-02,BLK,start,BlackRock
+2024-01-02,BMY,start,Bristol Myers Squibb
+2024-01-02,BNY,start,Bank of New York Mellon
+2024-01-02,BR,start,Broadridge Financial Solutions
+2024-01-02,BRK-B,start,Berkshire Hathaway
+2024-01-02,BRO,start,Brown & Brown
+2024-01-02,BSX,start,Boston Scientific
+2024-01-02,BWA,start,BorgWarner
+2024-01-02,BX,start,Blackstone
+2024-01-02,BXP,start,Boston Properties
+2024-01-02,C,start,Citigroup
+2024-01-02,CAG,start,Conagra Brands
+2024-01-02,CAH,start,Cardinal Health
+2024-01-02,CARR,start,Carrier Global
+2024-01-02,CAT,start,Caterpillar Inc.
+2024-01-02,CB,start,Chubb Limited
+2024-01-02,CBOE,start,Cboe Global Markets
+2024-01-02,CBRE,start,CBRE Group
+2024-01-02,CCI,start,Crown Castle
+2024-01-02,CCL,start,Carnival
+2024-01-02,CDAY,start,Ceridian
+2024-01-02,CDNS,start,Cadence Design Systems
+2024-01-02,CDW,start,CDW
+2024-01-02,CE,start,Celanese
+2024-01-02,CEG,start,Constellation Energy
+2024-01-02,CF,start,CF Industries
+2024-01-02,CFG,start,Citizens Financial Group
+2024-01-02,CHD,start,Church & Dwight
+2024-01-02,CHRW,start,CH Robinson
+2024-01-02,CHTR,start,Charter Communications
+2024-01-02,CI,start,Cigna
+2024-01-02,CINF,start,Cincinnati Financial
+2024-01-02,CL,start,Colgate-Palmolive
+2024-01-02,CLX,start,Clorox
+2024-01-02,CMA,start,Comerica
+2024-01-02,CMCSA,start,Comcast
+2024-01-02,CME,start,CME Group
+2024-01-02,CMG,start,Chipotle Mexican Grill
+2024-01-02,CMI,start,Cummins
+2024-01-02,CMS,start,CMS Energy
+2024-01-02,CNC,start,Centene Corporation
+2024-01-02,CNP,start,CenterPoint Energy
+2024-01-02,COF,start,Capital One
+2024-01-02,COO,start,CooperCompanies
+2024-01-02,COP,start,ConocoPhillips
+2024-01-02,COR,start,Cencora
+2024-01-02,COST,start,Costco
+2024-01-02,CPAY,start,Fleetcor
+2024-01-02,CPB,start,Campbell Soup Company
+2024-01-02,CPRT,start,Copart
+2024-01-02,CPT,start,Camden Property Trust
+2024-01-02,CRL,start,Charles River Laboratories
+2024-01-02,CRM,start,Salesforce
+2024-01-02,CSCO,start,Cisco
+2024-01-02,CSGP,start,CoStar Group
+2024-01-02,CSX,start,CSX
+2024-01-02,CTAS,start,Cintas
+2024-01-02,CTLT,start,Catalent
+2024-01-02,CTRA,start,Coterra
+2024-01-02,CTSH,start,Cognizant
+2024-01-02,CTVA,start,Corteva
+2024-01-02,CVS,start,CVS Health
+2024-01-02,CVX,start,Chevron Corporation
+2024-01-02,CZR,start,Caesars Entertainment
+2024-01-02,D,start,Dominion Energy
+2024-01-02,DAL,start,Delta Air Lines
+2024-01-02,DD,start,DuPont
+2024-01-02,DE,start,John Deere
+2024-01-02,DFS,start,Discover Financial
+2024-01-02,DG,start,Dollar General
+2024-01-02,DGX,start,Quest Diagnostics
+2024-01-02,DHI,start,DR Horton
+2024-01-02,DHR,start,Danaher Corporation
+2024-01-02,DIS,start,Walt Disney
+2024-01-02,DLR,start,Digital Realty
+2024-01-02,DLTR,start,Dollar Tree
+2024-01-02,DOC,start,Healthpeak
+2024-01-02,DOV,start,Dover Corporation
+2024-01-02,DOW,start,Dow Inc.
+2024-01-02,DPZ,start,Domino's
+2024-01-02,DRI,start,Darden Restaurants
+2024-01-02,DTE,start,DTE Energy
+2024-01-02,DUK,start,Duke Energy
+2024-01-02,DVA,start,DaVita Inc.
+2024-01-02,DVN,start,Devon Energy
+2024-01-02,DXCM,start,Dexcom
+2024-01-02,EA,start,Electronic Arts
+2024-01-02,EBAY,start,eBay
+2024-01-02,ECL,start,Ecolab
+2024-01-02,ED,start,Consolidated Edison
+2024-01-02,EFX,start,Equifax
+2024-01-02,EG,start,Everest Re
+2024-01-02,EIX,start,Edison International
+2024-01-02,EL,start,Estée Lauder Companies (The)
+2024-01-02,ELV,start,Elevance Health
+2024-01-02,EMN,start,Eastman Chemical Company
+2024-01-02,EMR,start,Emerson Electric
+2024-01-02,ENPH,start,Enphase
+2024-01-02,EOG,start,EOG Resources
+2024-01-02,EPAM,start,EPAM Systems
+2024-01-02,EQIX,start,Equinix
+2024-01-02,EQT,start,EQT
+2024-01-02,ES,start,Eversource
+2024-01-02,ESS,start,Essex Property Trust
+2024-01-02,ETN,start,Eaton Corporation
+2024-01-02,ETR,start,Entergy
+2024-01-02,ETSY,start,Etsy
+2024-01-02,EVRG,start,Evergy
+2024-01-02,EW,start,Edwards Lifesciences
+2024-01-02,EXC,start,Exelon
+2024-01-02,EXPD,start,Expeditors International
+2024-01-02,EXPE,start,Expedia Group
+2024-01-02,EXR,start,Extra Space Storage
+2024-01-02,F,start,Ford Motor Company
+2024-01-02,FANG,start,Diamondback Energy
+2024-01-02,FAST,start,Fastenal
+2024-01-02,FCX,start,Freeport-McMoRan
+2024-01-02,FDS,start,FactSet
+2024-01-02,FDX,start,FedEx
+2024-01-02,FE,start,FirstEnergy
+2024-01-02,FFIV,start,"F5, Inc."
+2024-01-02,FICO,start,Fair Isaac
+2024-01-02,FIS,start,Fidelity National Information Services
+2024-01-02,FISV,start,Fiserv
+2024-01-02,FITB,start,Fifth Third Bank
+2024-01-02,FMC,start,FMC Corporation
+2024-01-02,FOX,start,Fox Corporation (Class B)
+2024-01-02,FOXA,start,Fox Corporation (Class A)
+2024-01-02,FRT,start,Federal Realty
+2024-01-02,FSLR,start,First Solar
+2024-01-02,FTNT,start,Fortinet
+2024-01-02,FTV,start,Fortive
+2024-01-02,GD,start,General Dynamics
+2024-01-02,GE,start,General Electric
+2024-01-02,GEHC,start,GE HealthCare
+2024-01-02,GEN,start,Gen Digital
+2024-01-02,GILD,start,Gilead Sciences
+2024-01-02,GIS,start,General Mills
+2024-01-02,GL,start,Globe Life
+2024-01-02,GLW,start,Corning Inc.
+2024-01-02,GM,start,General Motors
+2024-01-02,GNRC,start,Generac
+2024-01-02,GOOG,start,Alphabet Inc. (Class C)
+2024-01-02,GOOGL,start,Alphabet Inc. (Class A)
+2024-01-02,GPC,start,Genuine Parts Company
+2024-01-02,GPN,start,Global Payments
+2024-01-02,GRMN,start,Garmin
+2024-01-02,GS,start,Goldman Sachs
+2024-01-02,GWW,start,W. W. Grainger
+2024-01-02,HAL,start,Halliburton
+2024-01-02,HAS,start,Hasbro
+2024-01-02,HBAN,start,Huntington Bancshares
+2024-01-02,HCA,start,HCA Healthcare
+2024-01-02,HD,start,Home Depot (The)
+2024-01-02,HES,start,Hess Corporation
+2024-01-02,HIG,start,Hartford (The)
+2024-01-02,HII,start,Huntington Ingalls Industries
+2024-01-02,HLT,start,Hilton Worldwide
+2024-01-02,HOLX,start,Hologic
+2024-01-02,HON,start,Honeywell
+2024-01-02,HPE,start,Hewlett Packard Enterprise
+2024-01-02,HPQ,start,HP Inc.
+2024-01-02,HRL,start,Hormel Foods
+2024-01-02,HSIC,start,Henry Schein
+2024-01-02,HST,start,Host Hotels & Resorts
+2024-01-02,HSY,start,Hershey's
+2024-01-02,HUBB,start,Hubbell Incorporated
+2024-01-02,HUM,start,Humana
+2024-01-02,HWM,start,Howmet Aerospace
+2024-01-02,IBM,start,IBM
+2024-01-02,ICE,start,Intercontinental Exchange
+2024-01-02,IDXX,start,Idexx Laboratories
+2024-01-02,IEX,start,IDEX Corporation
+2024-01-02,IFF,start,International Flavors & Fragrances
+2024-01-02,ILMN,start,Illumina
+2024-01-02,INCY,start,Incyte
+2024-01-02,INTC,start,Intel
+2024-01-02,INTU,start,Intuit
+2024-01-02,INVH,start,Invitation Homes
+2024-01-02,IP,start,International Paper
+2024-01-02,IPG,start,Interpublic Group of Companies (The)
+2024-01-02,IQV,start,IQVIA
+2024-01-02,IR,start,Ingersoll Rand
+2024-01-02,IRM,start,Iron Mountain
+2024-01-02,ISRG,start,Intuitive Surgical
+2024-01-02,IT,start,Gartner
+2024-01-02,ITW,start,Illinois Tool Works
+2024-01-02,IVZ,start,Invesco
+2024-01-02,J,start,Jacobs Solutions
+2024-01-02,JBHT,start,J.B. Hunt
+2024-01-02,JBL,start,Jabil
+2024-01-02,JCI,start,Johnson Controls
+2024-01-02,JKHY,start,Jack Henry & Associates
+2024-01-02,JNJ,start,Johnson & Johnson
+2024-01-02,JNPR,start,Juniper Networks
+2024-01-02,JPM,start,JPMorgan Chase
+2024-01-02,K,start,Kellanova
+2024-01-02,KDP,start,Keurig Dr Pepper
+2024-01-02,KEY,start,KeyCorp
+2024-01-02,KEYS,start,Keysight
+2024-01-02,KHC,start,Kraft Heinz
+2024-01-02,KIM,start,Kimco Realty
+2024-01-02,KLAC,start,KLA Corporation
+2024-01-02,KMB,start,Kimberly-Clark
+2024-01-02,KMI,start,Kinder Morgan
+2024-01-02,KMX,start,CarMax
+2024-01-02,KO,start,Coca-Cola Company (The)
+2024-01-02,KR,start,Kroger
+2024-01-02,KVUE,start,Kenvue
+2024-01-02,L,start,Loews Corporation
+2024-01-02,LDOS,start,Leidos
+2024-01-02,LEN,start,Lennar
+2024-01-02,LH,start,LabCorp
+2024-01-02,LHX,start,L3Harris
+2024-01-02,LIN,start,Linde plc
+2024-01-02,LKQ,start,LKQ Corporation
+2024-01-02,LLY,start,Eli Lilly and Company
+2024-01-02,LMT,start,Lockheed Martin
+2024-01-02,LNT,start,Alliant Energy
+2024-01-02,LOW,start,Lowe's
+2024-01-02,LRCX,start,Lam Research
+2024-01-02,LULU,start,Lululemon Athletica
+2024-01-02,LUV,start,Southwest Airlines
+2024-01-02,LVS,start,Las Vegas Sands
+2024-01-02,LW,start,Lamb Weston
+2024-01-02,LYB,start,LyondellBasell
+2024-01-02,LYV,start,Live Nation Entertainment
+2024-01-02,MA,start,Mastercard
+2024-01-02,MAA,start,Mid-America Apartment Communities
+2024-01-02,MAR,start,Marriott International
+2024-01-02,MAS,start,Masco
+2024-01-02,MCD,start,McDonald's
+2024-01-02,MCHP,start,Microchip Technology
+2024-01-02,MCK,start,McKesson
+2024-01-02,MCO,start,Moody's Corporation
+2024-01-02,MDLZ,start,Mondelez International
+2024-01-02,MDT,start,Medtronic
+2024-01-02,MET,start,MetLife
+2024-01-02,META,start,Meta Platforms
+2024-01-02,MGM,start,MGM Resorts
+2024-01-02,MHK,start,Mohawk Industries
+2024-01-02,MKC,start,McCormick & Company
+2024-01-02,MKTX,start,MarketAxess
+2024-01-02,MLM,start,Martin Marietta Materials
+2024-01-02,MMM,start,3M
+2024-01-02,MNST,start,Monster Beverage
+2024-01-02,MO,start,Altria
+2024-01-02,MOH,start,Molina Healthcare
+2024-01-02,MOS,start,Mosaic Company (The)
+2024-01-02,MPC,start,Marathon Petroleum
+2024-01-02,MPWR,start,Monolithic Power Systems
+2024-01-02,MRK,start,Merck & Co.
+2024-01-02,MRNA,start,Moderna
+2024-01-02,MRO,start,Marathon Oil
+2024-01-02,MRSH,start,Marsh McLennan
+2024-01-02,MS,start,Morgan Stanley
+2024-01-02,MSCI,start,MSCI
+2024-01-02,MSFT,start,Microsoft
+2024-01-02,MSI,start,Motorola Solutions
+2024-01-02,MTB,start,M&T Bank
+2024-01-02,MTCH,start,Match Group
+2024-01-02,MTD,start,Mettler Toledo
+2024-01-02,MU,start,Micron Technology
+2024-01-02,NCLH,start,Norwegian Cruise Line Holdings
+2024-01-02,NDAQ,start,"Nasdaq, Inc."
+2024-01-02,NDSN,start,Nordson Corporation
+2024-01-02,NEE,start,NextEra Energy
+2024-01-02,NEM,start,Newmont
+2024-01-02,NFLX,start,Netflix
+2024-01-02,NI,start,NiSource
+2024-01-02,NKE,start,"Nike, Inc."
+2024-01-02,NOC,start,Northrop Grumman
+2024-01-02,NOW,start,ServiceNow
+2024-01-02,NRG,start,NRG Energy
+2024-01-02,NSC,start,Norfolk Southern Railway
+2024-01-02,NTAP,start,NetApp
+2024-01-02,NTRS,start,Northern Trust
+2024-01-02,NUE,start,Nucor
+2024-01-02,NVDA,start,Nvidia
+2024-01-02,NVR,start,"NVR, Inc."
+2024-01-02,NWS,start,News Corp (Class B)
+2024-01-02,NWSA,start,News Corp (Class A)
+2024-01-02,NXPI,start,NXP Semiconductors
+2024-01-02,O,start,Realty Income
+2024-01-02,ODFL,start,Old Dominion
+2024-01-02,OKE,start,ONEOK
+2024-01-02,OMC,start,Omnicom Group
+2024-01-02,ON,start,ON Semiconductor
+2024-01-02,ORCL,start,Oracle Corporation
+2024-01-02,ORLY,start,O'Reilly Auto Parts
+2024-01-02,OTIS,start,Otis Worldwide
+2024-01-02,OXY,start,Occidental Petroleum
+2024-01-02,PANW,start,Palo Alto Networks
+2024-01-02,PAYC,start,Paycom
+2024-01-02,PAYX,start,Paychex
+2024-01-02,PCAR,start,Paccar
+2024-01-02,PCG,start,PG&E Corporation
+2024-01-02,PEG,start,Public Service Enterprise Group
+2024-01-02,PEP,start,PepsiCo
+2024-01-02,PFE,start,Pfizer
+2024-01-02,PFG,start,Principal Financial Group
+2024-01-02,PG,start,Procter & Gamble
+2024-01-02,PGR,start,Progressive Corporation
+2024-01-02,PH,start,Parker Hannifin
+2024-01-02,PHM,start,PulteGroup
+2024-01-02,PKG,start,Packaging Corporation of America
+2024-01-02,PLD,start,Prologis
+2024-01-02,PM,start,Philip Morris International
+2024-01-02,PNC,start,PNC Financial Services
+2024-01-02,PNR,start,Pentair
+2024-01-02,PNW,start,Pinnacle West
+2024-01-02,PODD,start,Insulet
+2024-01-02,POOL,start,Pool Corporation
+2024-01-02,PPG,start,PPG Industries
+2024-01-02,PPL,start,PPL Corporation
+2024-01-02,PRU,start,Prudential Financial
+2024-01-02,PSA,start,Public Storage
+2024-01-02,PSX,start,Phillips 66
+2024-01-02,PTC,start,PTC
+2024-01-02,PWR,start,Quanta Services
+2024-01-02,PXD,start,Pioneer Natural Resources
+2024-01-02,PYPL,start,PayPal
+2024-01-02,QCOM,start,Qualcomm
+2024-01-02,QRVO,start,Qorvo
+2024-01-02,RCL,start,Royal Caribbean Group
+2024-01-02,REG,start,Regency Centers
+2024-01-02,REGN,start,Regeneron
+2024-01-02,RF,start,Regions Financial Corporation
+2024-01-02,RHI,start,Robert Half
+2024-01-02,RJF,start,Raymond James
+2024-01-02,RL,start,Ralph Lauren Corporation
+2024-01-02,RMD,start,ResMed
+2024-01-02,ROK,start,Rockwell Automation
+2024-01-02,ROL,start,"Rollins, Inc."
+2024-01-02,ROP,start,Roper Technologies
+2024-01-02,ROST,start,Ross Stores
+2024-01-02,RSG,start,Republic Services
+2024-01-02,RTX,start,RTX Corporation
+2024-01-02,RVTY,start,Revvity (Previously PerkinElmer)
+2024-01-02,SBAC,start,SBA Communications
+2024-01-02,SBUX,start,Starbucks
+2024-01-02,SCHW,start,Charles Schwab Corporation
+2024-01-02,SHW,start,Sherwin-Williams
+2024-01-02,SJM,start,J.M. Smucker Company (The)
+2024-01-02,SKYD,start,Paramount Global
+2024-01-02,SLB,start,Schlumberger
+2024-01-02,SNA,start,Snap-on
+2024-01-02,SNPS,start,Synopsys
+2024-01-02,SO,start,Southern Company
+2024-01-02,SPG,start,Simon Property Group
+2024-01-02,SPGI,start,S&P Global
+2024-01-02,SRE,start,Sempra Energy
+2024-01-02,STE,start,Steris
+2024-01-02,STLD,start,Steel Dynamics
+2024-01-02,STT,start,State Street Corporation
+2024-01-02,STX,start,Seagate Technology
+2024-01-02,STZ,start,Constellation Brands
+2024-01-02,SW,start,WestRock
+2024-01-02,SWK,start,Stanley Black & Decker
+2024-01-02,SWKS,start,Skyworks Solutions
+2024-01-02,SYF,start,Synchrony Financial
+2024-01-02,SYK,start,Stryker Corporation
+2024-01-02,SYY,start,Sysco
+2024-01-02,T,start,AT&T
+2024-01-02,TAP,start,Molson Coors Beverage Company
+2024-01-02,TDG,start,TransDigm Group
+2024-01-02,TDY,start,Teledyne Technologies
+2024-01-02,TECH,start,Bio-Techne
+2024-01-02,TEL,start,TE Connectivity
+2024-01-02,TER,start,Teradyne
+2024-01-02,TFC,start,Truist
+2024-01-02,TFX,start,Teleflex
+2024-01-02,TGT,start,Target Corporation
+2024-01-02,TJX,start,TJX Companies
+2024-01-02,TMO,start,Thermo Fisher Scientific
+2024-01-02,TMUS,start,T-Mobile US
+2024-01-02,TPR,start,"Tapestry, Inc."
+2024-01-02,TRGP,start,Targa Resources
+2024-01-02,TRMB,start,Trimble Inc.
+2024-01-02,TROW,start,T. Rowe Price
+2024-01-02,TRV,start,Travelers Companies (The)
+2024-01-02,TSCO,start,Tractor Supply
+2024-01-02,TSLA,start,"Tesla, Inc."
+2024-01-02,TSN,start,Tyson Foods
+2024-01-02,TT,start,Trane Technologies
+2024-01-02,TTWO,start,Take-Two Interactive
+2024-01-02,TXN,start,Texas Instruments
+2024-01-02,TXT,start,Textron
+2024-01-02,TYL,start,Tyler Technologies
+2024-01-02,UAL,start,United Airlines Holdings
+2024-01-02,UBER,start,Uber
+2024-01-02,UDR,start,"UDR, Inc."
+2024-01-02,UHS,start,Universal Health Services
+2024-01-02,ULTA,start,Ulta Beauty
+2024-01-02,UNH,start,UnitedHealth Group
+2024-01-02,UNP,start,Union Pacific Corporation
+2024-01-02,UPS,start,United Parcel Service
+2024-01-02,URI,start,United Rentals
+2024-01-02,USB,start,U.S. Bank
+2024-01-02,V,start,Visa Inc.
+2024-01-02,VFC,start,VF Corporation
+2024-01-02,VICI,start,Vici Properties
+2024-01-02,VLO,start,Valero Energy
+2024-01-02,VLTO,start,Veralto
+2024-01-02,VMC,start,Vulcan Materials Company
+2024-01-02,VMRK,start,Equity Residential
+2024-01-02,VRSK,start,Verisk
+2024-01-02,VRSN,start,Verisign
+2024-01-02,VRTX,start,Vertex Pharmaceuticals
+2024-01-02,VTR,start,Ventas
+2024-01-02,VTRS,start,Viatris
+2024-01-02,VZ,start,Verizon
+2024-01-02,WAB,start,Wabtec
+2024-01-02,WAT,start,Waters Corporation
+2024-01-02,WBA,start,Walgreens Boots Alliance
+2024-01-02,WBD,start,Warner Bros. Discovery
+2024-01-02,WDC,start,Western Digital
+2024-01-02,WEC,start,WEC Energy Group
+2024-01-02,WELL,start,Welltower
+2024-01-02,WFC,start,Wells Fargo
+2024-01-02,WHR,start,Whirlpool Corporation
+2024-01-02,WM,start,Waste Management
+2024-01-02,WMB,start,Williams Companies
+2024-01-02,WMT,start,Walmart
+2024-01-02,WRB,start,Berkley
+2024-01-02,WST,start,West Pharmaceutical Services
+2024-01-02,WTW,start,Willis Towers Watson
+2024-01-02,WY,start,Weyerhaeuser
+2024-01-02,WYNN,start,Wynn Resorts
+2024-01-02,XEL,start,Xcel Energy
+2024-01-02,XOM,start,ExxonMobil
+2024-01-02,XRAY,start,Dentsply Sirona
+2024-01-02,XYL,start,Xylem Inc.
+2024-01-02,YUM,start,Yum! Brands
+2024-01-02,ZBH,start,Zimmer Biomet
+2024-01-02,ZBRA,start,Zebra Technologies
+2024-01-02,ZION,start,Zions Bancorporation
+2024-01-02,ZTS,start,Zoetis
+2024-02-01,CDAY,remove,Ceridian
+2024-02-01,DAY,add,Dayforce
+2024-03-18,WHR,remove,Whirlpool Corporation
+2024-03-18,ZION,remove,Zions Bancorporation
+2024-03-18,SMCI,add,Supermicro
+2024-03-18,DECK,add,Deckers Brands
+2024-04-01,SOLV,add,Solventum
+2024-04-02,GEV,add,GE Vernova
+2024-04-03,XRAY,remove,Dentsply Sirona
+2024-04-03,VFC,remove,VF Corporation
+2024-05-08,PXD,remove,Pioneer Natural Resources
+2024-05-08,VST,add,Vistra
+2024-06-24,RHI,remove,Robert Half
+2024-06-24,CMA,remove,Comerica
+2024-06-24,ILMN,remove,"Illumina, Inc."
+2024-06-24,KKR,add,KKR
+2024-06-24,CRWD,add,CrowdStrike
+2024-06-24,GDDY,add,GoDaddy
+2024-09-23,AAL,remove,American Airlines Group
+2024-09-23,ETSY,remove,Etsy
+2024-09-23,BIO,remove,Bio-Rad Laboratories
+2024-09-23,PLTR,add,Palantir Technologies
+2024-09-23,DELL,add,Dell Technologies
+2024-09-23,ERIE,add,Erie Indemnity
+2024-09-30,AMTM,add,Amentum
+2024-10-01,BBWI,remove,"Bath & Body Works, Inc."
+2024-11-26,MRO,remove,Marathon Oil
+2024-11-26,TPL,add,Texas Pacific Land Corporation
+2024-12-23,QRVO,remove,Qorvo
+2024-12-23,AMTM,remove,Amentum
+2024-12-23,CTLT,remove,Catalent
+2024-12-23,APO,add,Apollo Global Management
+2024-12-23,WDAY,add,"Workday, Inc."
+2024-12-23,LII,add,Lennox International
+2025-03-24,BWA,remove,BorgWarner
+2025-03-24,TFX,remove,Teleflex
+2025-03-24,CE,remove,Celanese
+2025-03-24,FMC,remove,FMC Corporation
+2025-03-24,DASH,add,DoorDash
+2025-03-24,TKO,add,TKO Group Holdings
+2025-03-24,WSM,add,"Williams-Sonoma, Inc."
+2025-03-24,EXE,add,Expand Energy
+2025-05-19,DFS,remove,Discover Financial
+2025-05-19,COIN,add,Coinbase
+2025-07-09,JNPR,remove,Juniper Networks
+2025-07-09,DDOG,add,Datadog
+2025-07-18,ANSS,remove,Ansys
+2025-07-18,TTD,add,The Trade Desk
+2025-07-23,HES,remove,Hess Corporation
+2025-07-23,XYZ,add,"Block, Inc."
+2025-08-28,WBA,remove,Walgreens Boots Alliance
+2025-08-28,IBKR,add,Interactive Brokers
+2025-09-22,ENPH,remove,Enphase Energy
+2025-09-22,CZR,remove,Caesars Entertainment
+2025-09-22,MKTX,remove,MarketAxess
+2025-09-22,EME,add,Emcor
+2025-09-22,HOOD,add,Robinhood Markets
+2025-09-22,APP,add,AppLovin
+2025-10-30,SOLS,add,Solstice Advanced Materials
+2025-10-31,KMX,remove,CarMax
+2025-11-03,Q,add,Qnity Electronics
+2025-11-04,EMN,remove,Eastman Chemical Co.
+2025-11-28,IPG,remove,Interpublic Group
+2025-11-28,SNDK,add,Sandisk
+2025-12-11,K,remove,Kellanova
+2025-12-11,ARES,add,Ares Management
+2025-12-22,LKQ,remove,LKQ Corporation
+2025-12-22,SOLS,remove,Solstice Advanced Materials
+2025-12-22,MHK,remove,Mohawk Industries
+2025-12-22,CRH,add,CRH
+2025-12-22,CVNA,add,Carvana
+2025-12-22,FIX,add,Comfort Systems USA
+2026-02-09,DAY,remove,Dayforce
+2026-02-09,CIEN,add,Ciena
+2026-03-23,MTCH,remove,Match Group
+2026-03-23,MOH,remove,Molina Healthcare
+2026-03-23,LW,remove,Lamb Weston
+2026-03-23,PAYC,remove,Paycom
+2026-03-23,VRT,add,Vertiv
+2026-03-23,LITE,add,Lumentum
+2026-03-23,COHR,add,Coherent Corp.
+2026-03-23,ECHO,add,EchoStar
+2026-04-09,HOLX,remove,Hologic
+2026-04-09,CASY,add,Casey's
+2026-05-07,CTRA,remove,Coterra Energy
+2026-05-07,VEEV,add,Veeva Systems
+2026-06-01,FDXF,add,FedEx Freight
+2026-06-02,EPAM,remove,EPAM Systems
+2026-06-22,POOL,remove,Pool Corporation
+2026-06-22,CPB,remove,Campbell's
+2026-06-22,MRVL,add,Marvell Technology
+2026-06-22,FLEX,add,Flex Ltd.
+2026-06-29,HONA,add,Honeywell Aerospace
+2026-06-30,CAG,remove,Conagra Brands
+2026-08-05,EA,remove,Electronic Arts
+2026-08-05,FERG,add,Ferguson Enterprises
+2026-08-18,AVB,remove,AvalonBay Communities
+2026-08-18,RDDT,add,Reddit
+2026-09-21,TAP,remove,Molson Coors
+2026-09-21,TTD,remove,The Trade Desk
+2026-09-21,BLDR,remove,Builders FirstSource
+2026-09-21,BE,add,Bloom Energy
+2026-09-21,P,add,Everpure
+2026-09-21,ILMN,add,"Illumina, Inc."
+2026-10-01,VYLR,add,Vylor
+2026-10-06,WBD,remove,Warner Bros. Discovery
+2026-10-06,CTVA,remove,Corteva
+2026-10-06,TWLO,add,Twilio
+2026-10-30,KVUE,remove,Kenvue
+2026-10-30,OKTA,add,"Okta, Inc."
