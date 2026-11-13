@@ -53,6 +53,11 @@ def _guard_count(r: SimResult, prefix: str) -> int:
     return sum(1 for e in r.events if e["kind"] == "guard" and e["text"].startswith(prefix))
 
 
+def peak_reset_count(events: list[dict]) -> int:
+    """Re-entries after a −20% stop: a ``peak_reset`` event (reset_peak) or the half_size rule's 재가동 guard line."""
+    return sum(1 for e in events if e["kind"] == "peak_reset" or (e["kind"] == "guard" and e["text"].startswith("재가동")))
+
+
 def paper_checks(max_drawdown: float, daily_breaches: int, stop_outs: int, days: int) -> dict[str, bool | None]:
     """``config.PAPER_TRADING`` applied literally to the whole backtest. ``None``: not measurable in a rules-only
     backtest (no LLM decisions to be REVIEW, every order has a decision record by construction)."""
@@ -72,6 +77,7 @@ def cell_row(risk: RiskConfig, r: SimResult) -> dict:
     worst = min(r.trades, key=lambda t: t.pnl_pct) if r.trades else None
     breaches = _guard_count(r, "일일 손실 한도")
     stop_outs = _guard_count(r, "MaxDrawdown")
+    peak_resets = peak_reset_count(r.events)
     checks = paper_checks(m["max_drawdown"], breaches, stop_outs, m["days"])
     return {
         "stop_loss_pct": risk.stop_loss_pct, "max_position_pct": risk.max_position_pct, "trailing_pct": risk.trailing_pct,
@@ -79,7 +85,7 @@ def cell_row(risk: RiskConfig, r: SimResult) -> dict:
         "trades": len(r.trades),
         "worst_trade_pct": worst.pnl_pct if worst else None,
         "worst_trade": f"{worst.ticker} {worst.exit_date} {worst.reason}" if worst else None,
-        "stop_outs": stop_outs, "stopped_out": stop_outs > 0, "daily_loss_breaches": breaches,
+        "stop_outs": stop_outs, "peak_resets": peak_resets, "stopped_out": stop_outs > 0, "daily_loss_breaches": breaches,
         "paper_checks": checks,
         "paper_passed": sum(1 for v in checks.values() if v),
         "paper_measurable": sum(1 for v in checks.values() if v is not None),
@@ -100,7 +106,7 @@ def run_grid(frames, index, base: SimConfig, configs: list[RiskConfig], *, secto
 
 
 CSV_COLUMNS = ["stop_loss_pct", "max_position_pct", "trailing_pct", "max_drawdown", "total_return", "volatility",
-               "trades", "worst_trade_pct", "worst_trade", "stopped_out", "stop_outs", "daily_loss_breaches",
+               "trades", "worst_trade_pct", "worst_trade", "stopped_out", "stop_outs", "peak_resets", "daily_loss_breaches",
                "paper_passed", "paper_measurable"]
 
 
@@ -108,7 +114,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", default="2024-01-02")
     parser.add_argument("--end", default="2026-11-12")
+    parser.add_argument("--dd-recovery", default="reset_peak", choices=["reset_peak", "half_size"],
+                        help="RiskConfig.dd_stop_recovery; half_size (the rule before 2026-11-13) writes grid_half_size.*")
     args = parser.parse_args()
+    base_risk = replace(RiskConfig(), dd_stop_recovery=args.dd_recovery)
+    stem = "grid" if args.dd_recovery == "reset_peak" else f"grid_{args.dd_recovery}"
     OUT.mkdir(parents=True, exist_ok=True)
     cache_dir = str(DATA / "cache")
 
@@ -126,7 +136,7 @@ def main() -> int:
                   "close_sum": round(float(f["Close"].sum()), 2)} for t, f in {**frames, INDEX: index}.items()}
     print(f"universe {len(frames)} tickers, sectors resolved {sum(1 for s in sectors.values() if s)}/{len(frames)}")
 
-    configs = grid_configs()
+    configs = grid_configs(base=base_risk)
     t0 = time.perf_counter()
     rows = run_grid(frames, index, SimConfig(args.start, args.end), configs, sector_of=sector_of,
                     progress=lambda k, n, row: print(
@@ -140,7 +150,7 @@ def main() -> int:
         "start": args.start, "end": args.end, "universe": list(frames), "sectors": sectors, "inputs": inputs, "index": INDEX,
         "variant": "rules_on_regime (docs/05 C) with three RiskConfig fields swept",
         "axes": {"stop_loss_pct": list(STOP_LOSS), "max_position_pct": list(MAX_POSITION), "trailing_pct": list(TRAILING)},
-        "base_risk": asdict(RiskConfig()), "paper_criteria": PAPER_TRADING, "elapsed_s": round(elapsed, 1),
+        "base_risk": asdict(base_risk), "paper_criteria": PAPER_TRADING, "elapsed_s": round(elapsed, 1),
         "cells": rows,
         "caveats": [
             "고른 값 없음: 격자 전체를 보고한다. 한 경로(2024-01~2026-11)에서 27칸 중 최선을 고르면 과최적화.",
@@ -150,12 +160,12 @@ def main() -> int:
             "OHLCV 캐시는 쓴 날에만 유효(yahoo._cache_is_fresh). 다른 날 재실행하면 재다운로드되어 값이 달라질 수 있다 — inputs로 대조.",
         ],
     }
-    (OUT / "grid.json").write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-    with (OUT / "grid.csv").open("w", newline="", encoding="utf-8-sig") as f:
+    (OUT / f"{stem}.json").write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    with (OUT / f"{stem}.csv").open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
-    print(f"wrote {OUT / 'grid.json'}, {OUT / 'grid.csv'}")
+    print(f"wrote {OUT / f'{stem}.json'}, {OUT / f'{stem}.csv'}")
     return 0
 
 
