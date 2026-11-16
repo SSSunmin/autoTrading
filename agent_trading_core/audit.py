@@ -166,6 +166,55 @@ def trim_target(d: DecisionRecord) -> float | None:
     return float(m.group(1)) / 100 if m else None
 
 
+_FIELD = re.compile(r"^\*\*([A-Za-z /]+)\*\*: ?(.*)$")
+_CHECK = re.compile(r"^- \[([x ])\] (.*?) — (.*)$")
+_ACTION = re.compile(r"^(Hold|Trim|Exit)(?: \(to ([0-9.eE+-]+)%\))?$")
+_PRICES = re.compile(r"^([0-9.eE+-]+) / ([0-9.eE+-]+) / ([0-9.eE+-]+)")
+
+
+def read_thesis(d: DecisionRecord) -> dict | None:
+    """What a model decision's recorded text says, read back from the text alone (no model call, no raw file): an
+    investment memo (``schemas.render_investment_memo``) or a sell review (``render_sell_review``, after the
+    "**Rating**" line ``agent.to_record`` puts first). None for any other text (a rule decision, REVIEW).
+
+    memo: ``{"kind": "memo", "thesis", "invalidation": [str], "price", "target", "downside", "horizon", "exit_plan"}``;
+    review: ``{"kind": "review", "action": Hold|Trim|Exit, "trim_to_pct", "reasons": [str], "checks": [{condition, met,
+    evidence}], "reasoning"}``. ponytail: the memo joins its invalidation conditions with "; ", so a condition that
+    itself holds "; " reads as two; a value runs on over the following lines up to a blank line or the next
+    "**Field**:" line, so a value with a blank line in it keeps only its first paragraph (the renderers put a blank line
+    between fields, and to_record's Trim note follows one). The structured answer is only in the raw response file,
+    which this host may lack. Check lines are read only inside the "**Invalidation checks**" block; a check's evidence
+    keeps its first line only, and a condition holding " — " splits at it (display only, met / total unchanged)."""
+    fields: dict[str, str] = {}
+    checks: list[dict] = []
+    current: str | None = None
+    for line in d.thesis.splitlines():
+        if m := _FIELD.match(line):
+            current = m.group(1) if m.group(1) not in fields else None
+            if current:
+                fields[current] = m.group(2).strip()
+        elif not line.strip():
+            current = None if current != "Invalidation checks" else current
+        elif current == "Invalidation checks":
+            if m := _CHECK.match(line):
+                checks.append({"condition": m.group(2), "met": m.group(1) == "x", "evidence": m.group(3)})
+        elif current is not None:
+            fields[current] = f"{fields[current]}\n{line.strip()}"
+    if (m := _ACTION.match(fields.get("Action", ""))) is not None:
+        reasons = fields.get("Reasons", "none")
+        return {"kind": "review", "action": m.group(1), "trim_to_pct": float(m.group(2)) if m.group(2) else None,
+                "reasons": [] if reasons == "none" else [r.strip() for r in reasons.split(",") if r.strip()],
+                "checks": checks, "reasoning": fields.get("Reasoning", "")}
+    if "Thesis" not in fields:
+        return None
+    px = _PRICES.match(fields.get("Price / Target / Downside", ""))
+    price, target, downside = (float(x) for x in px.groups()) if px else (None, None, None)
+    return {"kind": "memo", "thesis": fields["Thesis"],
+            "invalidation": [c.strip() for c in fields.get("Invalidation", "").split("; ") if c.strip()],
+            "price": price, "target": target, "downside": downside,
+            "horizon": fields.get("Time Horizon"), "exit_plan": fields.get("Exit Plan")}
+
+
 class PlanSide(BaseModel):
     """One column of a decision card's 원안 vs 최종 grid: what the order was before / after the hard rules."""
 

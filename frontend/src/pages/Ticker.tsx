@@ -7,9 +7,12 @@ import { useApi } from '../hooks/useApi'
 import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded, Pct, RatingBadge, RuleCell, TickerCell } from '../components/common'
 import { DecisionCard } from '../components/DecisionCard'
+import { HoldingPanel, ThesisPanel, TickerFacts } from '../components/ticker'
+import { TICKER_TABS } from '../components/tickerLogic'
 import type { TickerDetail } from '../api/types'
 
-/** 4: one instrument. Identity, decision history as the memo reads, screening history, outcomes and lessons. */
+/** 4: one instrument. Identity, decision history as the memo reads, screening history, outcomes and lessons, the
+ *  thesis checks (memos and sell reviews as recorded) and the holding. */
 export default function Ticker() {
   const { ticker } = useParams()
   const navigate = useNavigate()
@@ -42,10 +45,9 @@ function Body({ d, tab, setTab }: { d: TickerDetail; tab: string; setTab: (t: st
             <span className="muted">정체는 실행 시작 시 프로필 조회로 고정됩니다</span></div>
           <div>최근 선별 {latest ? (latest.selected ? <RatingBadge rating="Buy" label={`선정 · ${latest.rank}위`} /> : <RatingBadge rating="Hold" label="탈락" />) : '–'}</div>
         </div>
+        <TickerFacts d={d} />
       </div>
-      <AgentTabs value={tab} onChange={setTab} label="종목 정보" items={[
-        { id: 'decisions', label: '결정 이력' }, { id: 'screening', label: '선별 이력' }, { id: 'outcomes', label: '결과·교훈' }, { id: 'snapshot', label: '검증 스냅샷' },
-      ]} />
+      <AgentTabs value={tab} onChange={setTab} label="종목 정보" items={[...TICKER_TABS]} />
       <div className="section">
         {tab === 'decisions' && (
           <>
@@ -99,6 +101,8 @@ function Body({ d, tab, setTab }: { d: TickerDetail; tab: string; setTab: (t: st
             ) : <AgentEmptyState title="선별 기록 없음" compact />}
           </AgentSectionPanel>
         )}
+        {tab === 'thesis' && <ThesisPanel checks={d.thesis_checks} market={d.market} />}
+        {tab === 'holding' && <HoldingPanel h={d.holding} market={d.market} />}
       </div>
     </>
   )

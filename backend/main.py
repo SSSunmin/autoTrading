@@ -63,6 +63,7 @@ from agent_trading_core.audit import (
     latest_orders,
     market_audit,
     pending_rerun_marker,
+    read_thesis,
     stage_counts,
 )
 from agent_trading_core.config import AUTO_EXECUTION, LLM, MARKETS, PAPER_TRADING, auto_execution
@@ -837,9 +838,91 @@ def get_ticker(ticker: str, market: str | None = MarketQuery) -> dict:
                  **_outcome(e)} for e in sorted(st.memory, key=lambda e: e["date"], reverse=True) if e["ticker"] == t]
     if not screening and not decisions and not outcomes:
         raise HTTPException(404, f"종목 {t!r} 기록 없음 ({st.market})")
+    earnings, earnings_note = _earnings(t, st.market)
     return {"ticker": t, "name": st.name(t), "market": st.market, "screening": screening, "decisions": decisions,
             "outcomes": outcomes, "orders": [_order_out(o, st) for o in st.orders_where(ticker=t)],
-            "timeline": [{"date": o["trade_date"], "rating": o["rating"]} for o in reversed(outcomes)]}
+            "timeline": [{"date": o["trade_date"], "rating": o["rating"]} for o in reversed(outcomes)],
+            "sector": sector_of(t), "exchange": _exchange(t, st.market), "holding": _holding(st, t),
+            "thesis_checks": _thesis_checks(st.decisions(ticker=t)), "earnings": earnings, "earnings_note_ko": earnings_note}
+
+
+# 논지 점검 tab: a sell review's action as the verdict; a memo sets the conditions later reviews check
+VERDICT_KO = {"Hold": ("keep", "논지 유지"), "Trim": ("trim", "축소"), "Exit": ("exit", "청산")}
+US_EXCHANGE_KO = {"NAS": "나스닥", "NYS": "뉴욕증권거래소", "AMS": "NYSE American"}
+EARNINGS_FILE = "_earnings_us.json"              # scripts/refresh_earnings.py writes it; read here only
+
+
+def _thesis_checks(decisions: list[DecisionRecord]) -> list[dict]:
+    """The ticker's memos and sell reviews (any record whose text reads as one), oldest first, read back from the text
+    (``audit.read_thesis`` — no model call). A review's verdict is its action (Hold 논지 유지 / Trim 축소 / Exit 청산) with
+    its checks met / total; a memo has no verdict — its invalidation conditions are what the reviews check."""
+    out = []
+    for d in sorted(decisions, key=lambda d: (d.trade_date, d.recorded_at)):
+        if (r := read_thesis(d)) is None:
+            continue
+        row = {"trade_date": d.trade_date, "recorded_at": d.recorded_at, "rating": d.rating,
+               "rating_ko": RATING_KO.get(d.rating, d.rating), "decider": d.settings.get("decider"),
+               "stop_loss": d.stop_loss} | r
+        if r["kind"] == "review":
+            row["verdict"], row["verdict_ko"] = VERDICT_KO[r["action"]]
+            row["reasons_ko"] = [SELL_REASON_KO.get(x, x) for x in r["reasons"]]
+            row["met"], row["total"] = sum(c["met"] for c in r["checks"]), len(r["checks"])
+        else:
+            row["verdict"], row["verdict_ko"] = "memo", "투자 메모"
+            row["checks"] = [{"condition": c, "met": None, "evidence": None} for c in r["invalidation"]]
+            row["met"], row["total"] = None, len(r["invalidation"])
+        out.append(row)
+    return out
+
+
+def _exchange(ticker: str, market: str) -> str | None:
+    """Where it lists, from what is on disk: the KRX suffix (.KS 유가증권 · .KQ 코스닥), or for US the exchange the KIS
+    price refresh found and kept (``kis.EXCHANGE_FILE``). None when neither says."""
+    if market == "KRX":
+        return {"KS": "KRX 유가증권", "KQ": "KRX 코스닥"}.get(ticker.rsplit(".", 1)[-1])
+    path = DATA_DIR / "cache" / kis.EXCHANGE_FILE
+    try:
+        code = json.loads(path.read_text(encoding="utf-8")).get(ticker) if path.exists() else None
+    except (OSError, ValueError):
+        code = None
+    return US_EXCHANGE_KO.get(code, code) if code else None
+
+
+def _earnings(ticker: str, market: str) -> tuple[dict | None, str]:
+    """The next earnings date as a reference only (docs/10 D8 — never read by a decision or the executor): the cached
+    file the refresh command wrote, no network here. (entry | None, the note the screen shows)."""
+    if market != "US":
+        return None, "국내 실적 발표일 미제공 — 소스 없음(DART는 발표 예정일을 주지 않습니다)"
+    path = DATA_DIR / "cache" / EARNINGS_FILE
+    try:
+        book = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError):
+        return None, "실적 일정 캐시를 읽지 못했습니다"
+    e = book.get(ticker)
+    if e is None:
+        return None, "실적 일정 캐시에 없음 — 아직 실적 일정을 갱신하지 않았습니다"
+    note = "참고 · 결정 · 주문에 쓰지 않음"
+    if e.get("error"):
+        note = f"마지막 갱신 실패({e.get('failed', '')}: {e['error']})" + (" — 이전 값" if e.get("date") else "")
+    elif not e.get("date"):
+        note = "출처에 예정일 없음"
+    elif e.get("fetched") and (e.get("date_to") or e["date"]) < e["fetched"]:   # Yahoo keeps the last report a while
+        note = "지난 실적일 — 조회 시점에 출처가 다음 일정을 아직 주지 않았습니다"
+    return {"date": e.get("date"), "date_to": e.get("date_to"), "source": e.get("source"), "fetched": e.get("fetched")}, note
+
+
+def _holding(st: _Store, ticker: str) -> dict | None:
+    """The ticker's row of the paper book (``positions_view``, as the 포지션 screen has it) and its partial sales since
+    entry; None when not held."""
+    view = positions_view(st.order_rows, PRICES, cfg=paper_config(st.market), operations=st.operations)
+    row = next((r for r in view["positions"] if r["ticker"] == ticker), None)
+    if row is None:
+        return None
+    partial = [{"date": o.fill_date, "quantity": o.filled_quantity, "price": o.filled_price, "order_id": o.order_id}
+               for o in st.orders_where(ticker=ticker)
+               if o.filled_quantity and o.plan and o.plan.final.side == "Sell"
+               and o.plan.final.qty < o.plan.proposed.qty and o.fill_date and o.fill_date >= row["entry_date"]]
+    return row | {"as_of": view["as_of"], "partial_sales": sorted(partial, key=lambda x: x["date"])}
 
 
 @app.get("/api/performance", tags=["performance"])

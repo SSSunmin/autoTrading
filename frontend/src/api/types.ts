@@ -305,6 +305,53 @@ export interface TickerDetail {
   outcomes: (Outcome & { trade_date: string; rating: Rating; rating_ko: string })[]
   orders: Order[]
   timeline: { date: string; rating: Rating }[]
+  market: Market
+  /** universe.sector_of (data/universe/sectors.csv); null when the file has no sector for it */
+  sector: string | null
+  /** KRX from the suffix, US from the KIS exchange cache; null when neither says */
+  exchange: string | null
+  holding: TickerHolding | null
+  /** memos and sell reviews read back from the recorded text, oldest first (no model call) */
+  thesis_checks: ThesisCheck[]
+  /** US only, from the cache scripts/refresh_earnings.py writes; reference only (never a decision input) */
+  earnings: { date: string | null; date_to: string | null; source: string | null; fetched: string | null } | null
+  earnings_note_ko: string
+}
+
+/** The 보유 tab: the paper book's row for the ticker, and the partial sells since entry. */
+export interface TickerHolding extends Omit<PositionRow, 'name'> {
+  as_of: string | null
+  partial_sales: { date: string; quantity: number; price: number | null; order_id: string }[]
+}
+
+export interface ThesisCheck {
+  trade_date: string
+  recorded_at: string
+  rating: Rating
+  rating_ko: string
+  decider: string | null
+  kind: 'memo' | 'review'
+  /** review: its action (Hold 논지 유지 · Trim 축소 · Exit 청산); memo: no verdict */
+  verdict: 'keep' | 'trim' | 'exit' | 'memo'
+  verdict_ko: string
+  /** review: conditions met / checked; memo: null / its invalidation count */
+  met: number | null
+  total: number
+  checks: { condition: string; met: boolean | null; evidence: string | null }[]
+  // memo
+  thesis?: string
+  invalidation?: string[]
+  price?: number | null
+  target?: number | null
+  downside?: number | null
+  horizon?: string | null
+  exit_plan?: string | null
+  // review
+  action?: 'Hold' | 'Trim' | 'Exit'
+  trim_to_pct?: number | null
+  reasons?: string[]
+  reasons_ko?: string[]
+  reasoning?: string
 }
 
 /** GET /api/performance/series: one day of the paper book (6-A). Percentages are fractions. */

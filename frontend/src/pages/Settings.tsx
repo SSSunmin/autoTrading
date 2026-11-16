@@ -198,7 +198,7 @@ function ModePanel({ market, state, onChanged }: { market: Market; state: Tradin
             : <AgentSegmentedControl value={execution} onChange={(v) => setExecution(v as 'auto' | 'manual')} options={EXECUTIONS} />}
         </div>
         {account === 'live' && state.account_mode === 'paper' && <div className="muted">모의투자 → 실거래는 모의 판정을 통과해야 서버가 받습니다(409) — 성과 화면의 실거래 전환 모달을 쓰세요.</div>}
-        <div className="toolbar" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
+        <div className="toolbar form-row" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
           <AgentTextField label="관리자" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
           <AgentTextField label="사유" placeholder="변경 이력에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} style={{ minWidth: '28rem' }} />
           {state.admin_token_required && <AgentTextField label="관리자 토큰" type="password" value={token} onChange={(e) => setToken(e.target.value)} />}
