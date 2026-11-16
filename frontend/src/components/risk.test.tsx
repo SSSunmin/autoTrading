@@ -51,7 +51,7 @@ describe('modeBadge', () => {
     expect(modeBadge(DD).text).toBe('● 정지 · 시스템(−20% 드로다운) · 재가동 필요')
   })
   it('running keeps the server label', () => {
-    expect(modeBadge(state({ running: true, mode: 'auto', label_ko: '국내 자동 매매 실행 중' }))).toEqual({ variant: 'live', text: '● 국내 자동 매매 실행 중' })
+    expect(modeBadge(state({ running: true, mode: 'auto', label_ko: '국내 실거래 · 자동 실행 중' }))).toEqual({ variant: 'live', text: '● 국내 실거래 · 자동 실행 중' })
   })
 })
 

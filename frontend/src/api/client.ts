@@ -1,5 +1,5 @@
 import type {
-  BookEvents, DataStatus, Decision, ExceptionAction, ExceptionActionResult, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
+  BookEvents, CapitalAccount, CapitalInfo, CapitalPreview, CapitalResult, DataStatus, ModelSettings, UniverseKind, Decision, ExceptionAction, ExceptionActionResult, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
   ResumePreview, ResumeResult, RulesSettings, RunRow, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
 } from './types'
 
@@ -66,6 +66,10 @@ export const api = {
   events: (market: Market, limit = 50) => get<BookEvents>('/api/events', { market, limit }),
   resumePreview: (market: Market, resetPeak: boolean) => get<ResumePreview>('/api/trading/resume-preview', { market, reset_peak: resetPeak }),
   rules: (market: Market) => get<RulesSettings>('/api/settings/rules', { market }),
+  capital: (market: Market) => get<CapitalInfo>('/api/capital', { market }),
+  capitalPreview: (market: Market, params: { account: CapitalAccount; amount?: number; universe: UniverseKind; tickers?: string }) =>
+    get<CapitalPreview>('/api/capital/preview', { ...params, market }),
+  model: (market: Market) => get<ModelSettings>('/api/model', { market }),
   mode: (market: Market) => get<TradingState>('/api/trading/mode', { market }),
   halt: (body: { operator: string; reason: string; keep_exits: boolean; scope: 'all' | Market }) => post<HaltResult>('/api/trading/halt', body),
   resume: (body: { operator: string; reason: string; scope: 'all' | Market; reset_peak?: boolean }, adminToken?: string) =>
@@ -75,6 +79,10 @@ export const api = {
   /** The exception queue (docs/10 D7): REVIEW rerun · hold · dismiss, an order exception retry_next · dismiss_order. */
   exceptionAction: (market: Market, orderId: string, body: { action: ExceptionAction; operator: string; reason: string }, adminToken?: string) =>
     post<ExceptionActionResult>(`/api/exceptions/${encodeURIComponent(orderId)}/action?market=${market}`, body, adminToken),
+  /** Capital (docs/10 D5): paper — a new starting cash with no order yet, else a cash flow at today's close; live —
+   *  stored only (no live order path). */
+  setCapital: (market: Market, body: { account: CapitalAccount; amount: number; operator: string; reason: string }, adminToken?: string) =>
+    post<CapitalResult>(`/api/capital?market=${market}`, body, adminToken),
   /** The account axis only (docs/10 D4). Paper → live is taken only when the server's gate is eligible, with `confirmed`. */
   setAccount: (body: { operator: string; account_mode: 'paper' | 'live'; reason: string; market: Market; confirmed: boolean }, adminToken?: string) =>
     post<{ state: TradingState; note: string | null }>('/api/trading/mode', body, adminToken),

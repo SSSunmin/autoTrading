@@ -471,6 +471,8 @@ export interface MarketSummary extends MarketInfo {
   as_of: string | null
   equity: number | null
   initial_cash: number | null
+  /** starting cash + cash flows (capital_set, docs/10 D5) */
+  capital: number | null
   day_return: number | null
   drawdown: number | null
   positions: number | null
@@ -527,6 +529,9 @@ export interface Criterion {
 export interface RulesSettings {
   screen_rules: RuleRow[]
   screen_params: Record<string, number | string>
+  /** the screen per market: the US differs by its preset only (screening.us_preset) */
+  screen_params_by_market: Record<Market, Record<string, number | string>>
+  regime_index: Record<Market, { benchmark: string; name_ko: string }>
   risk_rules: RuleRow[]
   auto_rules: RuleRow[]
   auto_by_market: Record<Market, Record<string, number | string>>
@@ -656,6 +661,10 @@ export interface Positions {
   /** vs the previous close; null off a trading day or before the first fill */
   day_return: number | null
   initial_cash: number
+  /** starting cash + the cash flows to as_of (capital_set while running) */
+  capital: number
+  cash_flows: { date: string; amount: number }[]
+  small_account: boolean
   cash: number
   holdings_value: number
   equity: number
@@ -778,6 +787,9 @@ export interface PaperProgress {
   min_weeks: number
   judge_date: string | null
   initial_cash: number
+  /** starting cash + cash flows to as_of (capital_set while running) */
+  capital: number
+  cash_flows: { date: string; amount: number }[]
   eligible: boolean
   counts: Record<PaperStatus, number>
   summary_ko: string
@@ -790,8 +802,79 @@ export interface PaperProgress {
   drawdown: { current: number; min: number; min_date: string | null } | null
   limits: { max_drawdown: number; dd_halve: number; dd_stop: number }
   go_live: {
-    capital: number; capital_source_ko: string; auto_order_max: number; auto_daily_order_cap: number
+    capital: number; capital_source: 'live' | 'paper'; capital_source_ko: string; auto_order_max: number; auto_daily_order_cap: number
     daily_loss_limit: number; daily_loss_amount: number; other_markets_ko: string[]; note_ko: string
   }
   expected: PaperExpected | null
+}
+
+/** GET /api/capital (docs/10 D5): both accounts' capital replayed from capital_set operations. */
+export type CapitalAccount = 'paper' | 'live'
+export interface CapitalSetBy { at: string; operator: string; role: string; reason: string }
+export interface CapitalInfo {
+  market: Market
+  market_ko: string
+  currency: 'KRW' | 'USD'
+  paper: { account: 'paper'; label_ko: string; amount: number; start: number; source: 'record' | 'default'; set: CapitalSetBy | null; small_account: boolean }
+  live: { account: 'live'; label_ko: string; amount: number | null; source: 'record' | 'unset'; set: CapitalSetBy | null; small_account: boolean | null }
+  cash_flows: ({ date: string; amount: number; pending: boolean } & Partial<CapitalSetBy>)[]
+  /** what a paper change does now: no order yet → a new starting cash, else a cash flow at today's close */
+  next_paper_change: 'start' | 'flow'
+  next_paper_change_ko: string
+  small_threshold: number
+  max_amount: number
+  unit: number
+  account_mode: CapitalAccount
+  admin_token_required: boolean
+  note_ko: string
+}
+export interface CapitalResult {
+  replayed: boolean
+  change: 'start' | 'flow' | 'live'
+  change_ko?: string
+  flow: number | null
+  effective_from: string | null
+  capital: CapitalInfo
+  result_ko: string
+}
+export type UniverseKind = 'loop' | 'index' | 'custom'
+export interface PreviewRule { id: string; label_ko: string; setting_ko: string; amount: number | null; value_ko: string; note_ko: string; warn: boolean }
+export interface PreviewName { ticker: string; name: string | null; price: number }
+export interface CapitalPreview {
+  market: Market
+  currency: 'KRW' | 'USD'
+  account: CapitalAccount
+  account_ko: string
+  amount: number
+  small_account: boolean
+  small_threshold: number
+  as_of: string
+  universe: { id: UniverseKind; label_ko: string; label: string; size: number; priced: number; missing: string[]; missing_count: number; sector_ready: number; name_ready: number }
+  buyable: number
+  none_buyable: boolean
+  cheapest: PreviewName | null
+  over_order_cap: PreviewName[]
+  over_order_cap_count: number
+  rules: PreviewRule[]
+  note_ko: string
+}
+/** GET /api/model: config.LLM, read only. */
+export interface ModelSettings {
+  decider: 'rule' | 'llm'
+  decider_ko: string
+  decider_id: string
+  model: string | null
+  effort: string | null
+  max_tokens: number | null
+  timeout: number | null
+  max_calls_per_run: number | null
+  market: Market
+  enabled: boolean
+  /** the LLM trial (TRADING_LLM_TRIAL=1): model decide days in this market and how many are left; null when off */
+  trial: { sessions: number | null; days: string[]; remaining: number | null } | null
+  trial_mode: boolean
+  config: Record<string, unknown>
+  keys: Record<string, boolean>
+  output_language: string
+  note_ko: string
 }

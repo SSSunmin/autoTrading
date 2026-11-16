@@ -15,7 +15,7 @@ const to = (p: string) => `${p}${p.includes('?') ? '&' : '?'}market=US`
 const P: PaperProgress = {
   market: 'KRX', market_ko: '국내', currency: 'KRW', timezone: 'Asia/Seoul', benchmark_name_ko: '코스피',
   started: true, start: '2026-06-08', as_of: '2026-07-24', days: 46, weeks: 6, min_weeks: 8, judge_date: '2026-08-03',
-  initial_cash: 100_000_000, eligible: false, counts: { met: 4, unmet: 1, in_progress: 1 },
+  initial_cash: 100_000_000, capital: 100_000_000, cash_flows: [], eligible: false, counts: { met: 4, unmet: 1, in_progress: 1 },
   summary_ko: '충족 4 · 미충족 1 (REVIEW 결정 비율 상한) · 진행 중 1 (최소 모의 운용 기간(주))', verdict_ko: '전환 불가', weeks_badge_ko: '6/8주',
   criteria: [
     { id: 'min_weeks', label_ko: '최소 모의 운용 기간(주)', threshold: 8, threshold_ko: '≥ 8주', value: 6, value_ko: '6주 (2026-06-08 시작)', status: 'in_progress', status_ko: '진행 중', note_ko: '10일 남음 · 2026-08-03 장 마감 후 판정' },
@@ -33,7 +33,7 @@ const P: PaperProgress = {
   series: [{ date: '2026-06-08', equity: 1e8, drawdown: 0 }, { date: '2026-06-09', equity: 9.5e7, drawdown: -0.05 }],
   drawdown: { current: -0.05, min: -0.05, min_date: '2026-06-09' },
   limits: { max_drawdown: -0.1, dd_halve: -0.1, dd_stop: -0.2 },
-  go_live: { capital: 100_000_000, capital_source_ko: '모의 자본(실거래 자본 입력은 단계 5)', auto_order_max: 30_000_000, auto_daily_order_cap: 100_000_000,
+  go_live: { capital: 100_000_000, capital_source: 'paper', capital_source_ko: '모의 자본(실거래 자본 미설정 — 설정에서 입력)', auto_order_max: 30_000_000, auto_daily_order_cap: 100_000_000,
     daily_loss_limit: -0.02, daily_loss_amount: -2_000_000, other_markets_ko: ['미국'], note_ko: '실주문 경로는 아직 없습니다' },
   expected: {
     reference_only: true, measurement_ko: '2차 실측', variant_ko: '하드 룰 + 국면 필터', start: '2026-06-08', end: '2026-07-24', covered_until: null, error: null,

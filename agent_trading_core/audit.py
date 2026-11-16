@@ -223,19 +223,19 @@ def latest_orders(orders: list[OrderRecord]) -> dict[str, OrderRecord]:
 
 
 class OperationRecord(BaseModel):
-    """One operation on the trading loop: emergency halt, resume, mode or rule change.
+    """One operation on the trading loop: emergency halt, resume, mode or rule change, a capital setting.
 
     The current trading state is never stored; it is replayed from these records (``trading_state``),
     so the state and its audit trail cannot disagree.
     """
 
-    kind: Literal["halt", "resume", "mode_change", "rule_change", "exception_action"]
+    kind: Literal["halt", "resume", "mode_change", "rule_change", "exception_action", "capital_set"]
     at: str = Field(default_factory=_now)
     operator: str
     role: str = Field(description="Authority used: operator / admin / admin(dev, no token) / auto (the executor's own halt)")
     reason: str
     target: str = Field(default="", description="What changed, e.g. 'mode', 'sector_quota.sector_max', an order id "
-                                                "(exception_action). A halt: "
+                                                "(exception_action), 'paper' / 'live' (capital_set). A halt: "
                                                 "'manual' (a person; 'running' before halt-semantics), 'daily_loss' or "
                                                 "'dd_stop' (the executor's own, by system)")
     before: dict = Field(default_factory=dict)
@@ -245,7 +245,8 @@ class OperationRecord(BaseModel):
                                                          "market's log (same at, same reason), else the market")
     effective_from: str | None = Field(default=None, description="A system resume of a daily-loss halt: the trading day "
                                                                  "(YYYY-MM-DD, market time, from 00:00) the halt ended — "
-                                                                 "``at`` is when the line was written, later")
+                                                                 "``at`` is when the line was written, later. A capital "
+                                                                 "set: the market-time day whose close it applies at")
 
 
 class RunRecord(BaseModel):
