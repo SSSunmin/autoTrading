@@ -10,7 +10,8 @@ Stages, for one trading day of the market (default: today in the market's time z
 - ``decide`` (session close + 5 min): KIS incremental refresh (``kis.update_cache``) of the benchmark, the book's
   universe (baseline_krx.SETUPS) and every ticker with an order → today's bar as a provisional row
   (``kis.fetch_today_close``) → the screen as of the day and the rule baseline's decisions (``audit/<market>/``) →
-  ``execution.execute_date`` for the day: the decisions become ``open`` orders filling at the next session's open.
+  the reruns a person asked for on REVIEW exceptions (``answer_reruns``) → ``execution.execute_date`` for the day:
+  the decisions become ``open`` orders filling at the next session's open.
 - ``fill`` (session open + 5 min): refresh the benchmark and the tickers of open orders, today's bar (its Open) as a
   provisional row → ``execute_date`` of the previous session again, which fills its open orders at today's open.
 - ``all``: fill, then decide (a catch-up run after the close).
@@ -57,12 +58,17 @@ from baseline_krx import SETUPS, decide_from_screen, memory_text, screen_day, sc
 from agent_trading_core import agent, kis
 from agent_trading_core.audit import (
     BASELINE_DECIDER,
+    RERUN_OPERATOR,
     AuditLog,
     DecisionRecord,
+    OperationRecord,
+    OrderRecord,
     RunRecord,
     ScreenRun,
     latest_orders,
     market_audit,
+    pending_rerun_marker,
+    pending_reruns,
 )
 from agent_trading_core.config import LLM, MARKETS
 from agent_trading_core.execution import (
@@ -78,6 +84,7 @@ from agent_trading_core.execution import (
     replay,
 )
 from agent_trading_core.files import locked
+from agent_trading_core.rating import RATING_REVIEW
 from agent_trading_core.risk import RiskConfig
 
 STAGES = ("decide", "fill")
@@ -235,6 +242,12 @@ def _run(audit: AuditLog, market: str, stage: str, day: str, cache: Path, client
                         audit.record_decision(r)
                 counts |= {"screened": run.universe_size, "decisions": len(records),
                            "decisions_new": sum(r.ticker not in have for r in records)}
+            # reruns a person asked for on REVIEW exceptions: after the day's decisions, before the executor
+            reran, rerun_notes = answer_reruns(audit, market, day, decider, cache, prices, cfg, llm,
+                                               used=counts.get("llm_calls", 0))
+            for k, v in reran.items():
+                counts[k] = counts.get(k, 0) + v
+            notes += rerun_notes
             checked, moved = check_fill_opens(audit, prices, cfg, prev) if prev else (0, [])
             counts |= {"fill_open_checked": checked, "fill_open_mismatch": len(moved)}
             notes += [f"체결가 ≠ 확정 시가 기준: {m}" for m in moved]
@@ -271,6 +284,13 @@ def default_decider() -> str:
 def rule_fallback(market: str, run: ScreenRun, ticker: str, day: str, reason: str) -> DecisionRecord:
     """The rule baseline's decision for a ticker the model was not asked about, marked ``fallback: rule``. A Hold is
     recorded too (the rule path leaves it out): every target of an llm run has a record saying who decided it."""
+    record = rule_record(market, run, ticker, day)
+    record.settings |= {"fallback": "rule", "fallback_reason": reason}
+    return record
+
+
+def rule_record(market: str, run: ScreenRun, ticker: str, day: str) -> DecisionRecord:
+    """The rule baseline's decision for ``ticker`` from ``run``, a Hold included (a record either way)."""
     text = f"**Rating**: Hold\n\n**근거**: 규칙 결정 없음 — {ticker}는 이 날의 선별 대상 밖입니다."
     record = None
     if any(c.ticker == ticker for c in run.candidates):
@@ -278,7 +298,6 @@ def rule_fallback(market: str, run: ScreenRun, ticker: str, day: str, reason: st
         text = decision.text
     record = record or DecisionRecord(market=market, ticker=ticker, trade_date=day, screen_run_id=run.run_id,
                                       rating="Hold", action="Hold", thesis=text, settings={"decider": BASELINE_DECIDER})
-    record.settings |= {"fallback": "rule", "fallback_reason": reason}
     return record
 
 
@@ -310,15 +329,20 @@ def position_text(ticker: str, book: Book, prices: Prices, calendar: list[str], 
 
 
 def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: Path, prices: Prices,
-                 cfg: PaperConfig, llm=None, *, skip=frozenset(), on_record=None) -> tuple[list[DecisionRecord], dict]:
+                 cfg: PaperConfig, llm=None, *, skip=frozenset(), on_record=None, only: list[str] | None = None,
+                 used: int = 0, deferred: list | None = None) -> tuple[list[DecisionRecord], dict]:
     """The model's decisions of ``day``: a sell review of every holding (at the day's close), then a memo for every
     screened survivor not held, in rank order; tickers in ``skip`` are left out. Past ``LLM["max_calls_per_run"]``
     calls, or without a client or a snapshot, a ticker gets the rule decision (``rule_fallback``). Each record goes
-    to ``on_record`` as soon as it is made, so a crash keeps what was paid for. Returns (records, counts)."""
+    to ``on_record`` as soon as it is made, so a crash keeps what was paid for. Returns (records, counts).
+    ``only``: ask these tickers instead (a holding gets the sell review); ``used``: calls this run made already;
+    ``deferred``: given a list, a ticker that cannot be asked goes there as (ticker, reason), not to the rule."""
     book = replay(list(latest_orders(audit.orders()).values()), prices, cfg, until=day)
     targets = [(agent.HOLDING, t) for t in sorted(book.holdings)]
     targets += [(agent.CANDIDATE, c.ticker) for c in sorted(run.selected, key=lambda c: c.rank or 0)
                 if c.ticker not in book.holdings]
+    if only is not None:
+        targets = [(agent.HOLDING if t in book.holdings else agent.CANDIDATE, t) for t in only]
     targets = [(k, t) for k, t in targets if t not in skip]
     decisions = audit.decisions()
     calendar = prices.calendar(cfg.index)
@@ -334,7 +358,7 @@ def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: 
     records, counts = [], Counter()
     for kind, t in targets:
         cap = LLM["max_calls_per_run"]
-        reason = no_client or (f"max_calls_per_run({cap})" if counts["llm_calls"] >= cap else None)
+        reason = no_client or (f"max_calls_per_run({cap})" if used + counts["llm_calls"] >= cap else None)
         snap = None
         if reason is None:
             try:
@@ -350,6 +374,9 @@ def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: 
                             if kind == agent.HOLDING else None)
             except Exception as e:  # one ticker's prompt cannot be built: it alone gets the rule decision
                 reason = f"prep: {type(e).__name__}: {e}"[:200]
+        if reason is not None and deferred is not None:
+            deferred.append((t, reason))
+            continue
         if reason is not None:
             record = rule_fallback(market, run, t, day, reason)
             counts["llm_fallback"] += 1
@@ -374,6 +401,100 @@ def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: 
         if on_record:
             on_record(record)
     return records, {k: int(v) for k, v in counts.items()}
+
+
+REVIEW_REASON = "등급을 읽을 수 없어 주문하지 않았습니다"      # the executor's text for a REVIEW order (execution._place)
+
+
+def answer_reruns(audit: AuditLog, market: str, day: str, decider: str, cache: Path, prices: Prices, cfg: PaperConfig,
+                  llm=None, used: int = 0) -> tuple[dict, list[str]]:
+    """The reruns a person asked for on REVIEW exceptions (``audit.pending_reruns``), answered by ``day``'s decide
+    after the day's own decisions and before the executor runs. An exception of an earlier decision day is decided
+    again as of ``day`` from the screen that surfaced it, by the day's ``decider``: a new ``DecisionRecord`` dated
+    ``day`` (``settings.rerun_of`` = the order id, ``attempt``), so the executor places it like any decision of the
+    day — the REVIEW order's id already has its exception line, and the executor never orders an id twice. When the
+    day already decided that ticker, that decision is the answer (no second one). Then the stage's marker
+    (``OperationRecord`` exception_action, operator ``RERUN_OPERATOR``) and a closing line of the REVIEW order: off
+    the queue. A REVIEW again goes back on it as the day's REVIEW order, written here with the rerun count carried
+    (the executor would start it at 0), so the API's cap of two keeps counting. Nothing is changed in place.
+
+    An llm rerun past ``LLM["max_calls_per_run"]`` (``used`` = the calls the day's decisions made), without a client
+    or a prompt is put off to the next decide, never decided by the rule instead: a person asked for the model again.
+    Same with an exception of ``day`` itself (its id is the order the answer would get), and with a ticker the day's
+    llm run gave the rule instead (``fallback``). Returns (counts, notes)."""
+    pending = pending_reruns(audit.orders())
+    if not pending:
+        return {}, []
+    counts, notes = Counter(reruns_pending=len(pending)), []
+    decisions, operations = audit.decisions(), audit.operations()
+    screens = {r.run_id: r for r in audit.screens()}
+    current = latest_orders(audit.orders())
+    for o in pending:
+        n = o.reruns
+        if (marker := pending_rerun_marker(operations, o)) is not None:      # answered, not closed: a crash between
+            audit.record_order(o.model_copy(update={"exception_resolved": True,
+                                                    "reason": f"{o.reason} · {marker.reason}"}))
+            counts["reruns_done"] += 1
+            continue
+        why, answer = None, next((d for d in decisions if d.settings.get("rerun_of") == o.order_id
+                                  and d.settings.get("attempt") == n), None)
+        same_day = None if answer is not None or o.trade_date >= day else next(
+            (d for d in reversed(decisions) if d.source == "agent" and (d.ticker, d.trade_date) == (o.ticker, day)), None)
+        asked = next((d for d in reversed(decisions) if d.source == "agent" and d.rating == RATING_REVIEW
+                      and (d.ticker, d.trade_date) == (o.ticker, o.trade_date)), None)
+        run = screens.get(asked.screen_run_id) if asked is not None and asked.screen_run_id else None
+        if answer is None and o.trade_date >= day:
+            why = "결정일 당일 — 다음 결정일에"
+        elif answer is None and same_day is not None and same_day.settings.get("fallback"):
+            # the day's llm run gave it the rule instead (cap, no key, no prompt): not an answer, and asking now
+            # would make a second decision of the ticker that day
+            why = f"그날 결정이 규칙 대체({same_day.settings.get('fallback_reason', 'fallback')}) — 다음 결정일에"
+        elif answer is None and same_day is not None:
+            answer = same_day
+        elif answer is None and run is None:
+            why = f"원 선별 {asked.screen_run_id if asked else '(결정 없음)'} 없음"
+        elif answer is None:
+            tag = {"rerun_of": o.order_id, "attempt": n}
+
+            def keep(r: DecisionRecord, tag: dict = tag) -> None:
+                r.settings |= tag
+                audit.record_decision(r)
+
+            if decider == "llm":
+                put_off: list = []
+                made, c = agent_decide(audit, market, run, day, cache, prices, cfg, llm, on_record=keep,
+                                       only=[o.ticker], used=used, deferred=put_off)
+                used += c.get("llm_calls", 0)
+                counts.update(c)
+                answer = made[0] if made else None
+                why = put_off[0][1] if put_off else None
+            else:
+                answer = rule_record(market, run, o.ticker, day)
+                keep(answer)
+            if answer is not None:
+                decisions.append(answer)            # a second reservation of the ticker takes it as the day's
+        if answer is None:
+            counts["reruns_deferred"] += 1
+            notes.append(f"재실행 미룸 {o.order_id} ({n}회째): {why}")
+            continue
+        oid = f"paper-{day}-{o.ticker}"
+        if not answer.tradeable and oid not in current:
+            current[oid] = OrderRecord(order_id=oid, ticker=o.ticker, trade_date=day, market=market, quantity=0,
+                                       side="Sell" if answer.action == "Sell" else "Buy", status="exception",
+                                       exception_kind="review", reruns=n, retries=o.retries,
+                                       reason=f"{REVIEW_REASON} · 재실행 {n}회째 결과")
+            audit.record_order(current[oid])
+        text = f"재실행 {n}회째 → {day} {answer.rating}" + (" (그날 결정)" if answer is same_day else "")
+        audit.record_operation(OperationRecord(
+            kind="exception_action", operator=RERUN_OPERATOR, role="auto", reason=text, market=market,
+            target=o.order_id, before={"exception_action": "rerun", "reruns": n},
+            after={"action": "rerun", "attempt": n, "pending": False,
+                   "decision": {"trade_date": day, "rating": answer.rating, "decider": answer.settings.get("decider"),
+                                "same_day": answer is same_day}}))
+        audit.record_order(o.model_copy(update={"exception_resolved": True, "reason": f"{o.reason} · {text}"}))
+        counts["reruns_done"] += 1
+        notes.append(f"{o.order_id}: {text}")
+    return dict(counts), notes
 
 
 def dry_run(market: str, day: str, data: Path, llm=None) -> int:

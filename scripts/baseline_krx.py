@@ -163,11 +163,14 @@ def screen_section(run: ScreenRun, ticker: str) -> agent.Section | None:
     return agent.Section("other", "선별 규칙 결과", "\n".join(lines), summary)
 
 
+MEMORY_SOURCE_KO = {"agent": "매니저", "human": "사람"}   # memory_text: every other source (rule, baseline) is 규칙
+
+
 def memory_text(ticker: str, day: str, decisions: list[DecisionRecord], closed=(), n: int = 5) -> str:
     """The ticker's last decisions before ``day`` and its closed trades (``execution.ClosedTrade``): what was decided
     and how it ended."""
     past = [d for d in decisions if d.ticker == ticker and d.trade_date < day][-n:]
-    lines = [f"- {d.trade_date} {d.rating} ({'규칙' if decision_source(d) != 'agent' else '매니저'}): "
+    lines = [f"- {d.trade_date} {d.rating} ({MEMORY_SOURCE_KO.get(decision_source(d), '규칙')}): "
              + " ".join(d.thesis.split())[:200] for d in past]
     lines += [f"- 청산 {c.entry_date}→{c.exit_date} {c.pnl_pct:+.1%} ({c.reason})" for c in closed if c.ticker == ticker]
     return "\n".join(lines) or "지난 결정 없음."
