@@ -3,7 +3,9 @@
 Run:  python -m agent_trading_core.scheduler --markets KRX,US
       python -m agent_trading_core.scheduler --markets KRX,US --plan 6     # the next 6 stage times, then exit
 
-It sleeps until the next stage time of each market — ``daily_loop.stage_time`` from ``MARKETS[...]["session"]`` and
+It sleeps until the next stage time of each market's next session (``market_calendar.is_session``: no wake on a
+weekend or a listed holiday) — ``daily_loop.stage_time`` from ``MARKETS[...]["session"]`` (a US half day's early
+close from the calendar) and
 ``timezone`` (daylight saving follows the zone, the host's time zone is never read), the stages in
 ``daily_loop.SCHEDULED`` — then runs every stage that is due (``daily_loop.run_due``, the same call as
 ``daily_loop.py`` without ``--date`` from cron): the day whose stage time has come while the market's next session
@@ -29,7 +31,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from agent_trading_core import kis
+from agent_trading_core import kis, market_calendar
 from agent_trading_core.audit import market_audit
 from agent_trading_core.config import MARKETS
 
@@ -50,13 +52,14 @@ def daily_loop():
 
 
 def plan(dl, markets: list[str], after: datetime, n: int) -> list[tuple[datetime, str, str]]:
-    """The next ``n`` stage times after ``after``: (aware time, market, stage), earliest first."""
+    """The next ``n`` stage times after ``after``: (aware time, market, stage), earliest first — sessions only
+    (``market_calendar.is_session``: weekends and listed holidays have none)."""
     out = []
     for m in markets:
         local = after.astimezone(ZoneInfo(MARKETS[m]["timezone"])).date()
-        for i in range(-1, n + 8):          # weekends and the time-zone shift fit in the margin
+        for i in range(-1, n + 14):         # weekends, the longest closure and the time-zone shift fit in the margin
             d = local + timedelta(days=i)
-            if d.weekday() < 5:
+            if market_calendar.is_session(m, d):
                 out += [(t, m, s) for s in dl.SCHEDULED[m] if (t := dl.stage_time(m, s, d)) > after]
     return sorted(out)[:n]
 
@@ -107,7 +110,11 @@ def serve(dl, markets: list[str], data: Path, client, stop: list, clock=None, sl
             wake = next_wake(dl, markets, clock(), data)
         except Exception as e:          # an unreadable runs.jsonl: printed, the process keeps its schedule
             print(f"다음 깨어남 계산 오류 — {type(e).__name__}: {e}"[:500], flush=True)
-            wake = plan(dl, markets, clock(), 1)[0][0]
+            try:
+                wake = plan(dl, markets, clock(), 1)[0][0]
+            except Exception as e:      # an unreadable calendar file too: printed, tried again in RETRY
+                print(f"일정 계산 오류 — {type(e).__name__}: {e}"[:500], flush=True)
+                wake = clock() + RETRY
         print(f"다음 깨어남 {wake.astimezone(kis.KST):%Y-%m-%d %H:%M} KST", flush=True)
         while not stop and (left := (wake - clock()).total_seconds()) > 0:
             sleep(min(NAP, left))
