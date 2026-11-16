@@ -5,9 +5,11 @@ to the same state, two writers at once losing nothing, and TRADING_STORE choosin
 import json
 import sqlite3
 import threading
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from agent_trading_core import audit as audit_module
 from agent_trading_core.audit import (
     AuditLog,
     CandidateRecord,
@@ -32,6 +34,23 @@ ALL_TABLES = [*TABLES.values(), "screen_candidates", "schema_version"]
 @pytest.fixture
 def sqlite_store(monkeypatch):
     monkeypatch.setenv("TRADING_STORE", "sqlite")
+
+
+@pytest.fixture
+def ticking_clock(monkeypatch):
+    """The records' clock (audit._now) one second later on every read. A record parsed without its own time takes
+    the time of the parse (``Field(default_factory=_now)``), so two replays of such a line differ whenever a second
+    boundary falls between them — under load, now and then (flaky-sqlite). Here it always does."""
+    t0, reads = datetime(2026, 11, 16, tzinfo=UTC), []
+
+    class Ticking(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            reads.append(1)
+            return t0 + timedelta(seconds=len(reads))
+
+    monkeypatch.setattr(audit_module, "datetime", Ticking)
+    return reads
 
 
 def _order(oid="o1", status="open", market="KRX", **kw):
@@ -205,12 +224,13 @@ def test_a_sqlite_append_writes_no_file_and_moves_the_stamp_a_reader_watches(sql
 
 def _legacy_book(root):
     """Files as the JSONL store left them: KRX's from before the market axis (no market field), KRX's and US's own,
-    and one line written twice."""
+    and one line written twice. Every line carries its own time, as every line in data/audit/ does: a line without
+    one takes the parse's time, and the two replays --verify compares would differ by a second (ticking_clock)."""
     root.mkdir(parents=True)
     (root / "KRX").mkdir()
     (root / "US").mkdir()
     old = json.dumps({"order_id": "old", "ticker": "005930.KS", "trade_date": "2026-05-29", "side": "Buy",
-                      "quantity": 3, "status": "open"})
+                      "quantity": 3, "status": "open", "placed_at": "2026-05-29T06:00:00Z"})
     (root / "orders.jsonl").write_text(old + "\n", encoding="utf-8")
     twice = _order("k", status="filled", filled_quantity=1, filled_price=1.0).model_dump_json()
     (root / "KRX" / "orders.jsonl").write_text(f"{twice}\n\n{twice}\n", encoding="utf-8")    # a blank line too
@@ -219,7 +239,24 @@ def _legacy_book(root):
 
 
 @pytest.mark.unit
-def test_loading_keeps_the_read_order_and_repeated_lines_and_loading_again_adds_nothing(tmp_path, capsys):
+def test_verify_compares_the_same_book_however_the_clock_moves_between_its_two_replays(sqlite_store, tmp_path,
+                                                                                      ticking_clock, capsys):
+    """The flaky-sqlite failure made certain: a second between the jsonl and the sqlite replay. The legacy book's
+    lines all carry their time, so the clock is never read for them and the replays are the same bytes."""
+    _legacy_book(tmp_path / "audit")                                 # (its records are made, and stamped, here)
+    made = len(ticking_clock)
+    assert migrate.main(["--data-dir", str(tmp_path), "--verify"]) == 0
+    assert "재생 동일: 모든 시장" in capsys.readouterr().out
+    assert len(ticking_clock) == made                                # no line took the parse's time
+    times = {"orders": "placed_at", "screens": "recorded_at"}
+    for path in (tmp_path / "audit").rglob("*.jsonl"):
+        for line in filter(str.strip, path.read_text(encoding="utf-8").splitlines()):
+            assert times[path.stem] in json.loads(line), (path, line)
+
+
+@pytest.mark.unit
+def test_loading_keeps_the_read_order_and_repeated_lines_and_loading_again_adds_nothing(tmp_path, ticking_clock,
+                                                                                         capsys):
     _legacy_book(tmp_path / "audit")
     before = {p: p.read_bytes() for p in (tmp_path / "audit").rglob("*.jsonl")}
     assert migrate.main(["--data-dir", str(tmp_path), "--verify"]) == 0
@@ -351,7 +388,7 @@ def test_two_writers_at_once_lose_and_duplicate_nothing(sqlite_store, tmp_path):
 
 @pytest.mark.unit
 def test_back_from_jsonl_loads_from_scratch_and_reloading_onto_the_old_database_is_refused(tmp_path, monkeypatch,
-                                                                                          capsys):
+                                                                                          ticking_clock, capsys):
     monkeypatch.setenv("TRADING_STORE", "sqlite")
     market_audit(tmp_path / "a" / "audit", "KRX").record_order(_order("s"))        # written in sqlite
     back = tmp_path / "b"                                                           # the export as the audit root

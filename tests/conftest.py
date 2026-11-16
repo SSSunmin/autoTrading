@@ -21,3 +21,29 @@ def _no_llm_trial(monkeypatch):
     """TRADING_LLM_TRIAL=1 in the shell would make the loop's default decider the model, and a test that passes no
     fake client would call it for real: every test starts with the trial off (tests/test_llm_trial.py turns it on)."""
     monkeypatch.delenv("TRADING_LLM_TRIAL", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _failed_runs(monkeypatch):
+    """Every loop run recorded as failed in the test, with its error (flaky-sqlite: a loop test failed once on
+    ``assert 'failed' == 'ok'`` and the run's reason was lost). Shown in the report of a test that fails."""
+    from agent_trading_core.audit import AuditLog
+
+    seen: list[str] = []
+    real = AuditLog.record_run
+
+    def record_run(self, run):
+        if run.status == "failed":
+            seen.append(f"{run.market} {run.stage} {run.trade_date}: {run.error}")
+        return real(self, run)
+
+    monkeypatch.setattr(AuditLog, "record_run", record_run)
+    return seen
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = (yield).get_result()
+    seen = getattr(item, "funcargs", {}).get("_failed_runs")
+    if report.when == "call" and report.failed and seen:
+        report.sections.append(("loop runs recorded as failed", "\n".join(seen)))

@@ -3,12 +3,17 @@
 import errno
 import logging
 import os
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Windows refuses the move (WinError 5) while a scanner or an indexer has the file just read or written open:
+# 13 ms until it went through, 1 refusal in 18,020 moves under load (flaky-sqlite). Tried again for 0.5 s at most.
+REPLACE_TRIES, REPLACE_WAIT = 10, 0.05
 
 
 def replace_file(path, write: Callable[[str], None]) -> None:
@@ -17,14 +22,21 @@ def replace_file(path, write: Callable[[str], None]) -> None:
     A reader sees the old file or the new one, never a partial write, and two
     writers of the same path (tool calls run concurrently) never share a temp file.
     ``write`` receives the temp path and creates the file, so it gets the usual
-    permissions. The file is a cache: where another reader holds it open (Windows),
-    the old one stays and the write is skipped.
+    permissions. The file is a cache: where another reader holds it open (Windows)
+    past ``REPLACE_TRIES`` moves, the old one stays and the write is skipped.
     """
     path = Path(path)
     temp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         write(str(temp))
-        os.replace(temp, path)
+        for attempt in range(REPLACE_TRIES):
+            try:
+                os.replace(temp, path)
+                break
+            except PermissionError:
+                if attempt == REPLACE_TRIES - 1:
+                    raise
+                time.sleep(REPLACE_WAIT)
     except PermissionError as exc:
         temp.unlink(missing_ok=True)
         logger.warning("Kept the cached %s; it is in use (%s)", path.name, exc)
