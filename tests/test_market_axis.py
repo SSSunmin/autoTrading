@@ -213,7 +213,8 @@ def test_market_us_serves_the_us_book_and_krx_stays_empty(api, tmp_path):
     assert api.get("/api/positions").json()["currency"] == "KRW"
 
     r = api.get("/api/paper", params={"market": "US"})
-    assert r.status_code == 404 and "paper_backtest.py --market US" in r.json()["detail"]
+    assert r.status_code == 404 and r.json()["detail"].startswith("미국 포트폴리오 실측 결과가 아직 없습니다")
+    assert ".py" not in r.json()["detail"]                                # no script path on the user's screen
     out = tmp_path / "data" / "results" / "paper_us"
     out.mkdir(parents=True)
     (out / "summary.json").write_text(json.dumps({"market": "US", "currency": "USD", "variants": {

@@ -1,7 +1,8 @@
-import { useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 
 import { money } from '../api/client'
 import type { Market, PerformanceSeries, RatingBar, SeriesRow, Settlement } from '../api/types'
+import { useWidth } from '../hooks/useWidth'
 import { AlphaBar, RatingBadge } from './common'
 import { afterLeave, areaPath, linePath, nearestIndex, PC, scale, sharePct, signPct, stepIndex, tickLabel, tone, type Scale } from './perfLogic'
 
@@ -13,12 +14,12 @@ type Day = (d: string | null | undefined) => string
 /** a day picked by the pointer, or by the keyboard (`byKey` — kept when the pointer leaves) */
 type Pick = (i: number | null, byKey?: boolean) => void
 
-function Axes({ s, share = false }: { s: Scale; share?: boolean }) {
+function Axes({ s, w, share = false }: { s: Scale; w: number; share?: boolean }) {
   return (
     <g className="axes">
       {s.ticks.map((t) => (
         <g key={t} className={t === 0 ? 'tick zero' : 'tick'}>
-          <line x1={PC.left} y1={s.y(t)} x2={PC.width - PC.right} y2={s.y(t)} />
+          <line x1={PC.left} y1={s.y(t)} x2={w - PC.right} y2={s.y(t)} />
           <text x={PC.left - 6} y={s.y(t) + 4} textAnchor="end">{tickLabel(t, s.ticks, share)}</text>
         </g>
       ))}
@@ -28,10 +29,10 @@ function Axes({ s, share = false }: { s: Scale; share?: boolean }) {
 }
 
 /** The chosen day: a guide line, the values as dots and a small box (the readout line says the same in text). */
-function Marker({ s, i, points, label }: { s: Scale; i: number | null; points: { v: number | null; cls: string }[]; label: string }) {
+function Marker({ s, w, i, points, label }: { s: Scale; w: number; i: number | null; points: { v: number | null; cls: string }[]; label: string }) {
   if (i == null) return null
   const x = s.x(i)
-  const right = x > PC.width * 0.7
+  const right = x + 8 + 210 > w                                       // the 210px box would leave the chart
   return (
     <g className="marker">
       <line x1={x} y1={PC.top} x2={x} y2={PC.bottom} />
@@ -46,6 +47,8 @@ function Marker({ s, i, points, label }: { s: Scale; i: number | null; points: {
 
 interface ChartProps {
   title: string
+  /** the svg's measured width (useWidth): the viewBox is drawn in px */
+  box: readonly [RefObject<SVGSVGElement | null>, number]
   rows: SeriesRow[]
   sel: number | null
   onSel: Pick
@@ -54,10 +57,10 @@ interface ChartProps {
 }
 
 /** One chart: focusable, pointer and keyboard pick a day. */
-function Chart({ title, rows, sel, onSel, aria, children }: ChartProps) {
+function Chart({ title, box: [ref, w], rows, sel, onSel, aria, children }: ChartProps) {
   const move = (e: PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
-    if (r.width > 0) onSel(nearestIndex(((e.clientX - r.left) / r.width) * PC.width, rows.length))
+    if (r.width > 0) onSel(nearestIndex(((e.clientX - r.left) / r.width) * w, rows.length, w))
   }
   const key = (e: KeyboardEvent<SVGSVGElement>) => {
     const next = stepIndex(sel, e.key, rows.length)
@@ -68,7 +71,7 @@ function Chart({ title, rows, sel, onSel, aria, children }: ChartProps) {
   return (
     <figure className="perf-chart">
       <figcaption>{title}</figcaption>
-      <svg className="perf-svg" viewBox={`0 0 ${PC.width} ${PC.height}`} role="img" aria-label={aria} tabIndex={0}
+      <svg ref={ref} className="perf-svg" viewBox={`0 0 ${w} ${PC.height}`} role="img" aria-label={aria} tabIndex={0}
         onPointerMove={move} onFocus={() => onSel(sel ?? rows.length - 1, true)} onKeyDown={key}>
         {children}
       </svg>
@@ -79,16 +82,17 @@ function Chart({ title, rows, sel, onSel, aria, children }: ChartProps) {
 export function NavChart({ s: series, sel, onSel, day }: { s: PerformanceSeries; sel: number | null; onSel: Pick; day: Day }) {
   const rows = series.rows
   const nav = rows.map((r) => r.nav_pct), base = rows.map((r) => r.baseline_pct)
-  const sc = scale(rows, [...nav, ...base])
+  const box = useWidth<SVGSVGElement>(PC.width)
+  const sc = scale(rows, [...nav, ...base], [0], box[1])
   const last = rows[rows.length - 1]
   const at = sel == null ? null : rows[sel]
   return (
-    <Chart title="수익률 — 모의 장부(시간 가중 NAV) vs 백테스트 재현" rows={rows} sel={sel} onSel={onSel}
+    <Chart title="수익률 — 모의 장부(시간 가중 NAV) vs 백테스트 재현" box={box} rows={rows} sel={sel} onSel={onSel}
       aria={`수익률 ${day(series.start)} ~ ${day(last.date)}: 모의 ${signPct(last.nav_pct, 2)}, 백테스트 ${signPct(last.baseline_pct, 2)}`}>
-      <Axes s={sc} />
+      <Axes s={sc} w={box[1]} />
       <path className="line-base" d={linePath(base, sc)} />
       <path className="line-nav" d={linePath(nav, sc)} />
-      <Marker s={sc} i={sel} label={at ? `${at.date.slice(5)} 모의 ${signPct(at.nav_pct, 2)} · 백테스트 ${signPct(at.baseline_pct, 2)}` : ''}
+      <Marker s={sc} w={box[1]} i={sel} label={at ? `${at.date.slice(5)} 모의 ${signPct(at.nav_pct, 2)} · 백테스트 ${signPct(at.baseline_pct, 2)}` : ''}
         points={[{ v: at?.nav_pct ?? null, cls: 'dot-nav' }, { v: at?.baseline_pct ?? null, cls: 'dot-base' }]} />
     </Chart>
   )
@@ -97,16 +101,17 @@ export function NavChart({ s: series, sel, onSel, day }: { s: PerformanceSeries;
 export function DrawdownChart({ s: series, sel, onSel, day }: { s: PerformanceSeries; sel: number | null; onSel: Pick; day: Day }) {
   const rows = series.rows
   const dd = rows.map((r) => r.drawdown_pct)
-  const sc = scale(rows, dd)
+  const box = useWidth<SVGSVGElement>(PC.width)
+  const sc = scale(rows, dd, [0], box[1])
   const low = Math.min(...dd)
   const at = sel == null ? null : rows[sel]
   return (
-    <Chart title="드로다운 — NAV의 누적 최고 대비" rows={rows} sel={sel} onSel={onSel}
+    <Chart title="드로다운 — NAV의 누적 최고 대비" box={box} rows={rows} sel={sel} onSel={onSel}
       aria={`드로다운 ${day(series.start)} ~ ${day(rows[rows.length - 1].date)}: 최저 ${signPct(low, 2)}, 현재 ${signPct(dd[dd.length - 1], 2)}`}>
-      <Axes s={sc} />
+      <Axes s={sc} w={box[1]} />
       <path className="dd-area" d={areaPath(dd, sc)} />
       <path className="dd-line" d={linePath(dd, sc)} />
-      <Marker s={sc} i={sel} label={at ? `${at.date.slice(5)} 드로다운 ${signPct(at.drawdown_pct, 2)}` : ''}
+      <Marker s={sc} w={box[1]} i={sel} label={at ? `${at.date.slice(5)} 드로다운 ${signPct(at.drawdown_pct, 2)}` : ''}
         points={[{ v: at?.drawdown_pct ?? null, cls: 'dot-dd' }]} />
     </Chart>
   )
@@ -115,19 +120,20 @@ export function DrawdownChart({ s: series, sel, onSel, day }: { s: PerformanceSe
 export function ExposureChart({ s: series, sel, onSel, day }: { s: PerformanceSeries; sel: number | null; onSel: Pick; day: Day }) {
   const rows = series.rows
   const ex = rows.map((r) => r.exposure_pct)
-  const sc = scale(rows, ex, [0, 1])
+  const box = useWidth<SVGSVGElement>(PC.width)
+  const sc = scale(rows, ex, [0, 1], box[1])
   const n = rows.length
-  const w = Math.max(1, Math.min(14, ((PC.width - PC.left - PC.right) / Math.max(n, 1)) * 0.7))
+  const w = Math.max(1, Math.min(14, ((box[1] - PC.left - PC.right) / Math.max(n, 1)) * 0.7))
   const at = sel == null ? null : rows[sel]
   return (
-    <Chart title="노출 — 보유 평가액 / 평가액" rows={rows} sel={sel} onSel={onSel}
+    <Chart title="노출 — 보유 평가액 / 평가액" box={box} rows={rows} sel={sel} onSel={onSel}
       aria={`노출 ${day(series.start)} ~ ${day(rows[n - 1].date)}: 현재 ${sharePct(ex[n - 1], 0)}, 최고 ${sharePct(Math.max(...ex), 0)}`}>
-      <Axes s={sc} share />
+      <Axes s={sc} w={box[1]} share />
       {ex.map((v, i) => v > 0 && (
         <rect key={rows[i].date} className={i === sel ? 'bar-ex on' : 'bar-ex'} x={+(sc.x(i) - w / 2).toFixed(1)} y={sc.y(v)}
           width={+w.toFixed(1)} height={+(sc.y(0) - sc.y(v)).toFixed(1)} />
       ))}
-      <Marker s={sc} i={sel} label={at ? `${at.date.slice(5)} 노출 ${sharePct(at.exposure_pct, 1)} · 현금 ${sharePct(at.cash_pct, 1)}` : ''} points={[]} />
+      <Marker s={sc} w={box[1]} i={sel} label={at ? `${at.date.slice(5)} 노출 ${sharePct(at.exposure_pct, 1)} · 현금 ${sharePct(at.cash_pct, 1)}` : ''} points={[]} />
     </Chart>
   )
 }

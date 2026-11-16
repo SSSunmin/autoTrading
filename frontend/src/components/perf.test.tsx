@@ -35,6 +35,13 @@ describe('chart scale', () => {
     expect([s.x(0), s.x(2)]).toEqual([PC.left, PC.width - PC.right])
     expect(s.x(1)).toBe((PC.left + PC.width - PC.right) / 2)
   })
+  it('draws on the rendered width: days across it, the y axis and the margins in px unchanged (12px labels stay 12px)', () => {
+    const s = scale(ROWS, ROWS.map((r) => r.nav_pct), [0], 430)
+    expect([s.x(0), s.x(2)]).toEqual([PC.left, 430 - PC.right])
+    expect([s.y(0.1), s.y(-0.05)]).toEqual([PC.top, PC.bottom])
+    expect(nearestIndex(430 - PC.right, 3, 430)).toBe(2)
+    expect(nearestIndex(430 - PC.right, 3)).toBe(1)                     // read on the 1000 default it would be the middle day
+  })
   it('a flat series still gets a range; one day sits in the middle', () => {
     const one = scale([ROWS[0]], [0])
     expect(one.y(0)).toBeGreaterThan(PC.top)

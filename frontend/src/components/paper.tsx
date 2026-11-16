@@ -5,6 +5,7 @@ import { AgentAlert, AgentButton, AgentCheckbox, AgentModal, AgentTextField } fr
 import { announceStateChange, api, money, pct } from '../api/client'
 import type { Market, PaperExpectedRow, PaperProgress, PaperViolation, TradingState } from '../api/types'
 import { areaPolygon, CHART, diffText, drawdownChart, modalReady, PILL_CLASS, polyline, verdictTone } from '../pages/paperLogic'
+import { useWidth } from '../hooks/useWidth'
 import { ExitReasonBadge } from './parts'
 
 /** Screen 8 parts (docs/02 v0.7 §11-1, mockup Paper · PaperUS · PaperGo · PaperGoUS). Every verdict, count and
@@ -44,16 +45,18 @@ export function Scorecard({ p }: { p: PaperProgress }) {
 }
 
 export function DrawdownSvg({ p, day }: { p: PaperProgress; day: Day }) {
-  const chart = drawdownChart(p.series, p.limits)
+  const [ref, w] = useWidth<SVGSVGElement>(CHART.width)
+  const chart = drawdownChart(p.series, p.limits, w)
+  const lowLeft = chart.low != null && chart.low.x + 8 + 100 > w            // its ~95px label would leave the chart
   const dd = p.drawdown
   const aria = dd ? `모의 기간 드로다운: 최저 ${dd.min_date ? `${day(dd.min_date)} ` : ''}${pct(dd.min)}, 현재 ${pct(dd.current)}, 기준 ${pct(p.limits.max_drawdown, 0)}`
     : '모의 기간 드로다운: 기록 없음'
   return (
-    <svg className="dd-svg" viewBox={`0 0 ${CHART.width} ${CHART.height}`} role="img" aria-label={aria}>
+    <svg ref={ref} className="dd-svg" viewBox={`0 0 ${w} ${CHART.height}`} role="img" aria-label={aria}>
       {chart.rules.map((r) => (
         <g key={r.value} className={`rule ${r.kind}`}>
-          <line x1="0" y1={r.y} x2={CHART.width} y2={r.y} />
-          <text x={CHART.width - 2} y={r.y - 3} textAnchor="end">{r.label}</text>
+          <line x1="0" y1={r.y} x2={w} y2={r.y} />
+          <text x={w - 2} y={r.y - 3} textAnchor="end">{r.label}</text>
         </g>
       ))}
       {chart.points.length > 0 && <polygon className="dd-area" points={areaPolygon(chart.points)} />}
@@ -61,7 +64,7 @@ export function DrawdownSvg({ p, day }: { p: PaperProgress; day: Day }) {
       {chart.low && (
         <g className="dd-low">
           <circle cx={chart.low.x} cy={chart.low.y} r="4" />
-          <text x={chart.low.x + (chart.low.x > CHART.width * 0.8 ? -8 : 8)} y={chart.low.y + 4} textAnchor={chart.low.x > CHART.width * 0.8 ? 'end' : 'start'}>
+          <text x={chart.low.x + (lowLeft ? -8 : 8)} y={chart.low.y + 4} textAnchor={lowLeft ? 'end' : 'start'}>
             {chart.low.date.slice(5)} 최저 {pct(chart.low.drawdown)}
           </text>
         </g>

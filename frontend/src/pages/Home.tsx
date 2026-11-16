@@ -102,7 +102,7 @@ export default function Home() {
           {/* halted: the halt rows stand even on a day with no orders (the empty state would hide them) */}
           {halted && orders.data?.length === 0 ? orderTable([]) : (
             <Loaded state={orders} empty="오늘 주문 기록이 없습니다"
-              emptyDescription="모의 실행(scripts/paper_execute.py)이 이 결정일을 처리하면 결정마다 방향·수량·체결가·상태·적용 룰이 여기에 기록됩니다.">
+              emptyDescription="모의 실행이 이 결정일을 처리하면 결정마다 방향·수량·체결가·상태·적용 룰이 여기에 기록됩니다.">
               {orderTable}
             </Loaded>
           )}
