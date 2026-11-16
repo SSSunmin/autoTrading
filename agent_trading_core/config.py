@@ -155,6 +155,20 @@ LLM = {
     # (replayed from the decision records, scripts/daily_loop.default_decider), then the rule again. None: no end.
     "trial": False,
     "trial_sessions": 5,
+    # DART financials and filings in a KRX ticker's snapshot (agent.fundamentals_section, docs/01 §12-8). False: the
+    # user message and PROMPT_VERSION stay as they are; True: the "재무 스냅샷(DART)" section and prompt fm-v2.
+    "fundamentals": False,
+}
+
+
+# DART OpenAPI (agent_trading_core/dart.py): the key is DART_API_KEY from the environment or the .env. Requests are
+# capped at 20,000 a day as a rule (status 020); a cold ticker takes about eight, a cached one none or two.
+DART = {
+    "timeout": 20,                       # seconds per request
+    "corp_codes_max_age_days": 7,        # corpCode.xml is downloaded again after this
+    "periodic_days": 500,                # the periodic-report list looks this far back (five reports: 4 quarters + Q3)
+    "recent_days": 30,                   # the filings listed in the section
+    "disclosures_max": 10,
 }
 
 

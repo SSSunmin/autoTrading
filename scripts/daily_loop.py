@@ -248,10 +248,10 @@ def _run(audit: AuditLog, market: str, stage: str, day: str, cache: Path, client
             if decider == "llm":
                 # what an earlier run already decided is not asked again (cost, and the same answer for a rerun)
                 made, llm_counts = agent_decide(audit, market, run, day, cache, prices, cfg, llm, skip=have,
-                                                on_record=audit.record_decision)
+                                                on_record=audit.record_decision, notes=notes)
                 counts |= {"screened": run.universe_size, "decisions": len(have) + len(made),
                            "decisions_new": len(made)} | llm_counts
-                notes.append(f"결정자 {LLM['model']} (effort {LLM['effort']}, {agent.PROMPT_VERSION})")
+                notes.append(f"결정자 {LLM['model']} (effort {LLM['effort']}, {agent.prompt_version()})")
             else:
                 records = [r for c in run.candidates if (r := decide_from_screen(market, run, c.ticker, day)[1])]
                 for r in records:
@@ -377,13 +377,14 @@ def position_text(ticker: str, book: Book, prices: Prices, calendar: list[str], 
 
 def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: Path, prices: Prices,
                  cfg: PaperConfig, llm=None, *, skip=frozenset(), on_record=None, only: list[str] | None = None,
-                 used: int = 0, deferred: list | None = None) -> tuple[list[DecisionRecord], dict]:
+                 used: int = 0, deferred: list | None = None, notes: list | None = None) -> tuple[list[DecisionRecord], dict]:
     """The model's decisions of ``day``: a sell review of every holding (at the day's close), then a memo for every
     screened survivor not held, in rank order; tickers in ``skip`` are left out. Past ``LLM["max_calls_per_run"]``
     calls, or without a client or a snapshot, a ticker gets the rule decision (``rule_fallback``). Each record goes
     to ``on_record`` as soon as it is made, so a crash keeps what was paid for. Returns (records, counts).
     ``only``: ask these tickers instead (a holding gets the sell review); ``used``: calls this run made already;
-    ``deferred``: given a list, a ticker that cannot be asked goes there as (ticker, reason), not to the rule."""
+    ``deferred``: given a list, a ticker that cannot be asked goes there as (ticker, reason), not to the rule.
+    ``notes``: given a list, a line per reason the DART section had no figures (``LLM["fundamentals"]`` on)."""
     book = replay(list(latest_orders(audit.orders()).values()), prices, cfg, until=day)
     targets = [(agent.HOLDING, t) for t in sorted(book.holdings)]
     targets += [(agent.CANDIDATE, c.ticker) for c in sorted(run.selected, key=lambda c: c.rank or 0)
@@ -402,16 +403,21 @@ def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: 
             client = agent.make_client()
         except Exception as e:      # no key: every target gets the rule decision, said so in each record
             no_client = f"client: {type(e).__name__}: {e}"[:200]
-    records, counts = [], Counter()
+    records, counts, no_fundamentals = [], Counter(), {}
+    # one DART client a run: its cache counts, and a failed network or key is not tried again per ticker
+    dart_client = agent.dart.DartClient(cache / "dart") if agent.fundamentals_on() and market == "KRX" else None
     for kind, t in targets:
         cap = LLM["max_calls_per_run"]
         reason = no_client or (f"max_calls_per_run({cap})" if used + counts["llm_calls"] >= cap else None)
         snap = None
         if reason is None:
             try:
+                prices_now = agent.market_section(kis.read_cache(kis.cache_path(t, cache)), day, t in provisional)
+                fundamentals, why = agent.fundamentals_section(market, t, day, prices_now.close, cache, dart_client)
+                if why:
+                    no_fundamentals.setdefault(why, []).append(t)
                 snap = agent.Snapshot(t, day, MARKETS[market]["currency"], [
-                    agent.market_section(kis.read_cache(kis.cache_path(t, cache)), day, t in provisional),
-                    *[s for s in [screen_section(run, t)] if s], portfolio])
+                    prices_now, *[s for s in [screen_section(run, t), fundamentals] if s], portfolio])
             except Exception as e:  # no price file, no row before the day
                 reason = f"snapshot: {type(e).__name__}: {e}"[:200]
         if reason is None:
@@ -447,6 +453,8 @@ def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: 
         records.append(record)
         if on_record:
             on_record(record)
+    if notes is not None:
+        notes += [f"재무 데이터 없음({why}) {len(ts)}종목: {', '.join(ts)}" for why, ts in no_fundamentals.items()]
     return records, {k: int(v) for k, v in counts.items()}
 
 
@@ -563,7 +571,7 @@ def dry_run(market: str, day: str, data: Path, llm=None) -> int:
         lines = [f"가격 폴백 확인 실패: {type(e).__name__}: {e}"[:200]]
     for line in lines:
         print(line, file=sys.stderr)
-    print(f"{market} {day} 드라이런 — {LLM['model']} effort {LLM['effort']} {agent.PROMPT_VERSION}")
+    print(f"{market} {day} 드라이런 — {LLM['model']} effort {LLM['effort']} {agent.prompt_version()}")
     print("| 종목 | 종류 | 등급 | 매도 사유 | 확신도 | REVIEW·폴백 | 입력 | 출력 | 캐시 읽기 | 캐시 쓰기 | 초 | 비용 $ |")
     print("|---|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|")
     for r in records:

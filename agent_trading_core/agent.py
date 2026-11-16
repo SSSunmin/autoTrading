@@ -36,6 +36,7 @@ import anthropic
 import pandas as pd
 from stockstats import wrap
 
+from agent_trading_core import dart
 from agent_trading_core.audit import DecisionRecord, EvidenceItem
 from agent_trading_core.config import LLM
 from agent_trading_core.rating import RATING_REVIEW
@@ -52,6 +53,7 @@ from agent_trading_core.structured import validate_text
 
 ROOT = Path(__file__).resolve().parents[1]
 PROMPT_VERSION = "fm-v1"        # bump with any change to SYSTEM_PROMPT or the user message layout
+FUNDAMENTALS_PROMPT_VERSION = "fm-v2"   # LLM["fundamentals"]: SYSTEM_PROMPT + FUNDAMENTALS_PROMPT, the DART section
 
 # USD per million tokens, claude-opus-5-5 (2026-10 price list): input, output, cache read, 5-minute cache write
 PRICE = {"input_tokens": 4.00, "output_tokens": 20.00, "cache_read_input_tokens": 0.20,
@@ -93,6 +95,16 @@ SYSTEM_PROMPT = """당신은 롱온리 주식 재량 운용 펀드매니저다. 
 - 가격 필드는 숫자 하나다. 범위나 퍼센트를 쓰지 않는다.
 """
 
+# Appended to SYSTEM_PROMPT when LLM["fundamentals"] is on. Fixed text: no date or ticker, so the cache prefix holds.
+FUNDAMENTALS_PROMPT = """
+## 재무 스냅샷(DART)
+- 국내 종목에는 사용자 메시지에 "재무 스냅샷(DART)" 섹션이 붙는다. 실적·재무 점검과 밸류에이션에서 재무 숫자는 이 섹션의 값만 쓰고, 인용할 때 보고서 기간과 접수번호를 함께 적는다.
+- 섹션은 기준일 전날까지 접수된 정기보고서와 공시만 담는다. 그 뒤에 나온 실적이나 공시를 안다고 가정하지 않는다.
+- 섹션의 PER·PBR·EPS·BPS는 섹션에 적힌 정의(주식 수 출처, 순이익·자본 범위)대로만 해석한다. 섹션에 없는 배수나 추정 실적은 지어내지 않고, 필요하면 섹션 숫자에서 어떻게 계산했는지 적는다.
+- 공시는 제목과 접수일만 주어진다. 제목에서 내용을 추측해 숫자를 만들지 않는다.
+- 섹션이 "재무 데이터 없음"이면 그 사유를 밝히고, 재무 숫자는 "스냅샷에 없음"으로 쓴다.
+"""
+
 CANDIDATE = "candidate"
 HOLDING = "holding"
 REQUEST_LINE = {CANDIDATE: "요청: 신규 후보 — 투자 메모(InvestmentMemo)",
@@ -131,6 +143,35 @@ class Snapshot:
     def evidence(self, ref: str | None = None) -> list[EvidenceItem]:
         return [EvidenceItem(source=s.source, summary=s.summary, as_of=self.as_of, ref=ref or s.title)
                 for s in self.sections]
+
+
+def fundamentals_on() -> bool:
+    return bool(LLM.get("fundamentals"))
+
+
+def prompt_version() -> str:
+    return FUNDAMENTALS_PROMPT_VERSION if fundamentals_on() else PROMPT_VERSION
+
+
+def system_prompt() -> str:
+    return SYSTEM_PROMPT + FUNDAMENTALS_PROMPT if fundamentals_on() else SYSTEM_PROMPT
+
+
+def fundamentals_section(market: str, ticker: str, day: str, close: float | None, cache_dir: str | Path,
+                         client: dart.DartClient | None = None) -> tuple[Section | None, str | None]:
+    """(the "재무 스냅샷(DART)" section, why its figures are missing or None). No section with the flag off or outside
+    KRX (no US source yet). A failure (no key, the request limit, the network, no corp code, a refused answer) is a
+    section that says so, never a stopped decision; the reason is the run record's note."""
+    if not fundamentals_on() or market != "KRX":
+        return None, None
+    try:
+        text, summary = dart.build(client or dart.DartClient(Path(cache_dir) / "dart"), ticker, day, close)
+        return Section("fundamentals", "재무 스냅샷(DART)", text, summary), None
+    except dart.DartError as e:      # the status code or the exception's class beside the kind, never the key
+        why = e.kind if e.kind in (dart.NO_KEY, dart.NO_CORP) else str(e)
+    except Exception as e:           # an answer of an unexpected shape, a cache that cannot be written
+        why = f"처리 오류 {type(e).__name__}"
+    return Section("fundamentals", "재무 스냅샷(DART)", dart.missing_text(why), f"재무 데이터 없음({why})"), why
 
 
 def market_section(frame: pd.DataFrame, as_of: str, provisional: bool = False, look_back: int = 20) -> Section:
@@ -201,7 +242,7 @@ def request(kind: str, user_text: str) -> dict:
     return {
         "model": LLM["model"],
         "max_tokens": LLM["max_tokens"],
-        "system": [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+        "system": [{"type": "text", "text": system_prompt(), "cache_control": {"type": "ephemeral"}}],
         "messages": [{"role": "user", "content": user_text}],
         "output_config": {"effort": LLM["effort"],
                           "format": {"type": "json_schema", "schema": anthropic.transform_schema(SCHEMA[kind])}},
@@ -255,7 +296,7 @@ def _keep(raw_dir: Path, out: Outcome, user_text: str, message, error) -> Path:
     raw_dir.mkdir(parents=True, exist_ok=True)
     path = raw_dir / f"{out.ticker}-{out.kind}-{datetime.now():%H%M%S%f}.json"
     body = {"ticker": out.ticker, "kind": out.kind, "model": LLM["model"], "effort": LLM["effort"],
-            "prompt_version": PROMPT_VERSION, "seconds": out.seconds, "review": out.review, "usage": out.usage,
+            "prompt_version": prompt_version(), "seconds": out.seconds, "review": out.review, "usage": out.usage,
             "user": user_text,
             "response": message.to_dict() if message is not None else None,
             "error": None if error is None else {"type": type(error).__name__, "message": str(error)[:2000]}}
@@ -296,7 +337,7 @@ REVIEW_RATING = {SellAction.HOLD: "Hold", SellAction.TRIM: "Underweight", SellAc
 
 
 def settings() -> dict:
-    return {"decider": LLM["model"], "effort": LLM["effort"], "prompt_version": PROMPT_VERSION}
+    return {"decider": LLM["model"], "effort": LLM["effort"], "prompt_version": prompt_version()}
 
 
 def to_record(out: Outcome, *, market: str, day: str, screen_run_id: str | None,
