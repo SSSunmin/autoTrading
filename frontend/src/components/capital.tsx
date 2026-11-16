@@ -47,9 +47,9 @@ function CapitalForm({ info, onDone }: { info: CapitalInfo; onDone: (msg: string
     <div className="stack-gap" style={{ gap: '1rem' }}>
       <CapitalRows info={info} />
       <div className="toolbar" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
-        <AgentSegmentedControl size="sm" value={account} onChange={(v) => setAccount(v as CapitalAccount)}
+        <AgentSegmentedControl value={account} onChange={(v) => setAccount(v as CapitalAccount)}
           options={[{ value: 'paper', label: '모의투자 자본' }, { value: 'live', label: '실거래 자본' }]} />
-        <AgentTextField label={`${account === 'paper' ? '모의투자' : '실거래'} 자본 (${m === 'KRX' ? '원' : '달러'})`} size="sm"
+        <AgentTextField label={`${account === 'paper' ? '모의투자' : '실거래'} 자본 (${m === 'KRX' ? '원' : '달러'})`}
           inputMode="decimal" value={text[account]} onChange={(e) => setText((t) => ({ ...t, [account]: e.target.value }))} />
         <AgentButton variant="primary" disabled={problem != null} onClick={() => setOpen(true)}>변경…</AgentButton>
         <span className="muted cap-next">{account === 'paper' ? `지금 바꾸면: ${info.next_paper_change_ko}` : '저장 · 미리보기만 (실주문 없음)'}</span>
@@ -57,9 +57,9 @@ function CapitalForm({ info, onDone }: { info: CapitalInfo; onDone: (msg: string
       {problem && <div className="muted cap-problem">{problem}</div>}
       <div className="toolbar" style={{ marginBottom: 0 }}>
         <span className="muted">유니버스</span>
-        <AgentSegmentedControl size="sm" value={universe} onChange={(v) => setUniverse(v as UniverseKind)} options={UNIVERSES} />
+        <AgentSegmentedControl value={universe} onChange={(v) => setUniverse(v as UniverseKind)} options={UNIVERSES} />
       </div>
-      {universe === 'custom' && <AgentTextarea label="종목 코드 (쉼표 · 줄바꿈)" size="sm" rows={2} value={tickers}
+      {universe === 'custom' && <AgentTextarea label="종목 코드 (쉼표 · 줄바꿈)" rows={2} value={tickers}
         placeholder={m === 'KRX' ? '6자리 코드.KS' : '티커'} onChange={(e) => setTickers(e.target.value)} />}
       {preview.error && <AgentAlert tone="error" title="미리보기 실패">{preview.error}</AgentAlert>}
       {preview.data && <PreviewBody p={preview.data} />}
@@ -172,9 +172,9 @@ export function CapitalModalBody({ info, account, amount, form, set, error }: {
         <ul>{changePreview(info, account, amount, fmt).map((t) => <li key={t}>{t}</li>)}</ul>
       </div>
       <div className="xa-sec"><b>감사 로그에 남는 문구</b><code className="xa-log">{capitalAuditLine(info, account, amount, form.operator, form.reason, fmt)}</code></div>
-      <AgentTextField label="관리자" size="sm" placeholder="이름 또는 ID" value={form.operator} onChange={(e) => set({ operator: e.target.value })} />
-      <AgentTextField label="사유 (필수)" size="sm" placeholder="감사 로그에 남습니다" value={form.reason} onChange={(e) => set({ reason: e.target.value })} />
-      {info.admin_token_required && <AgentTextField label="관리자 토큰" size="sm" type="password" value={form.token} onChange={(e) => set({ token: e.target.value })} />}
+      <AgentTextField label="관리자" placeholder="이름 또는 ID" value={form.operator} onChange={(e) => set({ operator: e.target.value })} />
+      <AgentTextField label="사유 (필수)" placeholder="감사 로그에 남습니다" value={form.reason} onChange={(e) => set({ reason: e.target.value })} />
+      {info.admin_token_required && <AgentTextField label="관리자 토큰" type="password" value={form.token} onChange={(e) => set({ token: e.target.value })} />}
       {!ready && <div className="muted xa-need">관리자 · 사유{info.admin_token_required ? ' · 토큰' : ''}을 적어야 변경 버튼이 켜집니다</div>}
       {error && <AgentAlert tone="error" title="변경 실패">{error}</AgentAlert>}
     </div>

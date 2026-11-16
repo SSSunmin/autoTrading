@@ -53,7 +53,7 @@ export function PeriodControl({ value, onChange }: { value: Period; onChange: (p
   return (
     <div className="period-ctl" role="group" aria-label="기간">
       <span className="muted">기간</span>
-      <AgentSegmentedControl size="sm" value={value} onChange={(v) => onChange(v as Period)} options={PERIODS} />
+      <AgentSegmentedControl value={value} onChange={(v) => onChange(v as Period)} options={PERIODS} />
     </div>
   )
 }

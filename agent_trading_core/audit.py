@@ -20,6 +20,7 @@ DecisionRecord points at its entry by (ticker, trade_date).
 from __future__ import annotations
 
 import json
+import re
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -153,6 +154,16 @@ def decision_source(d: DecisionRecord) -> str:
     if d.settings.get("decider") == BASELINE_DECIDER:
         return "baseline"
     return d.source
+
+
+_TRIM = re.compile(r"trim to ([0-9.eE+-]+)% of equity")
+
+
+def trim_target(d: DecisionRecord) -> float | None:
+    """A sell review's Trim target as a fraction of equity (0.1 = 10%), or None. ``agent.to_record`` writes a Trim as
+    rating Underweight with ``position_sizing`` "trim to {trim_to_pct}% of equity" — the record has no field of its own."""
+    m = _TRIM.fullmatch(d.position_sizing or "")
+    return float(m.group(1)) / 100 if m else None
 
 
 class PlanSide(BaseModel):

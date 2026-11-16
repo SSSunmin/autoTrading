@@ -18,10 +18,14 @@ One run executes one trading day (docs/02 화면 3 실행 흐름):
    Every order has a decision behind it (``unexplained_orders``, ``PAPER_TRADING.max_unexplained_orders``).
 5. each agent decision of the date becomes one order keyed ``paper-<date>-<ticker>``, so a second run writes
    nothing: Buy/Overweight buy names not held, sized by ``risk.size_targets`` under the guards (drawdown,
-   daily loss, regime, Protections); Sell/Underweight sell the whole holding; Hold places nothing; REVIEW
-   is an exception. A buy over the per-order cap ``auto_order_max`` is shrunk to the most whole shares under it
+   daily loss, regime, Protections); Sell sells the whole holding, Underweight part of it (``_sell_size``: a sell
+   review's Trim down to its target weight, a memo's Underweight ``underweight_sell_fraction`` of the shares); Hold
+   places nothing; REVIEW is an exception. A buy over the per-order cap ``auto_order_max`` is shrunk to the most whole shares under it
    (docs/10 D1; none left: blocked ``cap_zero``); one past the session's ``auto_daily_order_cap`` is an exception.
-   Sells reduce risk and are not capped. Each sized buy keeps its 원안 vs 최종 (``OrderRecord.plan``).
+   Sells reduce risk and are not capped. Each sized buy keeps its 원안 vs 최종 (``OrderRecord.plan``); a partial-sell
+   order its holding before (``proposed``, the whole of it) and the part sold (``final``). A partial sell keeps the
+   rest's entry date, average price and so its stop line and trailing high; only a full close sets Protections
+   (Cooldown, StoplossGuard, LowProfit).
    An exception a person asked to retry (``retry_next``) goes through the guards and caps again here under its
    original order id (``retry_on`` = this date): at most its original quantity, sized on its decision day's buy list
    at this date's scale and caps (a zero-quantity exception: the day's target)
@@ -77,6 +81,7 @@ from agent_trading_core.audit import (
     PlanSide,
     latest_orders,
     trading_state,
+    trim_target,
 )
 from agent_trading_core.config import AUTO_EXECUTION, KRX_MARKET, MARKETS, PAPER_TRADING, auto_execution
 from agent_trading_core.files import locked
@@ -344,6 +349,7 @@ class Holding:
     quantity: int
     avg_price: float                         # fill prices (slippage in), commission not
     entry_date: str
+    sold: int = 0                            # shares partial sells took off it (the rest keeps entry date and price)
 
 
 @dataclass(frozen=True)
@@ -355,6 +361,7 @@ class ClosedTrade:
     entry_price: float
     exit_price: float
     reason: str = "exit_signal"              # risk.ExitReason: a rule exit's rule, else the agent's sell (등급 하향)
+    full: bool = True                        # False: a partial sell, the rest still held — it sets no Protections
 
     @property
     def pnl(self) -> float:
@@ -405,10 +412,13 @@ def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: s
             return
         book.cash += sell_proceeds(q, px, cfg)
         reason = o.rules_applied[0] if o.order_id.endswith(EXIT_SUFFIX) and o.rules_applied else "exit_signal"
-        book.closed.append(ClosedTrade(o.ticker, held.entry_date, o.fill_date, q, held.avg_price, px, reason))
+        book.closed.append(ClosedTrade(o.ticker, held.entry_date, o.fill_date, q, held.avg_price, px, reason,
+                                       full=q == held.quantity))
         held.quantity -= q
         if held.quantity == 0:
             del book.holdings[o.ticker]
+        else:
+            held.sold += q
 
     def flow(day: str, value: float) -> None:
         """The flows dated on or before ``day`` go in at its close; the units grow by what they bought."""
@@ -467,10 +477,10 @@ def _protections(closed: list[ClosedTrade], calendar: list[str], risk: RiskConfi
 def _replay_protections(closed: list[ClosedTrade], calendar: list[str],
                         risk: RiskConfig) -> tuple[Protections, list[tuple[str, str, str]]]:
     """The Protections after ``closed``, and every lock a close set as (exit date, ticker, text): Cooldown on each
-    close, StoplossGuard and LowProfit when they fire."""
+    full close, StoplossGuard and LowProfit when they fire. A partial sell is no close here: the name is still held."""
     p = Protections(risk)
     fired: list[tuple[str, str, str]] = []
-    for t in sorted(closed, key=lambda t: t.exit_date):
+    for t in sorted((t for t in closed if t.full), key=lambda t: t.exit_date):
         texts = p.record(TradeOutcome(t.ticker, _day_index(calendar, t.exit_date), t.reason, t.pnl_pct))
         fired.append((t.exit_date, t.ticker, f"Cooldown: {t.ticker} 청산 후 {risk.cooldown_days}거래일 재진입 금지"))
         fired += [(t.exit_date, t.ticker, x) for x in texts]
@@ -721,6 +731,24 @@ def _intervention(text: str) -> Intervention:
     return Intervention(rule=rule, note=text)
 
 
+def _sell_size(held: int, trim: float | None, fraction: float, ref: float | None, equity: float,
+               market: str) -> tuple[int, str]:
+    """An Underweight's shares to sell, and the reason's words. ``trim`` (a sell review's Trim, ``audit.trim_target``):
+    down to that weight of the decision day's equity at its close — the shares over it, rounded down (0: all; at or
+    under it: 0, no order). Else ``fraction`` of the holding rounded down, at least one share. ``ref`` is the close
+    (needed for a Trim only)."""
+    if trim is None:
+        qty = int(held * fraction + EPS) or held
+        text = f"Underweight 보유의 {fraction:.0%} 매도 ({held}주 → {held - qty}주)" if qty < held \
+            else f"Underweight 보유 {held}주 전량 매도" + (" (1주 보유)" if held == 1 else "")
+        return qty, text
+    now = held * ref / equity if equity > 0 else 0.0
+    keep = trim * equity / ref
+    qty = min(held, max(0, int(held - keep + EPS)))
+    return qty, (f"Trim 비중 {now:.1%} → {trim:.1%} ({held}주 → {held - qty}주) · "
+                 f"평가 {_short(held * ref, market)} → {_short((held - qty) * ref, market)}")
+
+
 def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderRecord], prices: Prices,
            risk: RiskConfig, cfg: PaperConfig, calendar: list[str],
            base: tuple[str, float] | None = None, retries: dict[str, OrderRecord] | None = None,
@@ -800,8 +828,30 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
                                        reason="보유 없음 — 매도할 수량이 없습니다 (공매도하지 않음)"))
                 continue
             # risk-reducing: the auto-execution caps limit buys only
-            out.append(OrderRecord(**base, side="Sell", quantity=held.quantity, status="open",
-                                   reason=f"모의 주문: 보유 {held.quantity}주 전량 매도 · 다음 거래일 시가"))
+            if d.rating == "Sell":
+                out.append(OrderRecord(**base, side="Sell", quantity=held.quantity, status="open",
+                                       reason=f"모의 주문: 보유 {held.quantity}주 전량 매도 · 다음 거래일 시가"))
+                continue
+            trim = trim_target(d)
+            if trim is not None and ref is None:
+                out.append(OrderRecord(**base, side="Sell", quantity=0, status="exception",
+                                       exception_kind="vendor_unavailable",
+                                       reason=f"결정일 {date} 종가 없음 — 목표 비중까지의 수량을 정할 수 없어 주문하지 않았습니다"))
+                continue
+            qty, text = _sell_size(held.quantity, trim, caps["underweight_sell_fraction"], ref, equity, cfg.market)
+            px = ref or 0.0
+            proposed = PlanSide(side="Sell", weight_pct=held.quantity * px / equity if ref and equity > 0 else None,
+                                qty=held.quantity, amount=held.quantity * px)
+            if qty <= 0:
+                out.append(OrderRecord(**base, side="Sell", quantity=0, status="blocked", rules_applied=["trim_at_target"],
+                                       reason=f"{text} — 줄일 수량 없음 (보유 {held.quantity}주 그대로)",
+                                       plan=OrderPlan(proposed=proposed, final=PlanSide(side="Hold"))))
+                continue
+            out.append(OrderRecord(**base, side="Sell", quantity=qty, status="open",
+                                   reason=f"모의 주문: {text} · 다음 거래일 시가",
+                                   plan=OrderPlan(proposed=proposed, final=PlanSide(
+                                       side="Sell", weight_pct=qty * px / equity if ref and equity > 0 else None,
+                                       qty=qty, amount=qty * px))))
             continue
 
         if d.ticker in book.holdings or d.ticker in pending_buys:
@@ -1088,6 +1138,7 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         gap = last / stop - 1 if last is not None and stop > 0 else None
         rows.append({
             "ticker": h.ticker, "quantity": h.quantity, "avg_price": h.avg_price, "entry_date": h.entry_date,
+            "partial_sold": h.sold,          # shares partial sells (Trim / Underweight) took off this holding
             "last_price": last, "last_date": st["last_date"],
             "market_value": h.quantity * last if last is not None else None,
             "unrealized": (last - h.avg_price) * h.quantity if last is not None else None,
@@ -1125,7 +1176,7 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         "MaxDrawdown": (risk.dd_stop_lock_days,
                         recent([op.after.get("date") or op.at[:10] for op in operations or []
                               if op.kind == "halt" and op.target == "dd_stop"], risk.dd_stop_lock_days)),
-        "Cooldown": (risk.cooldown_days, recent([t.exit_date for t in book.closed], risk.cooldown_days)),
+        "Cooldown": (risk.cooldown_days, recent([t.exit_date for t in book.closed if t.full], risk.cooldown_days)),
         "LowProfit": (risk.low_profit_lookback_days,
                       recent([d for d, _, x in fired if x.startswith("LowProfit")], risk.low_profit_lookback_days)),
     }
@@ -1171,10 +1222,10 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         # orders decided on as_of and every other order filling at their session (the daily cap's scope)
         "today_session": session, "today_buy_amount": buy_amount, "today_sell_amount": sell_amount,
         "today_buy_cap_used": buy_amount / cap if cap > 0 else None,
-        "exits_by_reason": dict(Counter(t.reason for t in book.closed)),
+        "exits_by_reason": dict(Counter(t.reason for t in book.closed if t.full)),   # a partial sell closes nothing
         "closed": [{"ticker": t.ticker, "entry_date": t.entry_date, "exit_date": t.exit_date, "quantity": t.quantity,
                     "entry_price": t.entry_price, "exit_price": t.exit_price, "pnl": t.pnl, "pnl_pct": t.pnl_pct,
-                    "reason": t.reason}
+                    "reason": t.reason, "full": t.full}
                    for t in reversed(book.closed)],
         "limits": {"stop_loss_pct": risk.stop_loss_pct, "dd_halve": risk.dd_halve, "dd_stop": risk.dd_stop,
                    "max_position_pct": risk.max_position_pct, "max_gross_pct": risk.max_gross_pct,
@@ -1428,7 +1479,7 @@ def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], o
         paper={"mean_exposure": sum(r["exposure"] for r in series) / len(series) if series else None,
                "new_buys": sum(o.status in ("filled", "partial") for o in buys),
                "new_buys_open": sum(o.status == "open" for o in buys),
-               "exits_by_reason": dict(Counter(t.reason for t in book.closed if start <= t.exit_date <= as_of)),
+               "exits_by_reason": dict(Counter(t.reason for t in book.closed if t.full and start <= t.exit_date <= as_of)),
                "period_return": nav_by_day.get(series[-1]["date"], series[-1]["equity"]) / cfg.initial_cash - 1
                if series else None,
                "max_drawdown": dd_min, "daily_loss_dates": [d for d, _ in breaches],

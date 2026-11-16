@@ -72,6 +72,7 @@ EXCEPTION_KIND_KO: dict[str, str] = {
 AUTO_RULE_KO: dict[str, str] = {
     "auto_daily_order_cap": "일일 주문 금액 상한", "auto_daily_loss_limit": "일일 손실 한도 (넘으면 자동 정지)",
     "auto_order_max": "주문당 금액 상한", "kill_switch_reset": "재가동 권한", "default_mode": "기본 운용 모드",
+    "underweight_sell_fraction": "Underweight 매도 비율 (보유 대비)",
 }
 
 RISK_RULE_KO: dict[str, str] = {

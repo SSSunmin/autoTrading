@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 import type { Decision, ExceptionItem, OrderPlan } from '../api/types'
 import { ExceptionBody, Interventions, PlanGrid, SourceBadge } from './decisionParts'
 import {
-  SOURCE_VARIANT, actionPreview, decisionInterventions, modalActions, modalVariant, planRows, splitInterventions,
+  SOURCE_VARIANT, actionPreview, decisionInterventions, modalActions, modalVariant, orderWords, planRows, sellSplit,
+  splitInterventions,
 } from './decisionLogic'
 
 const html = (el: ReactElement) => renderToStaticMarkup(el)
@@ -70,6 +71,35 @@ describe('원안 vs 최종 grid', () => {
   it('a decision gathers its orders’ interventions', () => {
     const d = { orders: [{ plan: SHRUNK }, { plan: null }] } as unknown as Decision
     expect(decisionInterventions(d).map((i) => i.rule)).toEqual(['max_position_pct', 'auto_order_max'])
+  })
+})
+
+// the server's plans for sells (tests/test_partial_sell.py, by hand): 999 held, a Trim to 5% sells 499
+const TRIM: OrderPlan = {
+  proposed: { side: 'Sell', weight_pct: 0.0999, qty: 999, amount: 9_990_000 },
+  final: { side: 'Sell', weight_pct: 0.0499, qty: 499, amount: 4_990_000 }, interventions: [],
+}
+const AT_TARGET: OrderPlan = { proposed: TRIM.proposed, final: { side: 'Hold', weight_pct: null, qty: 0, amount: 0 }, interventions: [] }
+const sell = (plan: OrderPlan | null, quantity: number, filled_quantity = 0, side: 'Buy' | 'Sell' = 'Sell') =>
+  ({ side, side_ko: side === 'Sell' ? '매도' : '매수', plan, quantity, filled_quantity })
+
+describe('partial sell on the card', () => {
+  it('a sell that keeps part reads 부분 매도 with what stays, before and after the fill', () => {
+    expect(sellSplit(sell(TRIM, 499))).toEqual({ held: 999, sold: 499, rest: 500 })
+    expect(orderWords(sell(TRIM, 499))).toBe('부분 매도 499주 · 남은 500주')
+    expect(orderWords(sell(TRIM, 499, 499))).toBe('부분 매도 499주 · 남은 500주')
+  })
+  it('a sized sell of the whole holding (Trim to 0%, Underweight of one share) reads as a sale', () => {
+    const all: OrderPlan = { ...TRIM, final: { ...TRIM.proposed } }
+    expect(sellSplit(sell(all, 999))?.rest).toBe(0)
+    expect(orderWords(sell(all, 999, 999))).toBe('매도 999주')
+  })
+  it('a full Sell, a rule exit, a Trim at its target and a buy keep the side and shares', () => {
+    expect(sellSplit(sell(null, 999))).toBeNull()
+    expect(orderWords(sell(null, 999, 999))).toBe('매도 999주')
+    expect(sellSplit(sell(AT_TARGET, 0))).toBeNull()
+    expect(orderWords(sell(AT_TARGET, 0))).toBe('매도 0주')
+    expect(orderWords(sell(SHRUNK, 3000, 3000, 'Buy'))).toBe('매수 3000주')
   })
 })
 

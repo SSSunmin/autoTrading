@@ -131,9 +131,9 @@ export function ExceptionBody({ item, variant, form, set, tokenRequired, error }
         <ul>{actionPreview(item, variant).map((t) => <li key={t}>{t}</li>)}</ul>
       </div>
       <div className="xa-sec"><b>감사 로그에 남는 문구</b><code className="xa-log">{auditLine(item, action, form.operator, form.reason)}</code></div>
-      <AgentTextField label="운영자" size="sm" placeholder="이름 또는 ID" value={form.operator} onChange={(e) => set({ operator: e.target.value })} />
-      <AgentTextField label="처리 사유 (필수)" size="sm" placeholder="감사 로그에 남습니다" value={form.reason} onChange={(e) => set({ reason: e.target.value })} />
-      {tokenRequired && <AgentTextField label="관리자 토큰" size="sm" type="password" value={form.token} onChange={(e) => set({ token: e.target.value })} />}
+      <AgentTextField label="운영자" placeholder="이름 또는 ID" value={form.operator} onChange={(e) => set({ operator: e.target.value })} />
+      <AgentTextField label="처리 사유 (필수)" placeholder="감사 로그에 남습니다" value={form.reason} onChange={(e) => set({ reason: e.target.value })} />
+      {tokenRequired && <AgentTextField label="관리자 토큰" type="password" value={form.token} onChange={(e) => set({ token: e.target.value })} />}
       {!form.reason.trim() && <div className="muted xa-need">사유를 적어야 처리 버튼이 켜집니다</div>}
       {error && <AgentAlert tone="error" title="처리 실패">{error}</AgentAlert>}
     </div>
