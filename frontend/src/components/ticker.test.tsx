@@ -58,11 +58,11 @@ describe('ticker tabs and verdicts', () => {
   })
 
   it('shows the earnings date with its source and fetch day, or the note alone', () => {
-    expect(earningsLine(detail({ earnings: { date: '2026-07-28', date_to: '2026-07-30', source: 'yfinance calendar', fetched: '2026-06-03' },
-      earnings_note_ko: '참고 · 결정 · 주문에 쓰지 않음' }))).toEqual({ date: '2026-07-28 ~ 2026-07-30', sub: 'yfinance calendar · 2026-06-03 조회 · 참고 · 결정 · 주문에 쓰지 않음' })
-    expect(earningsLine(detail({ market: 'KRX', earnings_note_ko: '국내 실적 발표일 미제공' }))).toEqual({ date: null, sub: '국내 실적 발표일 미제공' })
-    expect(earningsLine(detail({ earnings: { date: null, date_to: null, source: 'yfinance calendar', fetched: '2026-06-03' },
-      earnings_note_ko: '출처에 예정일 없음' }))).toEqual({ date: null, sub: 'yfinance calendar · 2026-06-03 조회 · 출처에 예정일 없음' })
+    expect(earningsLine(detail({ earnings: { date: '2026-07-28', date_to: '2026-07-30', source: 'yfinance calendar', fetched: '2026-06-03', error: null, failed: null },
+      earnings_note_ko: '참고 · 결정 · 주문에 쓰지 않음' }))).toEqual({ date: '2026-07-28 ~ 2026-07-30', sub: 'yfinance calendar · 2026-06-03 조회 · 참고 · 결정 · 주문에 쓰지 않음', failed: false })
+    expect(earningsLine(detail({ market: 'KRX', earnings_note_ko: '국내 실적 발표일 미제공' }))).toEqual({ date: null, sub: '국내 실적 발표일 미제공', failed: false })
+    expect(earningsLine(detail({ earnings: { date: null, date_to: null, source: 'yfinance calendar', fetched: '2026-06-03', error: null, failed: null },
+      earnings_note_ko: '출처에 예정일 없음' }))).toEqual({ date: null, sub: 'yfinance calendar · 2026-06-03 조회 · 출처에 예정일 없음', failed: false })
   })
 })
 
@@ -70,9 +70,9 @@ describe('논지 점검 tab', () => {
   it('heads with the latest verdict and lists every record oldest first', () => {
     const out = html(<ThesisPanel checks={[MEMO, TRIM]} market="KRX" />)
     expect(out).toContain('<span class="rating Underweight">축소</span><span class="muted">2026-06-05 검토 · 2개 조건 중 1개 충족</span>')
-    expect(out.indexOf('2026-06-01')).toBeLessThan(out.indexOf('2026-06-05</span><span class="rating'))
+    expect(out.indexOf('2026-06-01')).toBeLessThan(out.indexOf('2026-06-05</span><span class="review-badges'))
     expect(out).toContain('목표 비중 2%')
-    expect(out).toContain('사유 논지 깨짐')
+    expect(out).toContain('<span class="tag sell-reason thesis_broken">논지 깨짐</span>')
     expect(out).toContain('<li class="met"><span class="tag">충족</span> 영업이익률 12% 미만')
     expect(out).toContain('HBM 공급 부족')
     expect(out).toContain('₩14,000')
@@ -109,7 +109,7 @@ describe('보유 tab and header', () => {
   })
 
   it('header carries sector, exchange, holding and the earnings badge, with fallbacks', () => {
-    const us = html(<TickerFacts d={detail({ holding: HOLD, earnings: { date: '2026-07-30', date_to: null, source: 'yfinance calendar', fetched: '2026-06-03' } })} />)
+    const us = html(<TickerFacts d={detail({ holding: HOLD, earnings: { date: '2026-07-30', date_to: null, source: 'yfinance calendar', fetched: '2026-06-03', error: null, failed: null } })} />)
     expect(us).toContain('업종 <b>Technology</b>')
     expect(us).toContain('거래소 <b>나스닥</b>')
     expect(us).toContain('보유 <b>500주 · 2026-06-02 진입</b>')

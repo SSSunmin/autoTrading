@@ -10,6 +10,7 @@ import { useStateTick, useTradingState } from '../hooks/useTradingState'
 import { Loaded, TickerCell } from '../components/common'
 import { DecisionCard } from '../components/DecisionCard'
 import { ExceptionButtons } from '../components/decisionParts'
+import { ReviewBadges } from '../components/ticker'
 
 /** The queue item a card acts on: its REVIEW, or one of its orders' exceptions. */
 function exceptionOf(d: Decision, items: ExceptionItem[]): ExceptionItem | undefined {
@@ -45,6 +46,7 @@ export default function Decisions() {
 
   const rows = all.data ?? []
   const overrides = rows.filter((d) => d.has_intervention)
+  const reviews = rows.filter((d) => d.review)
   const nExc = exceptions.data?.length ?? 0
   const items = exceptions.data ?? []
   const token = mode.data?.admin_token_required ?? false
@@ -66,6 +68,7 @@ export default function Decisions() {
         { id: 'all', label: `결정·실행 ${rows.length}` },
         { id: 'exceptions', label: `예외 큐 ${nExc}` },
         { id: 'override', label: `하드룰 개입 ${overrides.length}` },
+        { id: 'reviews', label: `매도 검토 ${reviews.length}` },
       ]} />
 
       <div className="section">
@@ -89,6 +92,7 @@ export default function Decisions() {
                         <span className="rating REVIEW">{x.kind_ko}</span>
                       </div>
                       <div className="exec exception">{x.summary} · {x.pending_action_ko ?? '자동 주문하지 않았습니다.'}</div>
+                      {x.review && <div className="review-line"><ReviewBadges r={x.review} /></div>}
                       {x.kind === 'review' && d && (
                         <AgentSectionPanel title="에이전트 원문 전체" description="등급 파서가 읽지 못한 텍스트. Hold로 뭉개지 않고 사람이 봅니다">
                           <pre className="raw">{d.thesis}</pre>
@@ -103,6 +107,16 @@ export default function Decisions() {
                   )
                 })}
               </div>
+            )}
+          </Loaded>
+        )}
+
+        {tab === 'reviews' && (
+          <Loaded state={all} empty="이 날짜의 결정이 없습니다">
+            {() => reviews.length === 0 ? (
+              <AgentEmptyState title="매도 검토가 없습니다" description="이 날짜에 보유 종목의 에이전트 매도 검토(유지 · 축소 · 청산)가 없습니다. 규칙 청산(손절 · 트레일링 · 기간)은 결정·실행 탭의 규칙 청산 카드에 있습니다." />
+            ) : (
+              <div className="cards">{reviews.map(card)}</div>
             )}
           </Loaded>
         )}

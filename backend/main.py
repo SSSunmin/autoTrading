@@ -391,7 +391,26 @@ def _decision_out(d: DecisionRecord, st: _Store, memory_by_key: dict, orders_by_
     out["orders"] = [_order_out(o, st) for o in orders]
     # 하드룰 개입 tab: a rule cut or blocked one of its orders (OrderRecord.plan), or the agent listed one itself
     out["has_intervention"] = bool(d.hard_rule_overrides) or any(o.plan and o.plan.interventions for o in orders)
+    out["review"] = _review_of(d)
     return out
+
+
+# 논지 점검 · 매도 사유 배지: a sell review's action is its verdict (the ticker tab, the cards, the queue, positions)
+VERDICT_KO = {"Hold": ("keep", "논지 유지"), "Trim": ("trim", "축소"), "Exit": ("exit", "청산")}
+
+
+def _review_of(d: DecisionRecord) -> dict | None:
+    """A sell review read back from the decision's text (``audit.read_thesis`` — no model call): its action as the
+    verdict, every reason (``SellReason`` values with ``SELL_REASON_KO``), the Trim target, checks met / total. None for
+    any other decision (a memo, a rule exit, REVIEW). The reasons are the agent's; a rule exit's reason stays on its
+    order (``EXIT_REASON_KO``), so a screen never mixes the two."""
+    r = read_thesis(d)
+    if r is None or r["kind"] != "review":
+        return None
+    verdict, verdict_ko = VERDICT_KO[r["action"]]
+    return {"action": r["action"], "verdict": verdict, "verdict_ko": verdict_ko, "reasons": r["reasons"],
+            "reasons_ko": [SELL_REASON_KO.get(x, x) for x in r["reasons"]], "trim_to_pct": r["trim_to_pct"],
+            "met": sum(c["met"] for c in r["checks"]), "total": len(r["checks"])}
 
 
 def _screen_summary(s: ScreenRun) -> dict:
@@ -492,16 +511,22 @@ def _exceptions(st: _Store, date: str | None) -> list[dict]:
             continue
         items.append({"kind": "review", "kind_ko": EXCEPTION_KIND_KO["review"], "ticker": d.ticker,
                       "name": st.name(d.ticker), "trade_date": d.trade_date, "market": st.market,
-                      "summary": "등급을 읽을 수 없어 주문하지 않았습니다", "detail": d.thesis, "ref": d.screen_run_id}
+                      "summary": "등급을 읽을 수 없어 주문하지 않았습니다", "detail": d.thesis, "ref": d.screen_run_id, "review": None}
                      | _queue_state(o if o is not None and o.exception_kind == "review" else None, "review"))
+    reviews: dict | None = None
     for o in st.orders_where(status="exception", trade_date=date) + st.orders_where(status="rejected", trade_date=date):
         # a REVIEW decision is listed above already; its exception order is the same item
         if (o.status in ("rejected", "exception") and o.exception_kind != "review" and not o.exception_resolved
                 and (date is None or o.trade_date == date)):
             kind = _exception_kind(o)
+            if reviews is None:                  # read once, only when the queue has an order exception
+                reviews = {(d.ticker, d.trade_date): r for d in st.decisions(source="agent", trade_date=date)
+                           if (r := _review_of(d)) is not None}
             items.append({"kind": kind, "kind_ko": EXCEPTION_KIND_KO[kind], "ticker": o.ticker,
                           "name": st.name(o.ticker), "trade_date": o.trade_date, "market": st.market,
-                          "summary": o.reason or ORDER_STATUS_KO[o.status], "detail": ", ".join(o.rules_applied), "ref": o.order_id}
+                          "summary": o.reason or ORDER_STATUS_KO[o.status], "detail": ", ".join(o.rules_applied), "ref": o.order_id,
+                          # a rule exit's order is not the review's even on the same day
+                          "review": None if o.order_id.endswith(EXIT_SUFFIX) else reviews.get((o.ticker, o.trade_date))}
                          | _queue_state(o, kind))
     return sorted(items, key=lambda x: (x["trade_date"], x["ticker"]), reverse=True)
 
@@ -846,8 +871,6 @@ def get_ticker(ticker: str, market: str | None = MarketQuery) -> dict:
             "thesis_checks": _thesis_checks(st.decisions(ticker=t)), "earnings": earnings, "earnings_note_ko": earnings_note}
 
 
-# 논지 점검 tab: a sell review's action as the verdict; a memo sets the conditions later reviews check
-VERDICT_KO = {"Hold": ("keep", "논지 유지"), "Trim": ("trim", "축소"), "Exit": ("exit", "청산")}
 US_EXCHANGE_KO = {"NAS": "나스닥", "NYS": "뉴욕증권거래소", "AMS": "NYSE American"}
 EARNINGS_FILE = "_earnings_us.json"              # scripts/refresh_earnings.py writes it; read here only
 
@@ -864,9 +887,8 @@ def _thesis_checks(decisions: list[DecisionRecord]) -> list[dict]:
                "rating_ko": RATING_KO.get(d.rating, d.rating), "decider": d.settings.get("decider"),
                "stop_loss": d.stop_loss} | r
         if r["kind"] == "review":
-            row["verdict"], row["verdict_ko"] = VERDICT_KO[r["action"]]
-            row["reasons_ko"] = [SELL_REASON_KO.get(x, x) for x in r["reasons"]]
-            row["met"], row["total"] = sum(c["met"] for c in r["checks"]), len(r["checks"])
+            v = _review_of(d)
+            row |= {k: v[k] for k in ("verdict", "verdict_ko", "reasons_ko", "met", "total")}
         else:
             row["verdict"], row["verdict_ko"] = "memo", "투자 메모"
             row["checks"] = [{"condition": c, "met": None, "evidence": None} for c in r["invalidation"]]
@@ -908,7 +930,8 @@ def _earnings(ticker: str, market: str) -> tuple[dict | None, str]:
         note = "출처에 예정일 없음"
     elif e.get("fetched") and (e.get("date_to") or e["date"]) < e["fetched"]:   # Yahoo keeps the last report a while
         note = "지난 실적일 — 조회 시점에 출처가 다음 일정을 아직 주지 않았습니다"
-    return {"date": e.get("date"), "date_to": e.get("date_to"), "source": e.get("source"), "fetched": e.get("fetched")}, note
+    return {"date": e.get("date"), "date_to": e.get("date_to"), "source": e.get("source"), "fetched": e.get("fetched"),
+            "error": e.get("error"), "failed": e.get("failed")}, note
 
 
 def _holding(st: _Store, ticker: str) -> dict | None:
@@ -923,6 +946,45 @@ def _holding(st: _Store, ticker: str) -> dict | None:
                if o.filled_quantity and o.plan and o.plan.final.side == "Sell"
                and o.plan.final.qty < o.plan.proposed.qty and o.fill_date and o.fill_date >= row["entry_date"]]
     return row | {"as_of": view["as_of"], "partial_sales": sorted(partial, key=lambda x: x["date"])}
+
+
+def _last_review(st: _Store, ticker: str, as_of: str | None, entry_date: str) -> dict | None:
+    """The latest sell review of this holding: from its entry on (a review of an earlier holding of the same ticker,
+    sold and bought again, is not this one's), up to ``as_of``."""
+    rows = [d for d in st.decisions(ticker=ticker, source="agent")
+            if d.trade_date >= entry_date and (as_of is None or d.trade_date <= as_of)]
+    for d in sorted(rows, key=lambda d: (d.trade_date, d.recorded_at), reverse=True):
+        if (r := _review_of(d)) is not None:
+            return {"trade_date": d.trade_date} | r
+    return None
+
+
+@app.get("/api/reviews", tags=["decisions"])
+def list_reviews(market: str | None = MarketQuery, date_from: str | None = Query(None, alias="from"),
+                 date_to: str | None = Query(None, alias="to"), ticker: str | None = None,
+                 action: Literal["Hold", "Trim", "Exit"] | None = None) -> list[dict]:
+    """매도 검토 목록(LLM 매도 검토 결정만, 결정 화면과 같은 순서 — 최신 결정일 먼저, 같은 날은 종목 코드 내림차순): 결정일 · 종목 · action · 사유[] · trim_to_pct · 그 결정의 주문(상태 ·
+    부분 매도 수량). 규칙 청산(``-exit`` 주문)은 매도 검토가 아니라 빠진다."""
+    lo, hi = _date_range(date_from, date_to)
+    st = _store(market)
+    t = ticker.upper() if ticker else None
+    orders_by_key = _orders_by_key(st, ticker=t)
+    out = []
+    for d in st.decisions(ticker=t, source="agent"):
+        if (lo and d.trade_date < lo) or (hi and d.trade_date > hi) or (r := _review_of(d)) is None:
+            continue
+        if action and r["action"] != action:
+            continue
+        orders = [o for o in orders_by_key.get((d.ticker, d.trade_date), []) if not o.order_id.endswith(EXIT_SUFFIX)]
+        out.append({"trade_date": d.trade_date, "recorded_at": d.recorded_at, "ticker": d.ticker, "name": st.name(d.ticker),
+                    "market": st.market, "rating": d.rating, "rating_ko": RATING_KO.get(d.rating, d.rating)} | r
+                   | {"orders": [{"order_id": o.order_id, "status": o.status, "status_ko": ORDER_STATUS_KO.get(o.status, o.status),
+                                  "side": o.side, "quantity": o.quantity, "filled_quantity": o.filled_quantity,
+                                  "fill_date": o.fill_date, "held_before": o.plan.proposed.qty if o.plan else None,
+                                  # a partial sell: the plan's final is smaller than the holding it started from
+                                  "partial_quantity": o.filled_quantity if o.plan and o.plan.final.side == "Sell"
+                                  and o.plan.final.qty < o.plan.proposed.qty else 0} for o in orders]})
+    return out
 
 
 @app.get("/api/performance", tags=["performance"])
@@ -1410,6 +1472,8 @@ def positions(as_of: str | None = None, market: str | None = MarketQuery) -> dic
     for g in out["protections"]:
         g["label_ko"] = RISK_RULE_KO.get(g["id"], g["id"])
     out["exits_by_reason_ko"] = {EXIT_REASON_KO.get(k, k): n for k, n in out["exits_by_reason"].items()}
+    for r in out["positions"]:                   # the agent's latest sell review of it (its exit_signal is the rules')
+        r["last_review"] = _last_review(st, r["ticker"], out["as_of"], r["entry_date"])
     out["mode"] = _state_out(st.market)
     out["sector_exposure"] = sector_exposure(out["positions"])
     out["limits"]["max_sector_pct"] = RiskConfig().max_sector_pct          # the executor's sizing cap (size_targets)

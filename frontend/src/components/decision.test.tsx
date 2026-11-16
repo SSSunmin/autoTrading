@@ -29,7 +29,7 @@ const BLOCKED: OrderPlan = {
 
 const item = (over: Partial<ExceptionItem>): ExceptionItem => ({
   kind: 'review', kind_ko: '등급 읽기 실패 (REVIEW)', ticker: '105560.KS', name: 'KB금융', trade_date: '2026-07-24',
-  summary: '등급을 읽을 수 없어 주문하지 않았습니다', detail: 'Recommendation: …', ref: null, market: 'KRX',
+  summary: '등급을 읽을 수 없어 주문하지 않았습니다', detail: 'Recommendation: …', ref: null, market: 'KRX', review: null,
   order_id: 'paper-2026-07-24-105560.KS', pending_action: null, pending_action_ko: null, reruns: 0, retries: 0,
   actions: [
     { action: 'rerun', label_ko: '재실행', used: 0, limit: 2, available: true },
