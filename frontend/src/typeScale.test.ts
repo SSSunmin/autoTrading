@@ -54,9 +54,12 @@ function openingTag(text: string, start: number): string {
 }
 
 /** the smallest size of a DS button: Agent `size="sm"`, Button `size="small"`, IconButton `size={20}` — written as a
- *  string or in braces, before or after any other prop */
+ *  string or in braces, before or after any other prop. The controls beside the buttons too (partial-sell 부속,
+ *  2026-11-16): a segmented control reads as buttons, and a 28px field next to a 38px button is out of line */
+const CONTROLS = 'AgentButton|Button|IconButton|AgentIconButton|AgentSegmentedControl|SegmentedControl|AgentTextField|TextField'
+  + '|AgentTextarea|Textarea|AgentSelect|Select'
 export function smallButtons(files: { path: string; text: string }[]) {
-  return files.flatMap(({ path, text }) => [...text.matchAll(/<(AgentButton|Button|IconButton|AgentIconButton)\b/g)]
+  return files.flatMap(({ path, text }) => [...text.matchAll(new RegExp(`<(${CONTROLS})\\b`, 'g'))]
     .map((m) => ({ m, tag: openingTag(text, m.index ?? 0) }))
     .filter(({ tag }) => /\ssize\s*=\s*(\{\s*)?(["'`](sm|small|20)["'`]|20(?!\d))\s*\}?/.test(tag))
     .map(({ m, tag }) => `${path}:${line(text, m.index ?? 0)} <${m[1]} …${tag.match(/size\s*=\s*\S+?(?=[\s/>]|$)/)?.[0]}>`))
@@ -99,9 +102,11 @@ describe('type scale — five sizes, none under 12px (the screens had 13 sizes a
   })
 })
 
-describe('buttons — never the smallest DS size (the user: "버튼은 가장 작은 걸로는 안 했으면")', () => {
-  it('uses no small button anywhere in src/', () => {
-    expect(tsx.some((f) => f.text.includes('<AgentButton'))).toBe(true)
+describe('buttons and the controls beside them — never the smallest DS size (the user: "버튼은 가장 작은 걸로는 안 했으면")', () => {
+  it('uses no small button, segmented control, field or select anywhere in src/', () => {
+    for (const c of ['<AgentButton', '<AgentSegmentedControl', '<AgentTextField', '<AgentTextarea', '<AgentSelect']) {
+      expect(tsx.some((f) => f.text.includes(c))).toBe(true)
+    }
     expect(smallButtons(tsx)).toEqual([])
   })
 
@@ -113,6 +118,16 @@ describe('buttons — never the smallest DS size (the user: "버튼은 가장 �
     expect(smallButtons(probe)).toEqual([
       'x.tsx:1 <AgentButton …size="sm">', 'x.tsx:1 <AgentButton …size="sm">', 'x.tsx:4 <Button …size="small">', 'x.tsx:4 <IconButton …size={20}>',
       'x.tsx:5 <AgentButton …size="sm">', "x.tsx:5 <AgentButton …size={'sm'}>", 'x.tsx:5 <AgentButton …size={"sm"}>',
+    ])
+  })
+
+  it('catches the small segmented control, field, textarea and select, and leaves their default alone', () => {
+    const probe = [{ path: 'x.tsx', text: '<AgentSegmentedControl options={o} value={v} onChange={(x) => set(x)} size="sm" />\n'
+      + '<AgentTextField label="금액" size="sm" /> <AgentTextarea size={\'sm\'} /> <AgentSelect\n  size="sm"\n  options={o} />\n'
+      + '<AgentTextField label="사유" /> <AgentSelect options={o} size="md" /> <SelectOption size="sm" />' }]
+    expect(smallButtons(probe)).toEqual([
+      'x.tsx:1 <AgentSegmentedControl …size="sm">', 'x.tsx:2 <AgentTextField …size="sm">', "x.tsx:2 <AgentTextarea …size={'sm'}>",
+      'x.tsx:2 <AgentSelect …size="sm">',
     ])
   })
 })

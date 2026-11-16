@@ -35,8 +35,8 @@ function ScreenList({ market }: { market: Market }) {
     <>
       <PageHeader title="종목 선별" description="선별 실행 목록입니다. 행을 열면 유니버스 N개가 규칙을 하나씩 지나며 몇 개 남는지, 각 종목이 어느 규칙에서 어떤 값으로 떨어졌는지 봅니다." />
       <div className="toolbar">
-        <AgentSelect label="기간" size="sm" value={period} onChange={(e) => setPeriod(e.target.value)} options={PERIODS} />
-        <AgentSelect label="유니버스" size="sm" value={universe} onChange={(e) => setUniverse(e.target.value)}
+        <AgentSelect label="기간" value={period} onChange={(e) => setPeriod(e.target.value)} options={PERIODS} />
+        <AgentSelect label="유니버스" value={universe} onChange={(e) => setUniverse(e.target.value)}
           options={[{ value: '', label: '전체' }, ...universes.map((u) => ({ value: u, label: u }))]} />
         <span className="muted" style={{ marginLeft: 'auto' }}>기준일 내림차순</span>
       </div>

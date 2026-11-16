@@ -39,7 +39,7 @@ export default function Positions() {
                     <tbody>{b.positions.map((r) => (
                       <tr key={r.ticker} className="click" onClick={() => navigate(to(`/tickers/${encodeURIComponent(r.ticker)}`))}>
                         <td><TickerCell ticker={r.ticker} name={r.name} /></td>
-                        <td className="r num">{r.quantity}</td><td className="r num">{amt(r.avg_price)}</td><td className="r num">{amt(r.last_price)}</td>
+                        <td className="r num">{r.quantity}{r.partial_sold > 0 && <span className="muted" title="부분 매도(Trim · Underweight)로 줄인 수량 — 평단 · 손절선 · 트레일링 고점은 처음 그대로"> · 부분 매도 {r.partial_sold}주</span>}</td><td className="r num">{amt(r.avg_price)}</td><td className="r num">{amt(r.last_price)}</td>
                         <td className="r"><Pct value={r.unrealized_pct} /></td><td className="r num">{pct(r.weight).replace('+', '')}</td>
                         <td className="r num">{amt(r.stop_price)}</td>
                         <td className={`r num ${r.near_stop ? 'alert-t' : ''}`}>{pct(r.stop_gap).replace('+', '')}{r.near_stop ? ' · 근접' : ''}</td>
@@ -71,7 +71,7 @@ export default function Positions() {
                     <tbody>{b.closed.map((t) => (
                       <tr key={t.ticker + t.exit_date}>
                         <td><TickerCell ticker={t.ticker} name={t.name} /></td><td><ExitReasonBadge reason={t.reason} labels={exitKo} /></td><td className="num">{t.entry_date}</td><td className="num">{t.exit_date}</td>
-                        <td className="r num">{t.quantity}</td><td className="r num">{amt(t.entry_price)}</td><td className="r num">{amt(t.exit_price)}</td>
+                        <td className="r num">{t.quantity}{!t.full && <span className="muted" title="부분 매도 — 나머지는 아직 보유"> · 부분</span>}</td><td className="r num">{amt(t.entry_price)}</td><td className="r num">{amt(t.exit_price)}</td>
                         <td className="r num">{amt(t.pnl)}</td><td className="r"><Pct value={t.pnl_pct} /></td>
                       </tr>
                     ))}</tbody>

@@ -192,16 +192,16 @@ function ModePanel({ market, state, onChanged }: { market: Market; state: Tradin
         )}
         <div className="toolbar mode-axes" style={{ marginBottom: 0 }}>
           <span className="muted">계좌</span>
-          <AgentSegmentedControl size="sm" value={account} onChange={(v) => setAccount(v as 'paper' | 'live')} options={ACCOUNTS} />
+          <AgentSegmentedControl value={account} onChange={(v) => setAccount(v as 'paper' | 'live')} options={ACCOUNTS} />
           <span className="muted">실행</span>
           {account === 'paper' ? <span className="mode-locked">자동 실행 <span className="muted">· {axes.executionLocked ?? PAPER_LOCKED}</span></span>
-            : <AgentSegmentedControl size="sm" value={execution} onChange={(v) => setExecution(v as 'auto' | 'manual')} options={EXECUTIONS} />}
+            : <AgentSegmentedControl value={execution} onChange={(v) => setExecution(v as 'auto' | 'manual')} options={EXECUTIONS} />}
         </div>
         {account === 'live' && state.account_mode === 'paper' && <div className="muted">모의투자 → 실거래는 모의 판정을 통과해야 서버가 받습니다(409) — 성과 화면의 실거래 전환 모달을 쓰세요.</div>}
         <div className="toolbar" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
-          <AgentTextField label="관리자" size="sm" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
-          <AgentTextField label="사유" size="sm" placeholder="변경 이력에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} style={{ minWidth: '28rem' }} />
-          {state.admin_token_required && <AgentTextField label="관리자 토큰" size="sm" type="password" value={token} onChange={(e) => setToken(e.target.value)} />}
+          <AgentTextField label="관리자" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
+          <AgentTextField label="사유" placeholder="변경 이력에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} style={{ minWidth: '28rem' }} />
+          {state.admin_token_required && <AgentTextField label="관리자 토큰" type="password" value={token} onChange={(e) => setToken(e.target.value)} />}
           <AgentButton variant="primary" disabled={!ready || mode === state.mode}
             onClick={() => run(async () => { await api.setMode({ operator: operator.trim(), mode, reason: reason.trim(), market }, token || undefined) })}>
             {mode === state.mode ? '현재 모드' : `${axesLabel(mode)}으로 전환`}
@@ -261,7 +261,7 @@ function fmt(v: unknown): string {
 }
 /** Fractions named *_pct / *_limit / dd_* / max_drawdown / *_rate render as percentages; counts stay counts. */
 function fmtRule(id: string, v: unknown): string {
-  if (typeof v === 'number' && /(_pct|_limit|^dd_|drawdown|_rate)$|^dd_|drawdown|_rate/.test(id) && !/days|_n$/.test(id)) return `${(v * 100).toFixed(v * 100 % 1 ? 1 : 0)}%`
+  if (typeof v === 'number' && /(_pct|_limit|_fraction|^dd_|drawdown|_rate)$|^dd_|drawdown|_rate/.test(id) && !/days|_n$/.test(id)) return `${(v * 100).toFixed(v * 100 % 1 ? 1 : 0)}%`
   return fmt(v)
 }
 function fmtObj(o: Record<string, unknown>): string {

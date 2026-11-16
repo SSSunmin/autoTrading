@@ -1,4 +1,4 @@
-import type { Decision, ExceptionAction, ExceptionItem, Intervention, OrderPlan, PlanSide } from '../api/types'
+import type { Decision, ExceptionAction, ExceptionItem, Intervention, Order, OrderPlan, PlanSide } from '../api/types'
 
 /** The branching behind the decision card's 원안 vs 최종 grid, its source badge and the exception-action modal
  *  (decisionParts.tsx), apart from the components so the tests read the rules directly. Numbers come from the server. */
@@ -23,6 +23,21 @@ export function planRows(plan: OrderPlan, money: (v: number) => string): { label
     ['예상 금액', money(plan.proposed.amount), money(plan.final.amount)],
   ]
   return rows.map(([label, a, b]) => ({ label, a, b, diff: a !== b }))
+}
+
+/** A sized sell (Trim / Underweight, docs/04): the holding before (``plan.proposed``), the shares sold and what stays.
+ *  null for an order without a sell plan (a full Sell, a rule exit, a buy) or one that placed nothing (Trim at target). */
+export function sellSplit(o: Pick<Order, 'side' | 'plan' | 'quantity' | 'filled_quantity'>): { held: number; sold: number; rest: number } | null {
+  if (o.side !== 'Sell' || o.plan?.proposed.side !== 'Sell' || o.plan.final.side !== 'Sell') return null
+  const sold = o.filled_quantity || o.quantity
+  return { held: o.plan.proposed.qty, sold, rest: o.plan.proposed.qty - sold }
+}
+
+/** The execution strip's order words: "부분 매도 499주 · 남은 500주" when a sell keeps part of the holding, else the side
+ *  and the shares as before. */
+export function orderWords(o: Pick<Order, 'side' | 'side_ko' | 'plan' | 'quantity' | 'filled_quantity'>): string {
+  const s = sellSplit(o)
+  return s && s.rest > 0 ? `부분 매도 ${s.sold}주 · 남은 ${s.rest}주` : `${o.side_ko} ${o.filled_quantity || o.quantity}주`
 }
 
 /** A cut (before → after) is a chip; a rule with neither blocked the order — a lock line. */

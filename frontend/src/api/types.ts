@@ -705,6 +705,8 @@ export interface PositionRow {
   quantity: number
   avg_price: number
   entry_date: string
+  /** shares partial sells (Trim · Underweight) took off this holding; the rest keeps its entry and average price */
+  partial_sold: number
   last_price: number | null
   last_date: string | null
   market_value: number | null
@@ -746,6 +748,8 @@ export interface ClosedTrade {
   exit_price: number
   pnl: number
   pnl_pct: number
+  /** false: a partial sell, the rest still held (it sets no Cooldown) */
+  full: boolean
 }
 
 export interface Positions {

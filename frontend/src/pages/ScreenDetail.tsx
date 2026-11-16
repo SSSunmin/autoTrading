@@ -67,7 +67,7 @@ function Detail({ s, stage, setStage, filter, setFilter, q, setQ, ruleDesc, onTi
       <AgentSectionPanel title="종목 × 규칙" description="셀 = 값 (임계). 초록 통과, 빨강 탈락, 회색은 이전 규칙에서 떨어져 평가하지 않음"
         action={
           <div className="toolbar" style={{ marginBottom: 0 }}>
-            <AgentSegmentedControl size="sm" value={filter} onChange={setFilter}
+            <AgentSegmentedControl value={filter} onChange={setFilter}
               options={[{ value: 'all', label: '전체' }, { value: 'selected', label: '선정만' }, { value: 'rejected', label: '탈락만' }]} />
             <SearchField size="small" aria-label="티커·이름 검색" placeholder="티커·이름 검색" value={q} onChange={(e) => setQ(e.target.value)} onClear={() => setQ('')} />
           </div>

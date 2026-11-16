@@ -208,9 +208,9 @@ export function PaperGo({ p, state, market, open, onClose }: { p: PaperProgress;
       <div className="stack-gap" style={{ gap: '1rem' }}>
         <GoLiveSummary p={p} />
         <AgentCheckbox label="실계좌로 주문이 나간다는 것을 확인했습니다" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-        <AgentTextField label="관리자" size="sm" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
-        <AgentTextField label="전환 사유" size="sm" placeholder="감사 로그에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} />
-        {state.admin_token_required && <AgentTextField label="관리자 토큰" size="sm" type="password" value={token} onChange={(e) => setToken(e.target.value)} />}
+        <AgentTextField label="관리자" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
+        <AgentTextField label="전환 사유" placeholder="감사 로그에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} />
+        {state.admin_token_required && <AgentTextField label="관리자 토큰" type="password" value={token} onChange={(e) => setToken(e.target.value)} />}
         {error && <AgentAlert tone="error" title="전환 거부">{error}</AgentAlert>}
         {done && <AgentAlert tone="success" title="전환됨">{done}</AgentAlert>}
       </div>

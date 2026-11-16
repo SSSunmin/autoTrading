@@ -58,7 +58,7 @@ export default function Decisions() {
         {mode.data?.mode === 'manual' ? ' 수동 승인 모드라 주문 전에 승인 단계가 있습니다.' : ' 자동 모드라 승인 단계는 없고, 사람이 봐야 할 것은 예외 큐에만 올라옵니다.'}
       </p>
       <div className="toolbar">
-        <AgentSelect label={`결정일 (${market === 'US' ? '미국 거래일, 뉴욕 날짜' : '국내 거래일'})`} size="sm" value={day ?? ''} onChange={(e) => setPicked({ market, date: e.target.value })}
+        <AgentSelect label={`결정일 (${market === 'US' ? '미국 거래일, 뉴욕 날짜' : '국내 거래일'})`} value={day ?? ''} onChange={(e) => setPicked({ market, date: e.target.value })}
           options={(dates.data ?? []).map((d) => ({ value: d, label: d }))} />
         {mode.data && <span className="muted">{mode.data.label_ko}</span>}
       </div>

@@ -15,7 +15,7 @@ const MARKET_LABEL: Record<Market, string> = { KRX: '국내', US: '미국' }
 export function MarketToggle() {
   const [market, setMarket] = useMarket()
   return (
-    <AgentSegmentedControl size="sm" label="시장" value={market} onChange={(v) => setMarket(v as Market)}
+    <AgentSegmentedControl label="시장" value={market} onChange={(v) => setMarket(v as Market)}
       options={MARKETS.map((m) => ({ value: m, label: MARKET_LABEL[m] }))} />
   )
 }

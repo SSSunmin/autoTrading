@@ -6,6 +6,7 @@ import type { Decision, ExceptionItem } from '../api/types'
 import { useLabels } from '../hooks/useLabels'
 import { useMarketPath } from '../hooks/useMarket'
 import { ExecStatus, Pct, RatingBadge, TickerCell } from './common'
+import { orderWords } from './decisionLogic'
 import { ExceptionButtons, Interventions, PlanGrid, SourceBadge } from './decisionParts'
 import { FillTime } from './risk'
 
@@ -40,7 +41,7 @@ export function DecisionCard({ d, exception, tokenRequired = false }: { d: Decis
         <div key={o.order_id}>
           <div className={`exec ${o.status}`}>
             <ExecStatus status={o.status} label={o.status_ko} />
-            <span>{o.side_ko} {o.filled_quantity || o.quantity}주{o.filled_price != null ? ` · ${amt(o.filled_price)} · ${amt(o.amount)}` : ''}</span>
+            <span>{orderWords(o)}{o.filled_price != null ? ` · ${amt(o.filled_price)} · ${amt(o.amount)}` : ''}</span>
             {o.reason && <span className="muted">{o.reason}</span>}
             {o.exception_resolved && o.exception_action && <AgentChip variant="secondary">처리됨 · {actionKo[o.exception_action] ?? o.exception_action}</AgentChip>}
             {o.rerun_answer && (

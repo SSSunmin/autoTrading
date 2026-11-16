@@ -24,7 +24,7 @@ export default function Ticker() {
     <>
       <h1 className="page-title">종목 상세</h1>
       <div className="toolbar">
-        <AgentSelect label="종목" size="sm" value={current ?? ''} onChange={(e) => navigate(to(`/tickers/${encodeURIComponent(e.target.value)}`))}
+        <AgentSelect label="종목" value={current ?? ''} onChange={(e) => navigate(to(`/tickers/${encodeURIComponent(e.target.value)}`))}
           options={(tickers.data ?? []).map((t) => ({ value: t.ticker, label: market === 'US' ? stockName(t.ticker, t.name, market) : `${t.ticker} ${t.name ?? ''}` }))} />
       </div>
       <Loaded state={detail}>{(d) => <Body d={d} tab={tab} setTab={setTab} />}</Loaded>

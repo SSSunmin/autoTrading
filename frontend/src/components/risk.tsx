@@ -163,9 +163,9 @@ export function ResumeBody({ state, market, preview: p, others, form, set, error
               ))}</tbody>
             </table></div>
           )}
-          <AgentTextField label="관리자" size="sm" placeholder="이름 또는 ID" value={form.operator} onChange={(e) => set({ operator: e.target.value })} />
-          <AgentTextField label="재가동 사유" size="sm" placeholder="감사 로그에 남습니다" value={form.reason} onChange={(e) => set({ reason: e.target.value })} />
-          {state.admin_token_required && <AgentTextField label="관리자 토큰" size="sm" type="password" value={form.token} onChange={(e) => set({ token: e.target.value })} />}
+          <AgentTextField label="관리자" placeholder="이름 또는 ID" value={form.operator} onChange={(e) => set({ operator: e.target.value })} />
+          <AgentTextField label="재가동 사유" placeholder="감사 로그에 남습니다" value={form.reason} onChange={(e) => set({ reason: e.target.value })} />
+          {state.admin_token_required && <AgentTextField label="관리자 토큰" type="password" value={form.token} onChange={(e) => set({ token: e.target.value })} />}
         </>
       )}
       {error && <AgentAlert tone="error" title="재가동 실패">{error}</AgentAlert>}

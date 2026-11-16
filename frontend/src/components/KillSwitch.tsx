@@ -70,8 +70,8 @@ export function KillSwitch({ state, market }: { state: TradingState | null; mark
           </ul>
           <AgentCheckbox label="손절·트레일링 청산은 계속 작동" description="끄면 보유 종목이 손절선을 깨도 자동으로 팔지 않습니다"
             checked={keepExits} onChange={(e) => setKeepExits(e.target.checked)} />
-          <AgentTextField label="운용자" size="sm" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
-          <AgentTextarea label="정지 사유" size="sm" rows={3} placeholder="감사 로그에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <AgentTextField label="운용자" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
+          <AgentTextarea label="정지 사유" rows={3} placeholder="감사 로그에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} />
           {error && <AgentAlert tone="error" title="정지 실패">{error}</AgentAlert>}
         </div>
       </AgentModal>

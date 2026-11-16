@@ -112,6 +112,9 @@ AUTO_EXECUTION = {
     "auto_daily_loss_limit": -0.02,        # 일일 손실이 이 아래면 자동 정지 (시장마다 따로 판정)
     "kill_switch_reset": "admin",          # 재가동 권한
     "default_mode": "paper",               # auto | manual | paper
+    # Underweight (a memo's 비중 축소, no target weight) sells this share of the holding, whole shares rounded down —
+    # one share held: that share. A sell review's Trim sells down to its trim_to_pct; Sell / Exit sell it all (docs/04)
+    "underweight_sell_fraction": 0.5,
     "by_market": {
         "KRX": {"auto_daily_order_cap": 100_000_000,   # 일일 주문 금액 상한 (원)
                 "auto_order_max": 30_000_000},         # 주문당 금액 상한 (원)
