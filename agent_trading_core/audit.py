@@ -20,6 +20,7 @@ DecisionRecord points at its entry by (ticker, trade_date).
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -31,9 +32,24 @@ from agent_trading_core.schemas import SellReason
 from agent_trading_core.store import DB_NAME, JsonlStore, SqliteStore, store_kind
 from agent_trading_core.store.sqlite import TABLES, connect
 
+_fixed_now: str | None = None        # set by fixed_clock
+
 
 def _now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _fixed_now or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@contextmanager
+def fixed_clock(at: str):
+    """Inside, a record made without its own time (``Field(default_factory=_now)``) takes ``at``: two reads of the
+    same old line give the same record (scripts/migrate_jsonl_to_db.py ``--verify`` compares two replays byte for
+    byte). ponytail: one process-wide value, for a one-off script — not for a server handling requests."""
+    global _fixed_now
+    before, _fixed_now = _fixed_now, at
+    try:
+        yield at
+    finally:
+        _fixed_now = before
 
 
 class FilterResult(BaseModel):
