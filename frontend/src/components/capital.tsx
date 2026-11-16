@@ -46,7 +46,7 @@ function CapitalForm({ info, onDone }: { info: CapitalInfo; onDone: (msg: string
   return (
     <div className="stack-gap" style={{ gap: '1rem' }}>
       <CapitalRows info={info} />
-      <div className="toolbar" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
+      <div className="toolbar form-row" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
         <AgentSegmentedControl value={account} onChange={(v) => setAccount(v as CapitalAccount)}
           options={[{ value: 'paper', label: '모의투자 자본' }, { value: 'live', label: '실거래 자본' }]} />
         <AgentTextField label={`${account === 'paper' ? '모의투자' : '실거래'} 자본 (${m === 'KRX' ? '원' : '달러'})`}
