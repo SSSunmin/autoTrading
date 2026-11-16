@@ -525,7 +525,7 @@ def test_us_performance_is_404_without_its_summary_and_reads_its_own_summary_and
     body = us.json()
     assert set(body) == {"run_id", "cells_run", "resolved", "pending", "unscored", "holding", "dates", "universe",
                          "by_rating", "per_date", "reflections", "human_handled", "caveat",
-                         "market", "rating_bars", "settlement", "by_source"}
+                         "market", "rating_bars", "settlement", "by_source", "loop"}
     assert body["run_id"] == "us1" and body["by_rating"]["Sell"]["rating_ko"] == "매도"
     # the rating bars read the US log the same way (performance-charts): Sell −2.1% alpha → a hit, raw −4%
     sell = {b["rating"]: b for b in body["rating_bars"]}["Sell"]

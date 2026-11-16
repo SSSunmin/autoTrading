@@ -30,6 +30,7 @@ import json
 import math
 import os
 import re
+import threading
 from collections import Counter
 from contextlib import ExitStack
 from dataclasses import asdict
@@ -104,6 +105,8 @@ from agent_trading_core.krx_names import (
     HALT_SCOPE_KO,
     HALT_TARGET_KO,
     HALTED_BY_KO,
+    LOOP_PENDING_KO,
+    LOOP_SOURCE_KO,
     MARKET_KO,
     MODE_KO,
     OPERATION_KO,
@@ -121,7 +124,7 @@ from agent_trading_core.krx_names import (
     SIDE_KO,
     korean_name,
 )
-from agent_trading_core.memory import TradingMemoryLog
+from agent_trading_core.memory import TradingMemoryLog, settlement
 from agent_trading_core.rating import RATING_REVIEW, RATINGS_5_TIER
 from agent_trading_core.risk import EPS, RiskConfig, drawdown_scale
 from agent_trading_core.screening import ScreenConfig, us_preset
@@ -840,13 +843,19 @@ def get_ticker(ticker: str, market: str | None = MarketQuery) -> dict:
 
 
 @app.get("/api/performance", tags=["performance"])
-def performance(market: str | None = MarketQuery) -> dict:
+def performance(market: str | None = MarketQuery, source: str = Query("all", pattern="^(agent|rule|all)$"),
+                date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to")) -> dict:
     st = _store(market)
+    lo, hi = _date_range(date_from, date_to)
     s = st.summary
     if not s:
         raise HTTPException(404, "백테스트 요약 없음: scripts/baseline_krx.py를 먼저 실행" if st.market == "KRX" else
                             f"{MARKET_KO.get(st.market, st.market)} 결정 성과 요약 없음: "
                             f"scripts/baseline_krx.py --market {st.market}를 먼저 실행")
+    try:
+        loop = _loop_scoring(st, source, lo, hi)
+    except Exception as exc:  # the loop's own failure stays in its key; the baseline's scoring still answers
+        loop = {"error": f"{type(exc).__name__}: {exc}"}
     direction = {"Buy": 1, "Overweight": 1, "Hold": 0, "Underweight": -1, "Sell": -1}
     resolved = [e for e in st.memory if not e["pending"] and _pct(e.get("alpha")) is not None]
     per_date = []
@@ -868,7 +877,7 @@ def performance(market: str | None = MarketQuery) -> dict:
     by_rating = {r: v | {"rating_ko": RATING_KO.get(r, r)} for r, v in s.get("by_rating", {}).items()}
     by_source = {k: v for k, v in st.facts["by_source"].items() if k != "human"}
     bars = _rating_bars(st.memory)
-    return {"market": st.market, "rating_bars": bars, "settlement": _settlement(st),
+    return {"market": st.market, "loop": loop, "rating_bars": bars, "settlement": _settlement(st),
             "by_source": {"decisions": by_source, "human": human, "scored_source": "baseline",
                           "scored": sum(b["count"] for b in bars),
                           "note_ko": "채점(알파 · 적중률)은 규칙 베이스라인 실행의 메모리 로그에서만 나옵니다. 모의 루프의 "
@@ -973,6 +982,193 @@ def _series(st: _Store) -> tuple[dict, bool]:
     return book, False
 
 
+# --- the daily loop's decisions, settled five sessions on (loop-scoring) --------------------------------------------
+# The definition is scripts/llm_trial_report.py's — memory.settlement.fetch_returns over the KIS cache only: entry at
+# the first close after the decision day, exit five of the stock's own sessions on (a holiday has no bar, so the
+# calendar's closures are skipped), raw and alpha against the market's benchmark. A name without a KIS file has no
+# prices here (pending), never Yahoo's. The scripts are not imported for it (tests check the two agree).
+
+LOOP_HOLDING = 5                                       # llm_trial_report.HOLDING_DAYS
+LOOP_DIRECTION = {"Buy": 1, "Overweight": 1, "Hold": 0, "Underweight": -1, "Sell": -1}
+_settle_lock = threading.Lock()
+
+
+def _kis_closes(symbol: str, start: str, end: str) -> pd.Series:
+    """llm_trial_report.kis_closes: the KIS file's closes in [start, end), none for a name without a KIS file."""
+    if PRICES.info(symbol)["source"] != "kis":
+        return pd.Series(dtype=float)
+    c = PRICES.frame(symbol)["Close"].dropna()
+    c = c[(c.index >= start) & (c.index < end)]
+    return pd.Series(c.to_numpy(dtype=float), index=pd.DatetimeIndex(c.index))
+
+
+def _loop_settle(pairs: list[tuple[str, str]], benchmark: str) -> dict[tuple[str, str], tuple]:
+    """(ticker, day) → (raw, alpha, None) settled, (None, None, reason) pending (``no_price`` · ``window``), or
+    (None, None, "failed: <error>") when a price file cannot be read. ``fetch_returns`` reads its module's
+    ``get_closes``; it is swapped for the KIS reader for the length of the call, one caller at a time.
+    ponytail: the same swap as the report script — drop both once fetch_returns takes its price source as an argument
+    (core)."""
+    out: dict[tuple[str, str], tuple] = {}
+    with _settle_lock:
+        real = settlement.get_closes
+        settlement.get_closes = _kis_closes
+        try:
+            for t, day in pairs:
+                try:
+                    raw, alpha, _, _ = settlement.fetch_returns(t, day, LOOP_HOLDING, benchmark=benchmark)
+                except Exception as exc:  # one unreadable price file is reported, the rest still count (as the script)
+                    out[(t, day)] = (None, None, f"failed: {type(exc).__name__}")
+                    continue
+                out[(t, day)] = (raw, alpha, None if raw is not None else _pending_reason(t, day, benchmark))
+        finally:
+            settlement.get_closes = real
+    return out
+
+
+def _pending_reason(ticker: str, day: str, benchmark: str) -> str:
+    """Why fetch_returns gave nothing: no KIS file for the name (``no_price``) or the benchmark (``no_bench``); the
+    benchmark has its five sessions but the name's bars stop before the benchmark's (``price_ended`` — delisted or
+    halted); otherwise the five sessions have not passed yet (``window``)."""
+    if PRICES.info(ticker)["source"] != "kis":
+        return "no_price"
+    if PRICES.info(benchmark)["source"] != "kis":
+        return "no_bench"
+    after = (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    stock, bench = (_kis_closes(x, after, "9999-12-31") for x in (ticker, benchmark))
+    if len(bench) > LOOP_HOLDING and (stock.empty or stock.index[-1] < bench.index[-1]):
+        return "price_ended"
+    return "window"
+
+
+def _mean(xs: list[float]) -> float | None:
+    return sum(xs) / len(xs) if xs else None
+
+
+def _loop_column(src: str, decisions: list[DecisionRecord], settled: dict) -> dict:
+    """One column of the comparison. ``settled`` · ``pending`` · ``buy_settled`` · ``mean_raw`` · ``mean_alpha`` ·
+    ``alpha_by_rating`` are the report script's own figures (REVIEW and Hold settle too there; the overall mean is the
+    buy side's). ``directional`` and ``hold`` are this screen's: a sell-side call scores the opposite sign, REVIEW is
+    not scored, Hold is shown for reference."""
+    rows = [(d, *settled[(d.ticker, d.trade_date)]) for d in decisions]
+    done = [(d, raw, alpha) for d, raw, alpha, _ in rows if raw is not None]
+    pending = Counter(r for _, raw, _, r in rows if raw is None)
+    by_rating: dict[str, list[float]] = {}
+    for d, _, a in done:
+        by_rating.setdefault(d.rating, []).append(a)
+    buy = [(raw, a) for d, raw, a in done if d.rating in ("Buy", "Overweight")]
+    directed = [(LOOP_DIRECTION[d.rating], raw, a) for d, raw, a in done if LOOP_DIRECTION.get(d.rating)]
+    hold = [a for d, _, a in done if d.rating == "Hold"]
+    return {
+        "source": src, "label_ko": LOOP_SOURCE_KO[src], "decisions": len(decisions),
+        "ratings": dict(Counter(d.rating for d in decisions)),
+        "review": sum(d.rating == RATING_REVIEW for d in decisions),
+        "stand_ins": sum(bool(d.settings.get("fallback")) for d in decisions),
+        "first": min((d.trade_date for d in decisions), default=None),
+        "last": max((d.trade_date for d in decisions), default=None),
+        "settled": len(done), "pending": sum(v for k, v in pending.items() if not k.startswith("failed")),
+        "pending_by_reason": [{"id": k, "label_ko": LOOP_PENDING_KO[k], "count": pending.get(k, 0)} for k in LOOP_PENDING_KO],
+        "settle_failed": [f"{d.ticker} {d.trade_date}: {r.split(': ', 1)[1]}" for d, raw, _, r in rows
+                          if raw is None and r.startswith("failed")],
+        "buy_settled": len(buy), "mean_raw": _mean([r for r, _ in buy]), "mean_alpha": _mean([a for _, a in buy]),
+        "alpha_by_rating": {k: {"n": len(v), "mean_alpha": _mean(v)} for k, v in by_rating.items()},
+        "directional": {"n": len(directed), "mean_return": _mean([k * r for k, r, _ in directed]),
+                        "mean_alpha": _mean([k * a for k, _, a in directed]),
+                        "hit_rate": _mean([float(k * a > 0) for k, _, a in directed])},
+        "hold": {"n": len(hold), "mean_alpha": _mean(hold)},
+    }
+
+
+def _trial(st: _Store) -> dict | None:
+    """The LLM trial as /api/model gives it (scripts/daily_loop ``trial_on`` · ``llm_trial_days``), None when off."""
+    loop = _daily_loop()
+    if not loop.trial_on():
+        return None
+    days, sessions = loop.llm_trial_days(st.audit, st.market), LLM.get("trial_sessions")
+    return {"sessions": sessions, "days": days,
+            "remaining": max(sessions - len(days), 0) if sessions is not None else None}
+
+
+def _rule_calls(st: _Store, loop, decisions: list[DecisionRecord]) -> list[DecisionRecord | None]:
+    """The rule baseline's call for each decision's ticker and day from that day's screen (``daily_loop.rule_record``,
+    the report script's agreement), None without the screen. Kept per (run, ticker, day) until a screen is added."""
+    screens = {r.run_id: r for r in st.screens}
+    hit = st._cache.get("loop_rule")
+    known = hit[1] if hit is not None and hit[0] == st._stamp.get("screens") else {}
+    out = []
+    for d in decisions:
+        run = screens.get(d.screen_run_id)
+        if run is not None and (k := (run.run_id, d.ticker, d.trade_date)) not in known:
+            known[k] = loop.rule_record(st.market, run, d.ticker, d.trade_date)
+        out.append(known[(run.run_id, d.ticker, d.trade_date)] if run is not None else None)
+    st._cache["loop_rule"] = (st._stamp.get("screens"), known)
+    return out
+
+
+def _loop_scoring(st: _Store, source: str, lo: str | None, hi: str | None) -> dict:
+    """The daily loop's decisions (``daily_<market>_`` screens) in [lo, hi]: the model's (``agent``: settings.decider =
+    LLM["model"]) and, beside it, the rule baseline's call on the same ticker and day (``rule``: that day's screen
+    through the rule, as the report script's agreement) — the two columns score the same names on the same days,
+    never two periods. The rule's own records (before or after the trial, its stand-ins for the model) are counted
+    apart, as are a person's decisions and the rule exits; none is scored. Settlements are cached per market until a
+    decision or a price file changes."""
+    loop = _daily_loop()
+    prefix = f"{loop.RUN_IDS[st.market]}_"
+    every = [d for d in st.audit.decisions_where(trade_date=(lo or "0000-00-00", hi or "9999-99-99"))
+             if (d.screen_run_id or "").startswith(prefix) or d.source in ("human", "rule")]
+    loop_ds = [d for d in every if (d.screen_run_id or "").startswith(prefix) and d.source != "human"]
+    agent = [d for d in loop_ds if d.settings.get("decider") == LLM["model"]]
+    paired = [(d, r) for d, r in zip(agent, _rule_calls(st, loop, agent)) if r is not None]
+    groups = {"agent": agent, "rule": [r for _, r in paired]}
+    recorded = [d for d in loop_ds if d.settings.get("decider") == BASELINE_DECIDER]
+    bench = MARKETS[st.market]["benchmark"]
+    pairs = sorted({(d.ticker, d.trade_date) for d in agent})
+    # a settlement depends on the two price files and the day only: kept per (ticker, day) under the files' stamps
+    # and today (fetch_returns leaves today's bar out), so a new decision settles alone (memory only — no table)
+    today, files = datetime.now(UTC).date(), dict(PRICES.stamp([bench, *(t for t, _ in pairs)]))
+    hit = st._cache.get("loop_settle")
+    old = hit[1] if hit is not None and hit[0] == (today, files[bench]) else {}
+    known = {x: v for x, (stamp, v) in old.items() if stamp == files.get(x[0])}
+    missing = [x for x in pairs if x not in known]
+    known |= _loop_settle(missing, bench) if missing else {}
+    st._cache["loop_settle"] = ((today, files[bench]), {x: (files.get(x[0]), v) for x, v in known.items()})
+    columns = {k: _loop_column(k, v, known) for k, v in groups.items() if source in (k, "all")}
+    agree = sum(r.rating == d.rating for d, r in paired)
+    stand_ins = [d for d in recorded if d.settings.get("fallback")]
+    own = [d for d in recorded if not d.settings.get("fallback")]
+    return {"market": st.market, "source": source, "from": lo, "to": hi, "holding_days": LOOP_HOLDING,
+            "columns": columns, "trial": _trial(st),
+            "agreement": {"compared": len(paired), "agree": agree, "rate": agree / len(paired) if paired else None,
+                          "no_screen": len(agent) - len(paired)},
+            "rule_recorded": {"decisions": len(own), "first": min((d.trade_date for d in own), default=None),
+                              "last": max((d.trade_date for d in own), default=None), "stand_ins": len(stand_ins)},
+            "human_excluded": sum(d.source == "human" for d in every),
+            "rule_exits_excluded": sum(d.source == "rule" and not (d.screen_run_id or "").startswith(prefix) for d in every),
+            "note_ko": "5일 정산 = 결정 다음 첫 종가에 진입해 종목 자신의 5거래일 뒤 종가(휴장일은 봉이 없어 건너뜀), "
+                       "벤치마크 대비 알파, 가격은 KIS 캐시만(scripts/llm_trial_report.py와 같은 정의). 평균 수익 · "
+                       "알파는 매수 쪽(매수 · 비중확대)만, 방향 수익 · 적중률은 매도 쪽 부호를 뒤집어 함께, 보유는 참고, "
+                       "REVIEW는 미채점. 규칙 열은 모델과 같은 날 · 같은 종목을 그날 선별로 규칙이 판단한 결과(재계산)이고, "
+                       "규칙이 직접 기록한 결정 · 모델 대신 규칙이 정한 결정 · 사람 처리 · 규칙 청산은 수만 셉니다. "
+                       "베이스라인 채점과 섞지 않습니다."}
+
+
+def _date_range(date_from: str | None, date_to: str | None) -> tuple[str | None, str | None]:
+    try:
+        lo, hi = (check_date(d) if d else None for d in (date_from, date_to))
+    except ValueError as exc:
+        raise HTTPException(422, f"날짜 형식이 아닙니다(YYYY-MM-DD): {exc}") from exc
+    if lo and hi and lo > hi:
+        raise HTTPException(422, f"from {lo}이 to {hi}보다 늦습니다")
+    return lo, hi
+
+
+@app.get("/api/performance/loop", tags=["performance"])
+def performance_loop(market: str | None = MarketQuery, source: str = Query("all", pattern="^(agent|rule|all)$"),
+                     date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to")) -> dict:
+    """모의 루프 채점(LLM vs 규칙) — `/api/performance`의 `loop`와 같다. 베이스라인 요약이 없어도 답한다."""
+    st = _store(market)
+    return _loop_scoring(st, source, *_date_range(date_from, date_to))
+
+
 @app.get("/api/performance/series", tags=["performance"])
 def performance_series(market: str | None = MarketQuery, date_from: str | None = Query(None, alias="from"),
                        date_to: str | None = Query(None, alias="to")) -> dict:
@@ -980,12 +1176,7 @@ def performance_series(market: str | None = MarketQuery, date_from: str | None =
     대비), 같은 기간의 백테스트 비교선(2차 · 3차 실측의 규칙 + 국면 필터 변형, 모의 시작일 직전 평가액 기준 %).
     `from` · `to`는 보여 줄 범위만 자른다(% 기준은 모의 시작일 그대로). 장부 기록 · 가격 파일이 바뀌면 다시 계산."""
     st = _store(market)
-    try:
-        lo, hi = (check_date(d) if d else None for d in (date_from, date_to))
-    except ValueError as exc:
-        raise HTTPException(422, f"날짜 형식이 아닙니다(YYYY-MM-DD): {exc}") from exc
-    if lo and hi and lo > hi:
-        raise HTTPException(422, f"from {lo}이 to {hi}보다 늦습니다")
+    lo, hi = _date_range(date_from, date_to)
     book, cached = _series(st)
     rows = [r for r in book["rows"] if (lo is None or r["date"] >= lo) and (hi is None or r["date"] <= hi)]
     return {"market": st.market, "currency": MARKETS[st.market]["currency"], "start": book["start"],
@@ -1802,16 +1993,13 @@ def model_settings(market: str | None = MarketQuery) -> dict:
     env_path = Path(os.environ.get("TRADING_ENV_FILE") or ROOT / ".env")
     env_file = dotenv_values(env_path) if env_path.exists() else {}
     decider = loop.default_decider(st.audit, st.market)
-    trial = loop.trial_on()
-    days = loop.llm_trial_days(st.audit, st.market) if trial else []
+    trial = _trial(st)
     sessions = LLM.get("trial_sessions")
     return {"market": st.market, "decider": decider, "decider_ko": DECIDER_KO[decider],
             "decider_id": LLM["model"] if decider == "llm" else BASELINE_DECIDER,
             "model": LLM.get("model"), "effort": LLM.get("effort"), "max_tokens": LLM.get("max_tokens"),
             "timeout": LLM.get("timeout"), "max_calls_per_run": LLM.get("max_calls_per_run"),
-            "enabled": bool(LLM.get("enabled")), "trial_mode": trial,
-            "trial": {"sessions": sessions, "days": days,
-                      "remaining": max(sessions - len(days), 0) if sessions is not None else None} if trial else None,
+            "enabled": bool(LLM.get("enabled")), "trial_mode": trial is not None, "trial": trial,
             "config": dict(LLM), "keys": {"ANTHROPIC_API_KEY": _key_set("ANTHROPIC_API_KEY", env_file)},
             "output_language": "ko",
             "note_ko": "config.LLM의 값을 읽어 보여 줍니다(바꾸려면 코드 설정 — 컨트롤 타워). 시험 모드는 시장마다 모델 결정 "

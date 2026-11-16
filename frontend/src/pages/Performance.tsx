@@ -8,6 +8,8 @@ import { useMarket } from '../hooks/useMarket'
 import { AlphaBar, Loaded, Pct, RatingBadge, TickerCell } from '../components/common'
 import { SourceBadge } from '../components/decisionParts'
 import { RatingBars, SeriesCharts, SettlementTable } from '../components/perfCharts'
+import { LoopPanel, PeriodControl, PeriodNote, TrialBadge } from '../components/loopScoring'
+import { type Period, seriesParams, shownSeries } from '../components/loopScoringLogic'
 import type { Market, PaperSummary, SimMetrics } from '../api/types'
 
 const MEASURE: Record<Market, string> = { KRX: '2차', US: '3차 · 미국' }
@@ -22,20 +24,37 @@ export default function Performance() {
   const perf = useApi(() => api.performance(market), [market])
   const paper = useApi(() => api.paper(market), [market])
   const series = useApi(() => api.performanceSeries(market), [market])
+  const [period, setPeriod] = useState<Period>('all')
+  const asOf = series.data?.as_of ?? null
+  const params = seriesParams(asOf, period)
+  const from = params?.from
+  // the whole book first (its last day sets the period); a shorter period asks the server for that range
+  const cut = useApi(() => (params ? api.performanceSeries(market, params) : Promise.resolve(null)), [market, from])
+  const shown = shownSeries(from, series, cut)
+  const loop = useApi(() => api.performanceLoop(market), [market])
   const day = (d: string | null | undefined) => (d ? (market === 'US' ? `${d} ET` : d) : '–')
   return (
     <>
       <h1 className="page-title">성과·백테스트</h1>
       <AgentTabs value={tab} onChange={setTab} label="측정" items={[
         { id: 'book', label: `모의 장부 추이 (${market === 'US' ? '미국' : '국내'})` },
+        { id: 'loop', label: '모의 루프 채점 (LLM vs 규칙)' },
         { id: 'portfolio', label: `포트폴리오 실측 (${MEASURE[market]} · 드로다운)` },
         { id: 'compare', label: '국내 2차 ↔ 미국 3차' },
         { id: 'decisions', label: '결정 채점 (1차 · 알파)' },
       ]} />
       <div className="section">
-        {tab === 'book' && <Loaded state={series}>{(s) => (
-          <AgentSectionPanel title="모의 장부 일별 추이" description={`${day(s.start)} 모의 시작 ~ ${day(s.as_of)} · 가격 ${s.price_source ?? '없음'}${s.price_provisional ? ' (잠정)' : ''}. ${s.note_ko}`}>
-            <SeriesCharts key={market} s={s} market={market} day={day} />
+        {tab === 'book' && <Loaded state={shown}>{(s) => s && (
+          <AgentSectionPanel title="모의 장부 일별 추이" description={`${day(s.start)} 모의 시작 ~ ${day(s.as_of)} · 가격 ${s.price_source ?? '없음'}${s.price_provisional ? ' (잠정)' : ''}. ${s.note_ko}`}
+            action={<PeriodControl value={period} onChange={setPeriod} />}>
+            <PeriodNote from={from} day={day} />
+            <SeriesCharts key={`${market}-${period}`} s={s} market={market} day={day} />
+          </AgentSectionPanel>
+        )}</Loaded>}
+        {tab === 'loop' && <Loaded state={loop}>{(l) => (
+          <AgentSectionPanel title="모의 루프 채점" description={`일일 루프가 기록한 결정을 결정 다음 첫 종가에서 ${l.holding_days}거래일 뒤 종가로 정산합니다(scripts/llm_trial_report.py와 같은 숫자). 베이스라인 채점(결정 채점 탭)과 섞지 않습니다`}
+            action={<TrialBadge trial={l.trial} />}>
+            <LoopPanel l={l} />
           </AgentSectionPanel>
         )}</Loaded>}
         {tab === 'portfolio' && <Loaded state={paper}>{(p) => <Portfolio p={p} bench={bench} />}</Loaded>}

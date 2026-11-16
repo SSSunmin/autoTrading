@@ -355,3 +355,12 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .legend .sw.base { border-top: 2px dashed var(--app-fg-3); }
 .perf-empty { padding: 1.4rem; text-align: center; color: var(--app-fg-2); border: 1px dashed var(--app-line); border-radius: var(--bv-radius-200); margin: 0; }
 .fallback-warn { margin: 0; padding: 0.6rem 1rem; background: var(--app-warn-bg); color: var(--app-warn); border: 1px solid var(--app-warn-line); border-radius: var(--bv-radius-100); font-size: var(--bv-font-size-body-3-normal); }
+
+/* loop scoring (loop-scoring): tokens only */
+.trial-badge { display: inline-block; font-size: var(--bv-font-size-caption-1); font-weight: var(--bv-font-weight-semibold); color: var(--app-warn); background: var(--app-warn-bg); border: 1px solid var(--app-warn-line); border-radius: 999px; padding: 0.1rem 0.8rem; white-space: nowrap; }
+.trial-badge.done { color: var(--app-fg-2); background: var(--app-hold-bg); border-color: var(--app-line); }
+.loop-t td:first-child { font-weight: var(--bv-font-weight-semibold); }
+.loop-line { margin: 0; font-size: var(--bv-font-size-body-3-normal); color: var(--app-fg-2); }
+.loop-line b { color: var(--app-fg); }
+.period-ctl { display: inline-flex; align-items: center; gap: 0.6rem; }
+.period-note { margin: 0 0 0.6rem; }
