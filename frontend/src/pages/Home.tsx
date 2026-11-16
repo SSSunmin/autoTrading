@@ -198,6 +198,17 @@ function FlowCards({ flow, asOf, to }: { flow: MarketFlow; asOf: string | undefi
   )
 }
 
+/** The card's next-run row; a broken holiday calendar shows its error there instead of a guessed time. */
+export function NextRunRow({ m }: { m: MarketSummary }) {
+  if (m.schedule_error) {
+    return <tr><td>다음 실행</td><td className="r alert-t">{m.next_run_label_ko}</td><td className="wrap alert-t">{m.schedule_error}</td></tr>
+  }
+  return (
+    <tr><td>다음 실행</td><td className="r num">{m.next_run_label_ko}</td>
+      <td className="muted">{m.state && !m.state.running ? (m.state.keep_exits ? '결정만 기록 · 청산 매도만' : '결정만 기록 · 주문 없음') : `정규장 ${m.session_kst} KST · 마감 5분 뒤`}</td></tr>
+  )
+}
+
 /** One book on the home screen: value in its own currency, today, drawdown, mode and the next run in KST. */
 function MarketCard({ m, current }: { m: MarketSummary; current: boolean }) {
   const [, setMarket] = useMarket()
@@ -209,8 +220,7 @@ function MarketCard({ m, current }: { m: MarketSummary; current: boolean }) {
         <tr><td>오늘 손익</td><td className="r"><Pct value={m.day_return} digits={2} /></td><td className="muted">전일 종가 평가 대비</td></tr>
         <tr><td>드로다운</td><td className="r"><Pct value={m.drawdown} /></td><td className="muted">피크 대비</td></tr>
         <tr><td>운용</td><td className="r"><ModeBadge state={m.state} /></td><td className="muted">{m.state?.running ? '' : m.state?.halt_reason}</td></tr>
-        <tr><td>다음 실행</td><td className="r num">{m.next_run_label_ko}</td>
-          <td className="muted">{m.state && !m.state.running ? (m.state.keep_exits ? '결정만 기록 · 청산 매도만' : '결정만 기록 · 주문 없음') : `정규장 ${m.session_kst} KST · 마감 5분 뒤`}</td></tr>
+        <NextRunRow m={m} />
       </tbody></table></div>}
     </AgentSectionPanel>
   )

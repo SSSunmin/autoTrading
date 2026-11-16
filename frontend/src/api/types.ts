@@ -307,6 +307,54 @@ export interface TickerDetail {
   timeline: { date: string; rating: Rating }[]
 }
 
+/** GET /api/performance/series: one day of the paper book (6-A). Percentages are fractions. */
+export interface SeriesRow {
+  date: string
+  equity: number
+  /** time-weighted NAV against the starting cash — a deposit or withdrawal is no gain */
+  nav_pct: number
+  /** that NAV against its running peak (≤ 0) */
+  drawdown_pct: number
+  /** holdings / equity */
+  exposure_pct: number
+  cash_pct: number
+  /** the reference backtest's equity against its last row before the paper start; null where it does not reach */
+  baseline_pct: number | null
+}
+
+export interface PerformanceSeries {
+  market: Market
+  currency: 'KRW' | 'USD'
+  start: string | null
+  as_of: string | null
+  from: string | null
+  to: string | null
+  initial_cash: number
+  rows: SeriesRow[]
+  reference: { variant: string; variant_ko: string; measurement_ko: string; covered_until: string | null; error: string | null }
+  cache: 'hit' | 'miss'
+  price_source: PriceSource | null
+  price_as_of: string | null
+  price_provisional: boolean
+  note_ko: string
+}
+
+/** /api/performance rating bars (6-B): the scoring path's numbers, every rating listed (count 0 → nulls). */
+export interface RatingBar {
+  rating: Rating
+  rating_ko: string
+  count: number
+  mean_alpha: number | null
+  mean_raw: number | null
+  hit_rate: number | null
+}
+
+export interface Settlement {
+  failed: number
+  by_reason: { id: 'no_price' | 'price_ended'; label_ko: string; count: number; tickers: string[] }[]
+  waiting: number
+}
+
 export interface RatingScore {
   count: number
   hit_rate: number | null
@@ -341,6 +389,9 @@ export interface Performance {
   /** a person's "보유로 처리" decisions: never in the scores above, counted apart */
   human_handled: number
   caveat: string
+  rating_bars: RatingBar[]
+  settlement: Settlement
+  by_source: { decisions: Record<string, number>; human: number; scored_source: string; scored: number; note_ko: string }
 }
 
 export interface Health {
@@ -421,6 +472,8 @@ export interface DataStatus {
   refresh: Record<Market, RefreshInfo | null>
   vendors: VendorStatus[]
   price_source: Record<Market, { price_source: PriceSource | null; price_as_of: string | null; price_provisional: boolean }>
+  /** the market's last daily-loop run's price fallback lines (RunRecord.notes); null when it had none */
+  price_fallback: Record<Market, { stage: string; trade_date: string; ended_at: string; notes: string[] } | null>
   note: string
 }
 
@@ -461,7 +514,8 @@ export interface MarketInfo {
   benchmark_name_ko: string
   timezone: string
   session: string
-  session_kst: string
+  /** null when the market's holiday calendar could not be read (/api/markets ``schedule_error``) */
+  session_kst: string | null
   name_style: 'name' | 'name_ticker'
 }
 
@@ -480,9 +534,11 @@ export interface MarketSummary extends MarketInfo {
   /** home flow cards, counted by the server; null with ``error`` */
   flow: MarketFlow | null
   error: string | null
-  next_run_kst: string
-  next_run_stage: 'decide' | 'fill'
+  /** null: the next run and today's session are unknown — the calendar file is broken (no weekday guess) */
+  next_run_kst: string | null
+  next_run_stage: 'decide' | 'fill' | null
   next_run_label_ko: string
+  schedule_error: string | null
 }
 
 export interface MarketFlow {

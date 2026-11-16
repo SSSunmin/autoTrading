@@ -9,6 +9,7 @@ import { ModeBadge, Loaded } from '../components/common'
 import { ResumeButton } from '../components/risk'
 import { CapitalPanel } from '../components/capital'
 import { ACCOUNTS, axesMode, EXECUTIONS, modeAxes } from '../components/capitalLogic'
+import { fallbackLine } from '../components/perfLogic'
 
 const MODE_DESC: Record<Mode, string> = {
   paper: '같은 자동 루프를 실제 주문 없이 돌림. 실거래 전환 전 검증 기간.',
@@ -109,9 +110,16 @@ function DataPanel() {
   )
 }
 
+export function FallbackLines({ d }: { d: Pick<DataStatus, 'price_fallback'> }) {
+  const lines = MARKETS.flatMap((m) => { const t = fallbackLine(d, m); return t ? [{ m, t }] : [] })
+  if (!lines.length) return null
+  return <>{lines.map(({ m, t }) => <p key={m} className="fallback-warn" role="status"><b>{MARKET_KO[m]}</b> {t}</p>)}</>
+}
+
 function DataTables({ d }: { d: DataStatus }) {
   return (
     <div className="stack-gap" style={{ gap: '1rem' }}>
+      <FallbackLines d={d} />
       <div className="matrix"><table>
         <thead><tr><th>캐시</th><th className="r">파일</th><th className="r">크기</th></tr></thead>
         <tbody>

@@ -193,7 +193,8 @@ BOOK_EVENT_KO: dict[str, str] = {"guard": "가드", "lock": "잠금", "protectio
 DECISION_SOURCE_KO["human"] = "사람 처리"
 EXCEPTION_ACTION_KO: dict[str, str] = {"rerun": "재실행", "hold": "보유로 처리", "dismiss": "무시",
                                        "retry_next": "다음 세션 재시도", "dismiss_order": "무시"}
-EXCEPTION_PENDING_KO: dict[str, str] = {"rerun": "재실행 대기 (재실행 경로 미연결)", "retry_next": "다음 세션 재시도 예약"}
+EXCEPTION_PENDING_KO: dict[str, str] = {"rerun": "재실행 대기 (다음 일일 루프 decide에서 재판단)",
+                                         "retry_next": "다음 세션 재시도 예약"}
 OPERATION_KO["exception_action"] = "예외 처리"
 AUTO_RULE_KO["cap_zero"] = "주문당 상한 — 1주도 살 수 없음"
 
@@ -204,3 +205,6 @@ CAPITAL_ACCOUNT_KO: dict[str, str] = {"paper": "모의투자 자본", "live": "�
 CAPITAL_CHANGE_KO: dict[str, str] = {"start": "시작 자본 교체", "flow": "입출금(현금 흐름)", "live": "실거래 자본 저장"}
 AUTO_RULE_KO["small_account"] = "소액 1종목 모드"
 DECIDER_KO: dict[str, str] = {"rule": "규칙 베이스라인", "llm": "LLM 에이전트"}
+
+# Scoring (performance-charts): why a decision whose window is over has no settlement yet (GET /api/performance).
+SETTLEMENT_KO = {"no_price": "가격 파일 없음", "price_ended": "시세 끊김 (상장 폐지 · 거래 정지 등 — 청산일 전)"}

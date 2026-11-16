@@ -65,7 +65,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from agent_trading_core import kis
+from agent_trading_core import kis, market_calendar
 from agent_trading_core.audit import (
     AuditLog,
     DecisionRecord,
@@ -271,6 +271,12 @@ class Prices:
         as_of = closes.index[-1] if len(closes) else None
         marks = kis.provisional(self.cache_dir) if source == "kis" else {}
         return {"source": source, "as_of": as_of, "provisional": as_of is not None and ticker in marks.get(as_of, [])}
+
+    def stamp(self, tickers) -> tuple:
+        """Which file serves each ticker now and its mtime (frames: their identity) — a cache key that changes when a
+        refresh rewrites a price file. Read only."""
+        return tuple((t, id(self._frames[t]) if t in self._frames else self._file(t) if self.cache_dir is not None else None)
+                     for t in sorted(set(tickers)))
 
     def _close_series(self, ticker: str) -> pd.Series:
         """The ticker's closes without gaps, oldest first — kept while ``frame`` serves the same frame."""
@@ -624,15 +630,12 @@ def dd_stop_standing(operations: list[OperationRecord]) -> bool:
     return any(op.target == "dd_stop" for op in standing_halts(operations))
 
 
-def next_trading_day(calendar: list[str], date: str) -> str:
-    """The trading day after ``date``: from the index calendar, or past its end the next weekday.
-    ponytail: exchange holidays ahead are not in the price cache; upgrade with an exchange calendar."""
+def next_trading_day(calendar: list[str], date: str, market: str) -> str:
+    """The trading day after ``date``: from the index calendar, or past its end the market's next session
+    (``market_calendar.next_session`` — a listed holiday is skipped; a year with no calendar file, every weekday)."""
     if (day := next_session(calendar, date)) is not None:
         return day
-    d = Date.fromisoformat(date) + timedelta(days=1)
-    while d.weekday() >= 5:
-        d += timedelta(days=1)
-    return d.isoformat()
+    return market_calendar.next_session(market, Date.fromisoformat(date)).isoformat()
 
 
 def effective_state(operations: list[OperationRecord], calendar: list[str], market: str, now: datetime) -> dict:
@@ -650,7 +653,7 @@ def effective_state(operations: list[OperationRecord], calendar: list[str], mark
     if not halted_on:
         return state
     tz = ZoneInfo(MARKETS[market]["timezone"])
-    at = datetime.combine(Date.fromisoformat(next_trading_day(calendar, halted_on)), time(0), tz)
+    at = datetime.combine(Date.fromisoformat(next_trading_day(calendar, halted_on, market)), time(0), tz)
     state["auto_resume_at"] = at.isoformat()
     if now < at:
         return state
@@ -674,7 +677,7 @@ def _auto_resume(audit: AuditLog, date: str, calendar: list[str], cfg: PaperConf
         kind="resume", operator="system", role="auto", reason=f"일일 손실 정지 자동 해제(정지일 {halted_on})",
         target="daily_loss", market=cfg.market, scope=cfg.market, before={"running": False},
         after={"running": True, "date": date, "halted_on": halted_on},
-        effective_from=next_trading_day(calendar, halted_on)))
+        effective_from=next_trading_day(calendar, halted_on, cfg.market)))
     return True
 
 
@@ -1245,6 +1248,33 @@ def book_events(orders: list[OrderRecord], operations: list[OperationRecord], pr
 
 
 # --- the paper-trading gate (screen 8, docs/05 §4) ---------------------------------------------------------
+
+def book_series(orders: list[OrderRecord], operations: list[OperationRecord], prices: Prices, cfg: PaperConfig,
+                as_of: str | None = None) -> dict:
+    """The paper book day by day from its start (``paper_start``) to ``as_of`` (the calendar's last day): ``nav_pct``
+    (the time-weighted unit value against the starting cash — a deposit or withdrawal is no gain, ``unit_values``),
+    ``drawdown_pct`` (that value against its running peak, from the starting cash — as ``paper_progress``, no peak
+    reset), ``exposure_pct`` (holdings / equity) and ``cash_pct`` (cash / equity), and ``equity``. Read from the
+    records only."""
+    cfg = with_capital(cfg, operations)
+    calendar = prices.calendar(cfg.index)
+    latest = latest_orders(orders)
+    start = paper_start(list(latest.values()), operations, cfg.market)
+    as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else None)
+    out = {"start": start, "as_of": as_of, "initial_cash": cfg.initial_cash, "rows": []}
+    if start is None or as_of is None or as_of < start:
+        return out
+    book = replay(list(latest.values()), prices, cfg, until=as_of)
+    eq_by_day, ex_by_day, nav_by_day = dict(book.equity), dict(book.exposure), dict(unit_values(book, cfg))
+    peak = cfg.initial_cash
+    for d in (d for d in calendar if start <= d <= as_of):
+        eq, nav = eq_by_day.get(d, cfg.initial_cash), nav_by_day.get(d, cfg.initial_cash)
+        peak = max(peak, nav)
+        exposure = ex_by_day.get(d, 0.0)
+        out["rows"].append({"date": d, "equity": eq, "nav_pct": nav / cfg.initial_cash - 1, "drawdown_pct": nav / peak - 1,
+                            "exposure_pct": exposure, "cash_pct": 1 - exposure if eq > 0 else 0.0})
+    return out
+
 
 def paper_start(orders: list[OrderRecord], operations: list[OperationRecord], market: str) -> str | None:
     """The first day of the market's paper run: its first order's decision date, or — no order yet — the day of the

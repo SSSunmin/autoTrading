@@ -324,3 +324,34 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .cap-problem { color: var(--app-warn); }
 .mode-axes { align-items: center; gap: 0.8rem; }
 .mode-locked { font-size: var(--bv-font-size-body-3-normal); }
+
+/* performance 6-A · 6-B (performance-charts): tokens only; rising red / falling blue as everywhere (.up · .down) */
+.perf-charts { display: flex; flex-direction: column; gap: 1rem; }
+/* one column: a half-width chart scales its viewBox text below reading size */
+.perf-2 { display: grid; gap: 1rem; }
+.perf-chart { margin: 0; }
+.perf-chart figcaption { font-size: var(--bv-font-size-body-3-normal); font-weight: var(--bv-font-weight-semibold); color: var(--app-fg); margin-bottom: 0.4rem; }
+.perf-svg { display: block; width: 100%; height: auto; border-radius: var(--bv-radius-100); touch-action: pan-y; }
+.perf-svg:focus-visible { outline: 2px solid var(--app-gauge); outline-offset: 2px; }
+/* font sizes are viewBox units (the svg scales with its card), as the screen-8 drawdown chart */
+.perf-svg text { font-size: 11px; fill: var(--app-fg-2); }
+.perf-svg .tick line { stroke: var(--app-line); }
+.perf-svg .tick.zero line { stroke: var(--app-fg-3); }
+.perf-svg .line-nav { fill: none; stroke: var(--app-fg); stroke-width: 2; }
+.perf-svg .line-base { fill: none; stroke: var(--app-fg-3); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.perf-svg .dd-area { fill: var(--app-chart-area); }
+.perf-svg .dd-line { fill: none; stroke: var(--app-chart-line); stroke-width: 2; }
+.perf-svg .bar-ex { fill: var(--app-gauge); opacity: 0.55; }
+.perf-svg .bar-ex.on { opacity: 1; }
+.perf-svg .marker line { stroke: var(--app-fg-2); stroke-dasharray: 2 2; }
+.perf-svg .marker .dot-nav { fill: var(--app-fg); }
+.perf-svg .marker .dot-base { fill: var(--app-fg-3); }
+.perf-svg .marker .dot-dd { fill: var(--app-chart-line); }
+.perf-svg .tip rect { fill: var(--app-surface); stroke: var(--app-line); }
+.perf-svg .tip text { fill: var(--app-fg); font-size: 12px; }
+.chart-readout { margin: 0; font-size: var(--bv-font-size-body-3-normal); color: var(--app-fg-2); }
+.chart-readout b { color: var(--app-fg); }
+.legend .sw { display: inline-block; width: 1.6rem; height: 0; vertical-align: middle; margin: 0 0.3rem 0 0.6rem; border-top: 2px solid var(--app-fg); }
+.legend .sw.base { border-top: 2px dashed var(--app-fg-3); }
+.perf-empty { padding: 1.4rem; text-align: center; color: var(--app-fg-2); border: 1px dashed var(--app-line); border-radius: var(--bv-radius-200); margin: 0; }
+.fallback-warn { margin: 0; padding: 0.6rem 1rem; background: var(--app-warn-bg); color: var(--app-warn); border: 1px solid var(--app-warn-line); border-radius: var(--bv-radius-100); font-size: var(--bv-font-size-body-3-normal); }
