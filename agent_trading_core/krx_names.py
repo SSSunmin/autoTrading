@@ -208,3 +208,8 @@ DECIDER_KO: dict[str, str] = {"rule": "규칙 베이스라인", "llm": "LLM 에�
 
 # Scoring (performance-charts): why a decision whose window is over has no settlement yet (GET /api/performance).
 SETTLEMENT_KO = {"no_price": "가격 파일 없음", "price_ended": "시세 끊김 (상장 폐지 · 거래 정지 등 — 청산일 전)"}
+
+# Loop scoring (loop-scoring): the two columns of the performance screen's comparison and why a decision is unsettled.
+LOOP_SOURCE_KO = {"agent": "LLM 에이전트", "rule": "규칙 (같은 날 재계산)"}
+LOOP_PENDING_KO = {"window": "5거래일이 아직 안 지남", "no_price": "KIS 가격 파일 없음", "no_bench": "벤치마크 KIS 파일 없음",
+                   "price_ended": "시세 끊김 (상장 폐지 · 거래 정지 등)"}

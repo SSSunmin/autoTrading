@@ -339,6 +339,46 @@ export interface PerformanceSeries {
   note_ko: string
 }
 
+/** /api/performance/loop (loop-scoring): one source's daily-loop decisions settled five sessions on, as
+ *  scripts/llm_trial_report.py settles them. Fractions; null where nothing counts. */
+export interface LoopColumn {
+  source: 'agent' | 'rule'
+  label_ko: string
+  decisions: number
+  ratings: Record<string, number>
+  review: number
+  stand_ins: number
+  first: string | null
+  last: string | null
+  settled: number
+  pending: number
+  pending_by_reason: { id: 'window' | 'no_price' | 'no_bench' | 'price_ended'; label_ko: string; count: number }[]
+  settle_failed: string[]
+  buy_settled: number
+  mean_raw: number | null
+  mean_alpha: number | null
+  alpha_by_rating: Record<string, { n: number; mean_alpha: number | null }>
+  directional: { n: number; mean_return: number | null; mean_alpha: number | null; hit_rate: number | null }
+  hold: { n: number; mean_alpha: number | null }
+}
+
+export interface LoopScoring {
+  market: Market
+  source: 'agent' | 'rule' | 'all'
+  from: string | null
+  to: string | null
+  holding_days: number
+  columns: Partial<Record<'agent' | 'rule', LoopColumn>>
+  /** the rule column is the rule's call on these pairs (that day's screen through the rule) */
+  agreement: { compared: number; agree: number; rate: number | null; no_screen: number }
+  /** the rule's own records (outside the trial, stand-ins for the model): counted, in no column */
+  rule_recorded: { decisions: number; first: string | null; last: string | null; stand_ins: number }
+  trial: { sessions: number | null; days: string[]; remaining: number | null } | null
+  human_excluded: number
+  rule_exits_excluded: number
+  note_ko: string
+}
+
 /** /api/performance rating bars (6-B): the scoring path's numbers, every rating listed (count 0 → nulls). */
 export interface RatingBar {
   rating: Rating
