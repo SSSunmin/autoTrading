@@ -1,5 +1,6 @@
 import type {
-  BookEvents, CapitalAccount, CapitalInfo, CapitalPreview, CapitalResult, DataStatus, ModelSettings, UniverseKind, Decision, ExceptionAction, ExceptionActionResult, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
+  BookEvents, CapitalAccount, CapitalInfo, CapitalPreview, CapitalResult, DataStatus, ModelSettings, UniverseKind, Decision, ExceptionAction, ExceptionActionResult, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance,
+  PerformanceSeries, Positions,
   ResumePreview, ResumeResult, RulesSettings, RunRow, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
 } from './types'
 
@@ -60,6 +61,8 @@ export const api = {
   tickers: (market: Market) => get<TickerRow[]>('/api/tickers', { market }),
   ticker: (market: Market, ticker: string) => get<TickerDetail>(`/api/tickers/${encodeURIComponent(ticker)}`, { market }),
   performance: (market: Market) => get<Performance>('/api/performance', { market }),
+  performanceSeries: (market: Market, params?: { from?: string; to?: string }) =>
+    get<PerformanceSeries>('/api/performance/series', { ...params, market }),
   paper: (market: Market) => get<PaperSummary>('/api/paper', { market }),
   paperProgress: (market: Market) => get<PaperProgress>('/api/paper/progress', { market }),
   positions: (market: Market, params?: { as_of?: string }) => get<Positions>('/api/positions', { ...params, market }),

@@ -524,8 +524,13 @@ def test_us_performance_is_404_without_its_summary_and_reads_its_own_summary_and
     assert us.status_code == 200
     body = us.json()
     assert set(body) == {"run_id", "cells_run", "resolved", "pending", "unscored", "holding", "dates", "universe",
-                         "by_rating", "per_date", "reflections", "human_handled", "caveat"}
+                         "by_rating", "per_date", "reflections", "human_handled", "caveat",
+                         "market", "rating_bars", "settlement", "by_source"}
     assert body["run_id"] == "us1" and body["by_rating"]["Sell"]["rating_ko"] == "매도"
+    # the rating bars read the US log the same way (performance-charts): Sell −2.1% alpha → a hit, raw −4%
+    sell = {b["rating"]: b for b in body["rating_bars"]}["Sell"]
+    assert (sell["count"], sell["hit_rate"], sell["mean_alpha"], sell["mean_raw"]) == (1, 1.0, pytest.approx(-0.021),
+                                                                                       pytest.approx(-0.04))
     # a Sell's alpha counts on the short side; the reflection is the US log's, not the KRX one
     assert body["per_date"] == [{"date": "2026-06-05", "resolved": 1, "long_mean_alpha": None, "short_mean_alpha": pytest.approx(-0.021)}]
     assert [(x["ticker"], x["reflection"]) for x in body["reflections"]] == [("AAPL", "미국 규칙 베이스라인.")]

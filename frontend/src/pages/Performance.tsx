@@ -7,36 +7,8 @@ import { useLabels } from '../hooks/useLabels'
 import { useMarket } from '../hooks/useMarket'
 import { AlphaBar, Loaded, Pct, RatingBadge, TickerCell } from '../components/common'
 import { SourceBadge } from '../components/decisionParts'
-import type { Market, PaperSummary, RatingScore, SimMetrics } from '../api/types'
-
-const ORDER = ['Buy', 'Overweight', 'Hold', 'Underweight', 'Sell']
-
-export function RatingTable({ byRating }: { byRating: Record<string, RatingScore> }) {
-  const rows = ORDER.filter((r) => byRating[r])
-  if (!rows.length) return <p className="muted">정산된 결정이 없습니다</p>
-  return (
-    <div className="matrix">
-      <table>
-        <thead><tr><th>등급</th><th className="r">n</th><th className="r">방향 적중률</th><th className="r">평균 알파</th><th style={{ width: '40%' }}>±10% 스케일</th></tr></thead>
-        <tbody>
-          {rows.map((r) => {
-            const s = byRating[r]
-            return (
-              <tr key={r}>
-                <td><RatingBadge rating={r as never} label={s.rating_ko} /></td>
-                <td className="r num">{s.count}</td>
-                <td className="r num">{s.hit_rate == null ? '방향 없음' : `${(s.hit_rate * 100).toFixed(0)}%`}</td>
-                <td className="r"><Pct value={s.mean_alpha} digits={2} /></td>
-                <td><AlphaBar value={s.mean_alpha} /></td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      <p className="muted" style={{ marginTop: '0.6rem' }}>Hold는 방향을 주장하지 않으므로 적중률이 없습니다. Sell·Underweight는 알파가 음수일 때 적중입니다.</p>
-    </div>
-  )
-}
+import { RatingBars, SeriesCharts, SettlementTable } from '../components/perfCharts'
+import type { Market, PaperSummary, SimMetrics } from '../api/types'
 
 const MEASURE: Record<Market, string> = { KRX: '2차', US: '3차 · 미국' }
 
@@ -45,33 +17,50 @@ const MEASURE: Record<Market, string> = { KRX: '2차', US: '3차 · 미국' }
  *  alpha (1st measurement, KRX only). */
 export default function Performance() {
   const [market] = useMarket()
-  const [tab, setTab] = useState('portfolio')
+  const [tab, setTab] = useState('book')
   const bench = useLabels().data?.markets[market]?.benchmark_name_ko ?? '지수'
   const perf = useApi(() => api.performance(market), [market])
   const paper = useApi(() => api.paper(market), [market])
+  const series = useApi(() => api.performanceSeries(market), [market])
+  const day = (d: string | null | undefined) => (d ? (market === 'US' ? `${d} ET` : d) : '–')
   return (
     <>
       <h1 className="page-title">성과·백테스트</h1>
       <AgentTabs value={tab} onChange={setTab} label="측정" items={[
+        { id: 'book', label: `모의 장부 추이 (${market === 'US' ? '미국' : '국내'})` },
         { id: 'portfolio', label: `포트폴리오 실측 (${MEASURE[market]} · 드로다운)` },
         { id: 'compare', label: '국내 2차 ↔ 미국 3차' },
         { id: 'decisions', label: '결정 채점 (1차 · 알파)' },
       ]} />
       <div className="section">
+        {tab === 'book' && <Loaded state={series}>{(s) => (
+          <AgentSectionPanel title="모의 장부 일별 추이" description={`${day(s.start)} 모의 시작 ~ ${day(s.as_of)} · 가격 ${s.price_source ?? '없음'}${s.price_provisional ? ' (잠정)' : ''}. ${s.note_ko}`}>
+            <SeriesCharts key={market} s={s} market={market} day={day} />
+          </AgentSectionPanel>
+        )}</Loaded>}
         {tab === 'portfolio' && <Loaded state={paper}>{(p) => <Portfolio p={p} bench={bench} />}</Loaded>}
         {tab === 'compare' && <Compare />}
         {tab === 'decisions' && <Loaded state={perf}>{(p) => (
           <>
             <p className="page-sub"><SourceBadge d={{ source_kind: 'baseline', source_kind_ko: '규칙 베이스라인' }} /> 실행 <b className="num">{p.run_id}</b>: {p.universe.length}종목 × {p.dates.length}일 = {p.cells_run}셀. 규칙 전용 베이스라인이라 에이전트가 더하는 알파를 재는 기준선입니다.</p>
-            <Grid columns={5} gap="1.4rem">
+            <Grid columns={6} gap="1.4rem">
               <AgentKpiCard label="정산 완료" value={p.resolved} />
               <AgentKpiCard label="정산 대기" value={p.pending} />
+              <AgentKpiCard label="정산 실패" value={p.settlement.failed} delta={p.settlement.by_reason.filter((r) => r.count).map((r) => `${r.label_ko} ${r.count}`).join(' · ') || undefined} />
               <AgentKpiCard label="미채점 (REVIEW)" value={p.unscored} />
               {/* a person's "보유로 처리" is in none of the scores (docs/10 D7), counted apart */}
               <AgentKpiCard label="사람 처리 (채점 제외)" value={p.human_handled} />
               <AgentKpiCard label="보유기간" value={p.holding} />
             </Grid>
-            <div className="section"><AgentSectionPanel title="등급별 성과"><RatingTable byRating={p.by_rating} /></AgentSectionPanel></div>
+            <div className="section">
+              <AgentSectionPanel title="등급별 성과" description={`채점 대상 ${p.by_source.scored}건(${p.by_source.scored_source}). 모의 루프 결정 ${Object.entries(p.by_source.decisions).map(([k, v]) => `${k} ${v}`).join(' · ') || '없음'} · 사람 처리 ${p.by_source.human}(채점 제외). ${p.by_source.note_ko}`}>
+                <RatingBars bars={p.rating_bars} />
+                <p className="muted" style={{ marginTop: '0.6rem' }}>보유는 방향을 주장하지 않으므로 적중률이 없습니다. 매도·비중축소는 알파가 음수일 때 적중입니다. 상승 빨강 · 하락 파랑.</p>
+              </AgentSectionPanel>
+            </div>
+            <div className="section"><AgentSectionPanel title="정산 실패" description={`정산 기간이 끝났는데 결과가 없는 결정, 사유별. 기간이 안 끝난 대기 ${p.settlement.waiting}건은 실패가 아닙니다`}>
+              <SettlementTable st={p.settlement} />
+            </AgentSectionPanel></div>
             <div className="section">
               <AgentSectionPanel title="결정일별 평균 알파" description="롱 콜(매수·비중확대)과 숏 콜(매도·비중축소)을 따로 평균">
                 <div className="matrix"><table>

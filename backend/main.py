@@ -25,6 +25,7 @@ Environment:
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
 import os
@@ -32,7 +33,7 @@ import re
 from collections import Counter
 from contextlib import ExitStack
 from dataclasses import asdict
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 from typing import Literal
@@ -46,7 +47,7 @@ from pydantic import BaseModel, Field, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_trading_core import __version__ as core_version
-from agent_trading_core import kis, scheduler
+from agent_trading_core import kis, market_calendar, scheduler
 from agent_trading_core.audit import (
     BASELINE_DECIDER,
     AuditLog,
@@ -70,6 +71,7 @@ from agent_trading_core.execution import (
     SMALL_ACCOUNT,
     Prices,
     book_events,
+    book_series,
     cancel_orders,
     capital_state,
     check_date,
@@ -115,6 +117,7 @@ from agent_trading_core.krx_names import (
     RULE_DESC_KO,
     RULE_KO,
     SELL_REASON_KO,
+    SETTLEMENT_KO,
     SIDE_KO,
     korean_name,
 )
@@ -312,7 +315,7 @@ def _pct(text: str | None) -> float | None:
     if not text:
         return None
     try:
-        return float(text.rstrip("%")) / 100
+        return float(text.strip().rstrip("%")) / 100              # as backtest._alpha
     except ValueError:
         return None
 
@@ -331,7 +334,7 @@ def _fill_at(o: OrderRecord) -> dict:
     if o.status in ("filled", "partial") and o.fill_date:
         day, planned = o.fill_date, False
     elif o.status == "open":
-        day, planned = next_trading_day(PRICES.calendar(MARKETS[o.market]["benchmark"]), o.trade_date), True
+        day, planned = next_trading_day(PRICES.calendar(MARKETS[o.market]["benchmark"]), o.trade_date, o.market), True
     else:
         return {"fill_at_local": None, "fill_at_kst": None, "fill_planned": False}
     at = session_window(o.market, date.fromisoformat(day))[0]
@@ -550,10 +553,11 @@ def _require_admin(token: str | None) -> str:
 # --- market hours: the session in the market's own time zone, shown in KST -------------------
 
 def session_window(market: str, day: date) -> tuple[datetime, datetime]:
-    """The regular session of ``day`` (the market's local date) as aware datetimes in KST. The zone database
-    applies daylight saving (New York 09:30 is 22:30 KST in summer, 23:30 in winter), never a hand offset."""
+    """The session of ``day`` (the market's local date) as aware datetimes in KST: the calendar's hours that day
+    (``market_calendar`` — a US half day closes 13:00, KRX's exam day runs 10:00-16:30), else the regular session.
+    The zone database applies daylight saving (New York 09:30 is 22:30 KST in summer, 23:30 in winter)."""
     tz = ZoneInfo(MARKETS[market]["timezone"])
-    start, end = (time.fromisoformat(t) for t in MARKETS[market]["session"].split("-"))
+    start, end = market_calendar.session_open(market, day), market_calendar.session_close(market, day)
     return (datetime.combine(day, start, tz).astimezone(KST), datetime.combine(day, end, tz).astimezone(KST))
 
 
@@ -565,8 +569,7 @@ def _daily_loop():
 
 def next_run(market: str, now: datetime) -> tuple[datetime, str]:
     """The next stage the scheduler will start for ``market`` after ``now`` and its name (``scheduler.plan``: fill
-    after the open, decide after the close, weekdays), in KST. ponytail: weekdays only, as the scheduler — an exchange
-    holiday shows a run that will skip ("holiday"); upgrade both with an exchange calendar."""
+    after the open, decide after the close, on the market's sessions — ``market_calendar``), in KST."""
     at, _, stage = scheduler.plan(_daily_loop(), [market], now, 1)[0]
     return at.astimezone(KST), stage
 
@@ -646,13 +649,14 @@ def sector_exposure(rows: list[dict], *, top: int = 3) -> list[dict]:
     return out
 
 
-def _market_labels(market: str, now: datetime) -> dict:
+def _market_labels(market: str, now: datetime | None) -> dict:
+    """The market's fixed labels and today's session in KST (``now`` None: the session left out — the calendar failed)."""
     m = MARKETS[market]
-    open_kst, close_kst = session_window(market, now.astimezone(ZoneInfo(m["timezone"])).date())
+    open_kst, close_kst = session_window(market, now.astimezone(ZoneInfo(m["timezone"])).date()) if now else (None, None)
     return {"market": market, "label_ko": MARKET_KO.get(market, market), "currency": m["currency"],
             "currency_symbol": "$" if m["currency"] == "USD" else "₩", "benchmark": m["benchmark"],
             "benchmark_name_ko": m["benchmark_name_ko"], "timezone": m["timezone"], "session": m["session"],
-            "session_kst": f"{open_kst:%H:%M}-{close_kst:%H:%M}",
+            "session_kst": f"{open_kst:%H:%M}-{close_kst:%H:%M}" if open_kst else None,
             "name_style": "name_ticker" if market == "US" else "name"}
 
 
@@ -687,6 +691,9 @@ def labels() -> dict:
                                  "note": "국내 관례로 통일(시장 무관): 빨강=상승·매수, 파랑=하락·매도"}}
 
 
+CALENDAR_ERRORS = (ValueError, KeyError, TypeError)   # market_calendar on a broken data/calendar file
+
+
 @app.get("/api/markets", tags=["meta"])
 def markets() -> list[dict]:
     """홈 시장 요약 카드: 시장마다 평가액(그 시장 통화) · 오늘 손익 · 드로다운 · 운용 상태 · 다음 실행 시각(KST). 합산 없음.
@@ -694,9 +701,14 @@ def markets() -> list[dict]:
     now = datetime.now(UTC)
     out = []
     for m in MARKETS:
-        run, stage = next_run(m, now)
-        card = _market_labels(m, now) | {"next_run_kst": run.isoformat(), "next_run_stage": stage,
-                                         "next_run_label_ko": f"{run:%m-%d %H:%M} KST · {STAGE_KO.get(stage, stage)}"}
+        try:
+            run, stage = next_run(m, now)
+            card = _market_labels(m, now) | {"next_run_kst": run.isoformat(), "next_run_stage": stage,
+                                             "next_run_label_ko": f"{run:%m-%d %H:%M} KST · {STAGE_KO.get(stage, stage)}",
+                                             "schedule_error": None}
+        except CALENDAR_ERRORS as exc:              # a broken calendar file: this card says so, no weekday guess
+            card = _market_labels(m, None) | {"next_run_kst": None, "next_run_stage": None, "next_run_label_ko": "일정 계산 오류",
+                                              "schedule_error": f"{MARKET_KO[m]} 휴장 달력을 읽지 못함: {type(exc).__name__}: {exc}"[:300]}
         try:
             st = _store(m)
             book = positions_view(st.order_rows, PRICES, cfg=paper_config(m), operations=st.operations)
@@ -854,11 +866,133 @@ def performance(market: str | None = MarketQuery) -> dict:
                     "reflection": e.get("reflection") or ""}
                    for e in sorted(st.memory, key=lambda e: e["date"], reverse=True) if not e["pending"] and e.get("reflection")]
     by_rating = {r: v | {"rating_ko": RATING_KO.get(r, r)} for r, v in s.get("by_rating", {}).items()}
-    return {"run_id": s.get("run_id"), "cells_run": s.get("cells_run"), "resolved": s.get("resolved"),
+    by_source = {k: v for k, v in st.facts["by_source"].items() if k != "human"}
+    bars = _rating_bars(st.memory)
+    return {"market": st.market, "rating_bars": bars, "settlement": _settlement(st),
+            "by_source": {"decisions": by_source, "human": human, "scored_source": "baseline",
+                          "scored": sum(b["count"] for b in bars),
+                          "note_ko": "채점(알파 · 적중률)은 규칙 베이스라인 실행의 메모리 로그에서만 나옵니다. 모의 루프의 "
+                                     "agent · rule 결정은 기록 수만 셉니다 — 정산 경로가 아직 없습니다. 사람 처리는 채점 제외."},
+            "run_id": s.get("run_id"), "cells_run": s.get("cells_run"), "resolved": s.get("resolved"),
             "pending": s.get("pending"), "unscored": s.get("unscored"), "holding": s.get("holding"),
             "dates": s.get("dates", []), "universe": s.get("universe", []), "by_rating": by_rating,
             "per_date": per_date, "reflections": reflections[:50], "human_handled": human,
             "caveat": "알파는 결정일 다음 첫 종가 진입 기준. 규칙 전용 run은 재현 가능하지만 에이전트 run은 모델 샘플링과 피드 변동으로 재현값이 아니다."}
+
+
+RATING_ORDER = ("Buy", "Overweight", "Hold", "Underweight", "Sell")
+
+
+def _rating_bars(memory: list[dict]) -> list[dict]:
+    """등급별 막대: ``backtest.summarize``와 같은 대상(정산됨 · REVIEW 아님 · 알파 있음)과 같은 식 — 결정 수, 평균 알파,
+    적중률(방향 있는 등급만: 알파 × 방향 > 0), 그리고 같은 보유 기간의 평균 실현 수익(raw)."""
+    direction = {"Buy": 1, "Overweight": 1, "Hold": 0, "Underweight": -1, "Sell": -1}
+    resolved = [e for e in memory if not e["pending"] and _pct(e.get("alpha")) is not None]   # REVIEW: not in RATING_ORDER
+    out = []
+    for r in RATING_ORDER:
+        rows = [e for e in resolved if e["rating"] == r]
+        alphas, raws = [_pct(e["alpha"]) for e in rows], [x for e in rows if (x := _pct(e.get("raw"))) is not None]
+        d = direction[r]
+        out.append({"rating": r, "rating_ko": RATING_KO.get(r, r), "count": len(rows),
+                    "mean_alpha": sum(alphas) / len(alphas) if alphas else None,
+                    "mean_raw": sum(raws) / len(raws) if raws else None,
+                    "hit_rate": sum(a * d > 0 for a in alphas) / len(alphas) if d and alphas else None})
+    return out
+
+
+def _settlement(st: _Store) -> dict:
+    """정산 실패: 정산 기간이 끝났는데 아직 대기인 결정을 사유별로 — 가격 파일 없음, 시세가 청산일 전에 끊김(상장 폐지 ·
+    거래 정지 등). 정산 기간은 채점 경로(``memory.settlement.fetch_returns``)와 같다: 진입 = 결정일 다음 첫 거래일 종가,
+    청산 = 그 뒤 ``holding`` 거래일째 종가(결정일 뒤 holding + 1번째 거래일, 벤치마크 달력). 청산일이 아직 안 온 것은
+    가격 파일이 없어도 대기(실패 아님). REVIEW는 미채점으로 따로(``unscored``)."""
+    calendar = PRICES.calendar(MARKETS[st.market]["benchmark"])
+    reasons: dict[str, list[str]] = {"no_price": [], "price_ended": []}
+    waiting = 0
+    for e in st.memory:
+        if not e["pending"] or e["rating"] == RATING_REVIEW:
+            continue
+        days = int(m.group(1)) if (m := re.match(r"(\d+)d$", e.get("holding") or "")) else 5
+        i = bisect.bisect_right(calendar, e["date"]) + days      # entry calendar[i - days], exit holding sessions on
+        due = calendar[i] if i < len(calendar) else None
+        if due is None:                                           # the exit day has not come: still in its window
+            waiting += 1
+            continue
+        info = PRICES.info(e["ticker"])
+        if info["source"] is None:
+            reasons["no_price"].append(e["ticker"])
+        elif info["as_of"] is None or info["as_of"] < due:
+            reasons["price_ended"].append(e["ticker"])
+        else:
+            waiting += 1                                      # priced through the window: the next settle run takes it
+    rows = [{"id": k, "label_ko": SETTLEMENT_KO[k], "count": len(v), "tickers": sorted(set(v))[:20]}
+            for k, v in reasons.items()]
+    return {"failed": sum(r["count"] for r in rows), "by_reason": rows, "waiting": waiting}
+
+
+# --- the performance series (6-A): the book replayed day by day, against the measured reproduction ---------------
+
+def _reference_equity(m: str) -> tuple[pd.DataFrame | None, tuple | None, str | None]:
+    """The reference variant's equity CSV (scripts/paper_backtest.py — paper-gate reads the same), its file stamp,
+    and why it is missing."""
+    path = DATA_DIR / PAPER_SUMMARY[m]
+    try:
+        variant = json.loads(path.read_text(encoding="utf-8"))["variants"][PAPER_REFERENCE_VARIANT]
+        csv = path.parent / variant["equity_csv"]
+        stamp = (path.stat().st_mtime_ns, csv.stat().st_mtime_ns)
+        return pd.read_csv(csv, dtype={"Date": str}).set_index("Date").sort_index(), stamp, None
+    except (OSError, KeyError, ValueError, TypeError) as exc:
+        return None, None, f"{PAPER_MEASUREMENT_KO[m]} 결과 없음({type(exc).__name__})"
+
+
+def _series(st: _Store) -> tuple[dict, bool]:
+    """The market's series, cached once per market until its orders or operations get a record, a price file it reads
+    is rewritten or the reference CSV changes (memory only — no table, no file). Returns (series, cache hit)."""
+    m, cfg = st.market, paper_config(st.market)
+    rows = st.order_rows
+    path = DATA_DIR / PAPER_SUMMARY[m]
+    # the summary and the variants' equity CSVs beside it (a rerun of paper_backtest.py rewrites them)
+    ref_key = tuple((f.name, f.stat().st_mtime_ns) for f in [path, *sorted(path.parent.glob("*equity*.csv"))] if f.exists())
+    key = (st._stamp.get("orders"), st._stamp.get("operations"),
+           PRICES.stamp([cfg.index] + [o.ticker for o in rows]), ref_key)
+    hit = st._cache.get("series")
+    if hit is not None and hit[0] == key:
+        return hit[1], True
+    book = book_series(rows, st.operations, PRICES, cfg)
+    ref, _, ref_error = _reference_equity(m)
+    base = None
+    if ref is not None and book["start"] and len(ref):
+        prior = ref[ref.index < book["start"]]
+        base = float((prior.iloc[-1] if len(prior) else ref.iloc[0])["equity"])
+    for r in book["rows"]:
+        r["baseline_pct"] = (float(ref.at[r["date"], "equity"]) / base - 1
+                             if base and ref is not None and r["date"] in ref.index else None)
+    book["reference"] = {"variant": PAPER_REFERENCE_VARIANT, "variant_ko": VARIANT_KO[PAPER_REFERENCE_VARIANT],
+                         "measurement_ko": PAPER_MEASUREMENT_KO[m], "covered_until": ref.index[-1] if ref is not None and len(ref) else None,
+                         "error": ref_error}
+    st._cache["series"] = (key, book)
+    return book, False
+
+
+@app.get("/api/performance/series", tags=["performance"])
+def performance_series(market: str | None = MarketQuery, date_from: str | None = Query(None, alias="from"),
+                       date_to: str | None = Query(None, alias="to")) -> dict:
+    """성과 6-A: 모의 장부의 일별 NAV(시간 가중 — 입출금은 성과가 아님) · 드로다운 · 노출 · 현금 비중(시작 자본 · 평가액
+    대비), 같은 기간의 백테스트 비교선(2차 · 3차 실측의 규칙 + 국면 필터 변형, 모의 시작일 직전 평가액 기준 %).
+    `from` · `to`는 보여 줄 범위만 자른다(% 기준은 모의 시작일 그대로). 장부 기록 · 가격 파일이 바뀌면 다시 계산."""
+    st = _store(market)
+    try:
+        lo, hi = (check_date(d) if d else None for d in (date_from, date_to))
+    except ValueError as exc:
+        raise HTTPException(422, f"날짜 형식이 아닙니다(YYYY-MM-DD): {exc}") from exc
+    if lo and hi and lo > hi:
+        raise HTTPException(422, f"from {lo}이 to {hi}보다 늦습니다")
+    book, cached = _series(st)
+    rows = [r for r in book["rows"] if (lo is None or r["date"] >= lo) and (hi is None or r["date"] <= hi)]
+    return {"market": st.market, "currency": MARKETS[st.market]["currency"], "start": book["start"],
+            "as_of": book["as_of"], "from": lo, "to": hi, "initial_cash": book["initial_cash"], "rows": rows,
+            "reference": book["reference"], "cache": "hit" if cached else "miss", **_price_out(st.market),
+            "note_ko": "NAV는 입출금을 뺀 시간 가중 수익(시작 자본 대비), 드로다운은 그 NAV의 누적 최고 대비, 노출 = 보유 평가액 "
+                       "/ 평가액. 비교선은 같은 규칙을 과거 데이터로 돌린 재현값(참고 — 판정에 안 씀)."}
 
 
 @app.get("/api/paper", tags=["performance"])
@@ -1020,6 +1154,22 @@ def list_runs(limit: int = Query(50, ge=1, le=500), stage: Literal["decide", "fi
     return [_run_out(r) for r in reversed(_store(market).audit.runs_where(stage=stage, last=limit))]
 
 
+FALLBACK_PREFIX = ("가격 Yahoo 폴백", "가격 폴백 확인 실패")   # scripts/daily_loop.fallback_notes · done()
+
+
+def _fallback(m: str) -> dict | None:
+    """The market's last daily-loop run and its price fallback lines (``RunRecord.notes``); None when that run had none."""
+    try:
+        last = STORES[m].refresh().audit.runs_where(last=1)
+    except (OSError, ValueError):
+        return None
+    if not last:
+        return None
+    r = last[-1]
+    notes = [n for n in r.notes if n.startswith(FALLBACK_PREFIX)]
+    return {"stage": r.stage, "trade_date": r.trade_date, "ended_at": r.ended_at, "notes": notes} if notes else None
+
+
 @app.get("/api/data/status", tags=["meta"])
 def data_status() -> dict:
     """설정 '데이터 · 캐시 상태': 캐시 파일 수 · 크기(출처별), 시장별 마지막 갱신, 벤더별 키 유무(값은 절대 내보내지 않음).
@@ -1048,7 +1198,7 @@ def data_status() -> dict:
                                                                   "no_key": "키 없음", "unknown": "기록 없음"}[state],
                         "last_refresh_at": runs[-1].get("at") if runs else None})
     return {"cache": cache, "refresh": {m: _refresh_out(lines, m) for m in MARKETS}, "vendors": vendors,
-            "price_source": {m: _price_out(m) for m in MARKETS},
+            "price_source": {m: _price_out(m) for m in MARKETS}, "price_fallback": {m: _fallback(m) for m in MARKETS},
             "note": "키는 있는지만 보여 줍니다. 값은 서버 환경 변수(.env)에만 있고 화면 · 응답에 나오지 않습니다."}
 
 
