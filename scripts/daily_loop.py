@@ -156,7 +156,8 @@ def run_stage(market: str, stage: str, day: str, data: Path, client, now: dateti
               decider: str | None = None, llm=None) -> RunRecord | None:
     """One stage of ``day``; the RunRecord it appended, or None when it did nothing (already done, or too early).
     One run of a market's stage at a time (a lock beside its audit files); the done check is made holding it.
-    ``decider``: rule | llm, default ``default_decider()``; ``llm``: the Anthropic client (default: ``agent.make_client``)."""
+    ``decider``: rule | llm, default ``default_decider()`` (the LLM trial, when on, counts this market's days);
+    ``llm``: the Anthropic client (default: ``agent.make_client``)."""
     now = now or datetime.now(kis.KST)
     audit = market_audit(data / "audit", market)
     local_today = now.astimezone(ZoneInfo(MARKETS[market]["timezone"])).date().isoformat()
@@ -169,13 +170,17 @@ def run_stage(market: str, stage: str, day: str, data: Path, client, now: dateti
         if any(r.final for r in audit.runs() if (r.stage, r.trade_date) == (stage, day)):
             print(f"{market} {stage} {day}: 이미 완료 — 새 기록 없음")
             return None
-        return _run(audit, market, stage, day, data / "cache", client, now, day == local_today,
-                    decider or default_decider(), llm)
+        notes = []
+        if decider is None:
+            decider = default_decider(audit, market, day)
+            if stage == "decide" and trial_on() and not LLM["enabled"]:
+                notes.append(trial_note(audit, market, day, decider))
+        return _run(audit, market, stage, day, data / "cache", client, now, day == local_today, decider, llm, notes)
 
 
 def _run(audit: AuditLog, market: str, stage: str, day: str, cache: Path, client, now: datetime,
-         today: bool, decider: str = "rule", llm=None) -> RunRecord:
-    started, counts, notes = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), {}, []
+         today: bool, decider: str = "rule", llm=None, notes: list[str] | None = None) -> RunRecord:
+    started, counts, notes = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), {}, list(notes or [])
     bench = MARKETS[market]["benchmark"]
 
     def done(status: str, reason: str | None = None, error: str | None = None) -> RunRecord:
@@ -276,9 +281,39 @@ def check_fill_opens(audit: AuditLog, prices: Prices, cfg, day: str) -> tuple[in
     return len(filled), moved
 
 
-def default_decider() -> str:
-    """The decide stage's decider when none is given: ``config.LLM["enabled"]`` switches the loop to the model."""
-    return "llm" if LLM["enabled"] else "rule"
+def default_decider(audit: AuditLog | None = None, market: str | None = None, day: str | None = None) -> str:
+    """The decide stage's decider when none is given: ``config.LLM["enabled"]`` switches the loop to the model. Else,
+    while the LLM trial is on (``trial_on``), the model for a market whose trial days other than ``day``
+    (``llm_trial_days`` — ``day`` itself stays as it began, so a rerun of it does not count twice) are fewer than
+    ``LLM["trial_sessions"]``, then the rule. No book given, or the trial off: the rule."""
+    if LLM["enabled"]:
+        return "llm"
+    if not trial_on() or audit is None:
+        return "rule"
+    n = LLM["trial_sessions"]
+    return "llm" if n is None or len([d for d in llm_trial_days(audit, market) if d != day]) < n else "rule"
+
+
+def trial_on() -> bool:
+    """The LLM trial: ``LLM["trial"]`` or TRADING_LLM_TRIAL=1 (the docker .env). Off by default."""
+    return bool(LLM["trial"]) or os.environ.get("TRADING_LLM_TRIAL") == "1"
+
+
+def llm_trial_days(audit: AuditLog, market: str) -> list[str]:
+    """The decide days the model decided in this market's book: dates of decisions the model wrote
+    (``settings.decider`` = ``LLM["model"]``, so a rule stand-in does not count) from the daily loop's screens
+    (``RUN_IDS`` — a ``baseline_krx.py --decider llm`` grid has its own run ids). Replayed from the records."""
+    prefix = f"{RUN_IDS[market]}_"
+    return sorted({d.trade_date for d in audit.decisions() if d.settings.get("decider") == LLM["model"]
+                   and (d.screen_run_id or "").startswith(prefix)})
+
+
+def trial_note(audit: AuditLog, market: str, day: str, decider: str) -> str:
+    """The decide run's line about the trial: which session this is, or that it ended and the rule decides."""
+    n, used = LLM["trial_sessions"], len([d for d in llm_trial_days(audit, market) if d != day])
+    if decider == "llm":
+        return f"LLM 시험 {used + 1}/{n}회째" if n is not None else "LLM 시험 (기한 없음)"
+    return f"LLM 시험 종료 → 규칙 ({used}/{n}회 끝남)"
 
 
 def rule_fallback(market: str, run: ScreenRun, ticker: str, day: str, reason: str) -> DecisionRecord:

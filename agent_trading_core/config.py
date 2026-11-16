@@ -150,6 +150,11 @@ LLM = {
     "timeout": 120,                      # seconds per request; the SDK retries twice (its default)
     "max_calls_per_run": 30,
     "enabled": False,
+    # A trial (user decision 2026-11-16, "1주 시험 후 판단"): with ``trial`` True or TRADING_LLM_TRIAL=1 the daily
+    # loop's default decider is the model for a market's first ``trial_sessions`` decide days that the model decided
+    # (replayed from the decision records, scripts/daily_loop.default_decider), then the rule again. None: no end.
+    "trial": False,
+    "trial_sessions": 5,
 }
 
 
