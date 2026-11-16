@@ -394,6 +394,28 @@ def market_audit(root: str | Path, market: str) -> AuditLog:
     return AuditLog(root / market, market=market, legacy=root if market == "KRX" else None)
 
 
+RERUN_OPERATOR = "daily_loop"     # operator of the decide stage's line answering a rerun (pending_rerun_marker)
+
+
+def pending_reruns(orders: list[OrderRecord]) -> list[OrderRecord]:
+    """REVIEW exceptions waiting for the rerun a person asked for (POST /api/exceptions/{order_id}/action, docs/10
+    D7): the order's current line is a review exception whose last action is rerun, not closed — the rule
+    backend/main.py ``_queue_state`` shows as "재실행 대기". The decide stage (scripts/daily_loop.py) answers each and
+    closes the line, so a pending one is one it has not answered yet (or answered without closing: its marker is
+    written, ``pending_rerun_marker``)."""
+    return [o for o in latest_orders(orders).values() if o.exception_kind == "review"
+            and o.status in ("exception", "rejected") and o.exception_action == "rerun" and not o.exception_resolved]
+
+
+def pending_rerun_marker(operations: list[OperationRecord], order: OrderRecord) -> OperationRecord | None:
+    """The decide stage's record that it answered ``order``'s rerun number ``order.reruns``, if it wrote one. Its
+    role and ``pending: false`` too, not the operator name alone: the API takes any operator string, and a
+    reservation's own line says ``pending: true``."""
+    return next((op for op in operations if op.kind == "exception_action" and op.operator == RERUN_OPERATOR
+                 and op.role == "auto" and op.after.get("pending") is False
+                 and op.target == order.order_id and op.after.get("attempt") == order.reruns), None)
+
+
 def baseline_summary_path(data: str | Path, market: str) -> Path:
     """The rule-only decision baseline's summary (scripts/baseline_krx.py) under ``data``: KRX keeps the file from
     before the market axis, ``data/baseline_summary.json``; any other market writes ``data/audit/<market>/``."""
