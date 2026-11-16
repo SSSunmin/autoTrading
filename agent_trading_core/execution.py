@@ -59,6 +59,7 @@ from __future__ import annotations
 import bisect
 import re
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from datetime import date as Date
 from datetime import datetime, time, timedelta
@@ -360,8 +361,9 @@ class ClosedTrade:
     quantity: int
     entry_price: float
     exit_price: float
-    reason: str = "exit_signal"              # risk.ExitReason: a rule exit's rule, else the agent's sell (등급 하향)
+    reason: str = "exit_signal"              # risk.ExitReason: a rule exit's rule, else the decision's sell (등급 하향)
     full: bool = True                        # False: a partial sell, the rest still held — it sets no Protections
+    order_id: str = ""                       # the sell order it came from (positions_view tells an agent sell apart)
 
     @property
     def pnl(self) -> float:
@@ -413,7 +415,7 @@ def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: s
         book.cash += sell_proceeds(q, px, cfg)
         reason = o.rules_applied[0] if o.order_id.endswith(EXIT_SUFFIX) and o.rules_applied else "exit_signal"
         book.closed.append(ClosedTrade(o.ticker, held.entry_date, o.fill_date, q, held.avg_price, px, reason,
-                                       full=q == held.quantity))
+                                       full=q == held.quantity, order_id=o.order_id))
         held.quantity -= q
         if held.quantity == 0:
             del book.holdings[o.ticker]
@@ -1117,14 +1119,26 @@ def cancel_orders(audit: AuditLog, orders: list[OrderRecord], reason: str) -> li
 
 # --- the positions screen (docs/02 화면 5) -----------------------------------------------------------
 
+AGENT_SELL = "agent_sell"       # an exit reason of the 포지션 screen only: a sale an agent sell review decided
+
+
+def agent_sell_orders(decisions: list[DecisionRecord]) -> set[str]:
+    """The order ids of the agent's sell reviews that sell (Trim · Exit — ``sell_reason`` is set exactly then: a
+    review that sells names at least one reason). Not a rule exit (its own ``-exit`` order), not a rating downgrade
+    (a memo's or the rule baseline's Sell / Underweight: no sell reason)."""
+    return {_order_id(d) for d in decisions if d.sell_reason is not None}
+
+
 def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | None = None,
                    risk: RiskConfig | None = None, cfg: PaperConfig | None = None,
-                   operations: list[OperationRecord] | None = None) -> dict:
+                   operations: list[OperationRecord] | None = None, agent_sells: Collection[str] = ()) -> dict:
     """Holdings with their stop line, trailing high and expiry, the book's equity and drawdown, the guards'
     state, as of ``as_of`` (default: the last trading day in the data). ``exit_signal`` is the same verdict the
     executor turns into a rule-exit order at that day's close (``exit_signals``). ``operations``: the market's
     operations log, for the peak reset (``peak_base``) and the capital (``with_capital``); without it the peak counts
-    from the start and the capital is ``cfg``'s."""
+    from the start and the capital is ``cfg``'s. ``agent_sells`` (``agent_sell_orders``): sells counted and shown as
+    ``AGENT_SELL`` in ``exits_by_reason`` and ``closed``, apart from the rules' reasons and the rating downgrade; the
+    replay itself does not change."""
     risk, cfg = risk or RiskConfig(), with_capital(cfg or PaperConfig(), operations or [])
     calendar = prices.calendar(cfg.index)
     as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else datetime.now().strftime("%Y-%m-%d"))
@@ -1200,6 +1214,10 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
     session, buy_amount, sell_amount = session_amounts(latest_orders(orders).values(), prices, calendar, as_of)
     cap = auto_execution(cfg.market)["auto_daily_order_cap"]
     top = max(rows, key=lambda r: r["weight"] or 0.0, default=None)
+
+    def reason(t: ClosedTrade) -> str:
+        return AGENT_SELL if t.order_id in agent_sells else t.reason
+
     return {
         "market": cfg.market, "currency": MARKETS[cfg.market]["currency"],
         "as_of": as_of, "initial_cash": cfg.initial_cash, "capital": cfg.capital_on(as_of),
@@ -1222,10 +1240,10 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
         # orders decided on as_of and every other order filling at their session (the daily cap's scope)
         "today_session": session, "today_buy_amount": buy_amount, "today_sell_amount": sell_amount,
         "today_buy_cap_used": buy_amount / cap if cap > 0 else None,
-        "exits_by_reason": dict(Counter(t.reason for t in book.closed if t.full)),   # a partial sell closes nothing
+        "exits_by_reason": dict(Counter(reason(t) for t in book.closed if t.full)),   # a partial sell closes nothing
         "closed": [{"ticker": t.ticker, "entry_date": t.entry_date, "exit_date": t.exit_date, "quantity": t.quantity,
                     "entry_price": t.entry_price, "exit_price": t.exit_price, "pnl": t.pnl, "pnl_pct": t.pnl_pct,
-                    "reason": t.reason, "full": t.full}
+                    "reason": reason(t), "full": t.full}
                    for t in reversed(book.closed)],
         "limits": {"stop_loss_pct": risk.stop_loss_pct, "dd_halve": risk.dd_halve, "dd_stop": risk.dd_stop,
                    "max_position_pct": risk.max_position_pct, "max_gross_pct": risk.max_gross_pct,

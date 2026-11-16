@@ -66,7 +66,7 @@ export default function Positions() {
               </AgentSectionPanel>
             </div>
             <div className="section">
-              <AgentSectionPanel title="청산 사유 분포 · 청산 기록" description="청산 사유는 룰의 판정입니다(결정 카드의 에이전트 매도 사유와 다름)">
+              <AgentSectionPanel title="청산 사유 분포 · 청산 기록" description="룰 청산(손절 · 트레일링 · 기간 만료 · 정지 청산)과 등급 하향, 에이전트 매도 검토의 매도(점선)를 따로 셉니다">
                 <ExitBar exits={b.exits_by_reason} labels={exitKo} />
                 {b.closed.length > 0 && (
                   <div className="matrix"><table>
