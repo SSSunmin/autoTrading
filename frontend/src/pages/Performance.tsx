@@ -6,6 +6,7 @@ import { useApi } from '../hooks/useApi'
 import { useLabels } from '../hooks/useLabels'
 import { useMarket } from '../hooks/useMarket'
 import { AlphaBar, Loaded, Pct, RatingBadge, TickerCell } from '../components/common'
+import { SourceBadge } from '../components/decisionParts'
 import type { Market, PaperSummary, RatingScore, SimMetrics } from '../api/types'
 
 const ORDER = ['Buy', 'Overweight', 'Hold', 'Underweight', 'Sell']
@@ -61,11 +62,13 @@ export default function Performance() {
         {tab === 'compare' && <Compare />}
         {tab === 'decisions' && <Loaded state={perf}>{(p) => (
           <>
-            <p className="page-sub">실행 <b className="num">{p.run_id}</b>: {p.universe.length}종목 × {p.dates.length}일 = {p.cells_run}셀. 규칙 전용 베이스라인이라 에이전트가 더하는 알파를 재는 기준선입니다.</p>
-            <Grid columns={4} gap="1.4rem">
+            <p className="page-sub"><SourceBadge d={{ source_kind: 'baseline', source_kind_ko: '규칙 베이스라인' }} /> 실행 <b className="num">{p.run_id}</b>: {p.universe.length}종목 × {p.dates.length}일 = {p.cells_run}셀. 규칙 전용 베이스라인이라 에이전트가 더하는 알파를 재는 기준선입니다.</p>
+            <Grid columns={5} gap="1.4rem">
               <AgentKpiCard label="정산 완료" value={p.resolved} />
               <AgentKpiCard label="정산 대기" value={p.pending} />
               <AgentKpiCard label="미채점 (REVIEW)" value={p.unscored} />
+              {/* a person's "보유로 처리" is in none of the scores (docs/10 D7), counted apart */}
+              <AgentKpiCard label="사람 처리 (채점 제외)" value={p.human_handled} />
               <AgentKpiCard label="보유기간" value={p.holding} />
             </Grid>
             <div className="section"><AgentSectionPanel title="등급별 성과"><RatingTable byRating={p.by_rating} /></AgentSectionPanel></div>

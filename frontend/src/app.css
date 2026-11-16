@@ -293,3 +293,20 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .evk.peak_reset { background: var(--app-pass-bg); color: var(--app-pass-strong); }
 .ev-foot { margin-top: 0.8rem; font-size: var(--bv-font-size-caption-1); }
 .sector-off { display: flex; justify-content: space-between; margin: 0.8rem 0 0; padding-top: 0.8rem; border-top: 1px solid var(--app-line); }
+/* decision cards (docs/10 단계 4): 원안 vs 최종, interventions, the exception-action modal */
+.plan { display: grid; gap: 0.6rem; margin-top: 0.6rem; }
+.plan-grid { border-collapse: collapse; font-size: var(--bv-font-size-body-3-normal); width: 100%; max-width: 48rem; }
+.plan-grid th, .plan-grid td { padding: 0.4rem 0.8rem; border-bottom: 1px solid var(--app-line); text-align: left; }
+.plan-grid thead th { color: var(--app-fg-2); font-weight: var(--bv-font-weight-semibold); font-size: var(--bv-font-size-caption-1); }
+.plan-grid tbody th { color: var(--app-fg-2); font-weight: var(--bv-font-weight-medium); width: 8rem; }
+.plan-grid td.diff { background: var(--app-warn-bg); color: var(--app-warn); font-weight: var(--bv-font-weight-semibold); }
+.ivs { display: grid; gap: 0.4rem; font-size: var(--bv-font-size-caption-1); }
+.ivs-cuts { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.ivs-lock { color: var(--app-warn); }
+.xa-btns { display: inline-flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-left: 0.8rem; }
+.xa { display: grid; gap: 1rem; }
+.xa-kind { margin-left: 0.6rem; color: var(--app-fail-strong); font-weight: var(--bv-font-weight-semibold); }
+.xa-sec { display: grid; gap: 0.4rem; font-size: var(--bv-font-size-body-3-normal); }
+.xa-sec ul { margin: 0; padding-left: 1.8rem; }
+.xa-log { display: block; padding: 0.6rem 0.8rem; background: var(--app-surface-2); border-radius: var(--bv-radius-100); font-size: var(--bv-font-size-caption-1); white-space: pre-wrap; word-break: break-all; }
+.xa-need { font-size: var(--bv-font-size-caption-1); }

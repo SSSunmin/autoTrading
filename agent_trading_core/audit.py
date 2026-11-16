@@ -112,11 +112,12 @@ class DecisionRecord(BaseModel):
     sell_reason: SellReason | None = Field(default=None,
                                            description="A sell review's first reason (schemas.SellReason, docs/01 "
                                                        "§12-2), when its action is Trim or Exit")
-    source: Literal["agent", "rule", "baseline"] = Field(
+    source: Literal["agent", "rule", "baseline", "human"] = Field(
         default="agent",
         description="agent: the manager's call; rule: a hard-rule exit the executor recorded before its sell order "
                     "(stop-loss, trailing, expiry, drawdown stop); baseline: the rule-only momentum baseline. "
-                    "Baseline records so far are stored as agent — read them through decision_source",
+                    "Baseline records so far are stored as agent — read them through decision_source; human: an "
+                    "operator's \"보유로 처리\" of an exception (Hold only, no order, never scored — docs/10 D7)",
     )
     market: str = Field(default="KRX", description="config.MARKETS key of the book this belongs to; lines written "
                                                     "before the market axis have none and are KRX")
@@ -130,11 +131,36 @@ BASELINE_DECIDER = "rule_momentum_baseline"     # settings["decider"] of scripts
 
 
 def decision_source(d: DecisionRecord) -> str:
-    """agent · rule · baseline. A decision whose ``settings.decider`` is the rule baseline is baseline whatever was
+    """agent · rule · baseline · human. A decision whose ``settings.decider`` is the rule baseline is baseline whatever was
     stored: the baseline's records (data/audit/, audit/KRX/, audit/US/) were written as agent and are not moved."""
     if d.settings.get("decider") == BASELINE_DECIDER:
         return "baseline"
     return d.source
+
+
+class PlanSide(BaseModel):
+    """One column of a decision card's 원안 vs 최종 grid: what the order was before / after the hard rules."""
+
+    side: Literal["Buy", "Sell", "Hold"]
+    weight_pct: float | None = Field(default=None, description="Share of the book's equity, 0.1 = 10%")
+    qty: int = 0
+    amount: float = Field(default=0.0, description="qty × the decision-day close, in the market's currency")
+
+
+class Intervention(BaseModel):
+    """One hard rule that changed or blocked the order. A cut has before / after (as the rule's text shows them);
+    a lock has neither, its ``note`` says why."""
+
+    rule: str
+    before: str | None = None
+    after: str | None = None
+    note: str = Field(description="The rule's own text, as simulate events word it")
+
+
+class OrderPlan(BaseModel):
+    proposed: PlanSide
+    final: PlanSide
+    interventions: list[Intervention] = Field(default_factory=list)
 
 
 class OrderRecord(BaseModel):
@@ -165,10 +191,25 @@ class OrderRecord(BaseModel):
     rules_applied: list[str] = Field(default_factory=list,
                                      description="Hard-rule and auto-execution rule ids that touched this order")
     market: str = Field(default="KRX", description="config.MARKETS key; amounts are in that market's currency")
+    plan: OrderPlan | None = Field(default=None, description="원안 vs 최종 (docs/10 단계 4). None: written before, "
+                                                            "or not sized (already held, no close)")
+    # the exception queue's write actions (POST /api/exceptions/{order_id}/action, docs/10 D7)
+    exception_action: Literal["rerun", "hold", "dismiss", "retry_next", "dismiss_order"] | None = Field(
+        default=None, description="The last human action on this exception. rerun / retry_next stand until done")
+    exception_resolved: bool = Field(default=False, description="Closed by hold / dismiss / dismiss_order: off the queue")
+    reruns: int = Field(default=0, ge=0, description="Agent reruns asked for (cap 2)")
+    retries: int = Field(default=0, ge=0, description="Next-session retries asked for (cap 2)")
+    retry_on: str | None = Field(default=None, description="A retried order: the run date that placed it again; it "
+                                                          "fills at the session after this date, not after trade_date")
 
     @property
     def amount(self) -> float | None:
         return self.filled_price * self.filled_quantity if self.filled_price is not None else None
+
+    @property
+    def placed_on(self) -> str:
+        """The run date the order was (last) placed on: it fills at the next session after this day."""
+        return self.retry_on or self.trade_date
 
 
 def latest_orders(orders: list[OrderRecord]) -> dict[str, OrderRecord]:
@@ -187,12 +228,13 @@ class OperationRecord(BaseModel):
     so the state and its audit trail cannot disagree.
     """
 
-    kind: Literal["halt", "resume", "mode_change", "rule_change"]
+    kind: Literal["halt", "resume", "mode_change", "rule_change", "exception_action"]
     at: str = Field(default_factory=_now)
     operator: str
     role: str = Field(description="Authority used: operator / admin / admin(dev, no token) / auto (the executor's own halt)")
     reason: str
-    target: str = Field(default="", description="What changed, e.g. 'mode', 'sector_quota.sector_max'. A halt: "
+    target: str = Field(default="", description="What changed, e.g. 'mode', 'sector_quota.sector_max', an order id "
+                                                "(exception_action). A halt: "
                                                 "'manual' (a person; 'running' before halt-semantics), 'daily_loss' or "
                                                 "'dd_stop' (the executor's own, by system)")
     before: dict = Field(default_factory=dict)

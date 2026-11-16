@@ -12,7 +12,9 @@ TRADING_DATA_DIR overrides data/.
 
 ``--all`` runs every trading day from the first decision (or the last executed day) to the end of the price
 data, not only decision days: the rule exits are judged at each day's close. It ends with the audit count of
-orders that have no decision behind them (PAPER_TRADING.max_unexplained_orders).
+orders that have no decision behind them (PAPER_TRADING.max_unexplained_orders), with the buys the per-order cap
+shrank (docs/10 D1) and the exceptions still on the queue. An exception a person asked to retry next session is
+placed again by the first run whose date is at or past the session it failed at (execution._retries_due).
 
 Exit codes: 0 done (also when nothing new was written), 2 bad arguments, 3 refused (halted with exits stopped,
 not paper mode, out of order) with nothing written, 4 an audit log line is broken or invalid (nothing written).
@@ -104,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     current = latest_orders(orders).values()
     state = trading_state(audit.operations())
     print(f"{args.market} · 주문 {len(current)}건 · 규칙 청산 {sum(o.order_id.endswith(EXIT_SUFFIX) for o in current)}건 · "
+          f"주문당 상한 축소 {sum(bool(o.plan) and 'auto_order_max' in o.rules_applied and 'cap_zero' not in o.rules_applied for o in current)}건 · "
+          f"예외 {sum(o.status in ('exception', 'rejected') and not o.exception_resolved for o in current)}건 · "
           f"자동 정지 {halts}회 · 자동 재가동 {resumes}회 · 미설명 주문 {len(missing)}건 · 상태 "
           + ("실행 중" if state["running"] else f"정지({state['halted_by']}: {state['halt_reason']})"))
     for o in missing:

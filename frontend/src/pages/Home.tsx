@@ -9,6 +9,7 @@ import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { useStateTick } from '../hooks/useTradingState'
 import { ExecStatus, Loaded, ModeBadge, Pct, RatingBadge, TickerCell } from '../components/common'
 import { AsOfStamp, PageHeader, RegimeBadge, RiskGauges } from '../components/parts'
+import { ExceptionButtons } from '../components/decisionParts'
 import { FillTime, HaltBand, HaltedChip } from '../components/risk'
 
 /** 1 (v0.3): portfolio state, what ran automatically today, and the exceptions a human must look at.
@@ -28,7 +29,7 @@ export default function Home() {
   const latestDate = dates.loading ? undefined : dates.data?.[0]
   const today = useApi(() => (latestDate ? api.decisions(market, { date: latestDate }) : Promise.resolve([])), [market, latestDate])
   const orders = useApi(() => (latestDate ? api.orders(market, { date: latestDate }) : Promise.resolve([])), [market, latestDate])
-  const exceptions = useApi(() => api.exceptions(market), [market])
+  const exceptions = useApi(() => api.exceptions(market), [market, tick])
   const screens = useApi(() => api.screens(market), [market])
   const perf = useApi(() => api.performance(market), [market])
   const book = useApi(() => api.positions(market), [market, tick])
@@ -89,6 +90,8 @@ export default function Home() {
           <AgentAlert tone="error" title={`예외 ${exceptions.data.length}건 확인 필요`}>
             <b>{stockName(first.ticker, first.name, market)}</b> · {first.summary} ({first.kind_ko}).{' '}
             <Link to={to('/decisions?tab=exceptions')}>예외 큐 열기 →</Link>
+            {/* the banner acts on its first item too (mockup ExceptionAction 주문 예외 · 미국 배너에서 진입) */}
+            <span className="xa-btns"><ExceptionButtons item={first} tokenRequired={b?.mode.admin_token_required ?? false} /></span>
           </AgentAlert>
         </div>
       )}

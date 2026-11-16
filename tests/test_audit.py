@@ -115,5 +115,7 @@ def test_decision_source_reads_the_rule_baseline_as_baseline():
     assert decision_source(DecisionRecord(**base, source="baseline")) == "baseline"
     assert decision_source(DecisionRecord(**base, settings={"decider": "llm"})) == "agent"
     assert DECISION_SOURCE_KO[decision_source(old_line)] == "규칙 베이스라인"
+    # stage 4 (decision-cards): an operator's "보유로 처리" of an exception
+    assert decision_source(DecisionRecord(**base, source="human")) == "human"
     with pytest.raises(ValueError):
-        DecisionRecord(**base, source="human")                                    # not until stage 4
+        DecisionRecord(**base, source="robot")
