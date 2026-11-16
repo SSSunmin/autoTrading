@@ -83,8 +83,9 @@ export function FailureBand({ health, to }: { health: Health | undefined; to: st
   )
 }
 
-/** The rule's exit reason (not the agent's sell reason): 5 kinds, colour plus the server's label. An unknown reason
- *  keeps its id and the neutral look. */
+/** A closed trade's reason, colour plus the server's label: the rules' five (and the rating downgrade among them), or
+ *  agent_sell — a sale an agent sell review decided, dashed like the 에이전트 매도 검토 tag. An unknown reason keeps its
+ *  label and the neutral look. */
 export function ExitReasonBadge({ reason, labels }: { reason: string; labels: Record<string, string> | undefined }) {
   const kind = (EXIT_REASONS as readonly string[]).includes(reason) ? reason : 'expired'
   return <span className={`xr ${kind}`}>{labels?.[reason] ?? reason}</span>

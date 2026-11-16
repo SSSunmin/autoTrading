@@ -124,6 +124,15 @@ describe('exit-reason bar', () => {
     expect(h).toContain('3건')
     expect(h).not.toMatch(/>\d+%</)                                      // the legend shows counts, no share
   })
+  it('counts the agent sell apart from the rules and the rating downgrade, after them', () => {
+    const exits = { agent_sell: 1, exit_signal: 1, stop_loss: 2 }
+    expect(exitSegments(exits).map((s) => s.reason)).toEqual(['stop_loss', 'exit_signal', 'agent_sell'])
+    const h = html(<ExitBar exits={exits} labels={{ stop_loss: '손절', exit_signal: '등급 하향', agent_sell: '에이전트 매도' }} />)
+    expect(h).toContain('aria-label="청산 사유 분포: 손절 2건, 등급 하향 1건, 에이전트 매도 1건"')
+    expect(h).toContain('<span class="xr agent_sell">에이전트 매도</span>')
+    expect(h).toContain('<span class="xr exit_signal">등급 하향</span>')
+    expect(h).toContain('<i class="xseg agent_sell" style="width:25%"></i>')
+  })
 })
 
 describe('fill time in two zones', () => {

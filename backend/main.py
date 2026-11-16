@@ -29,6 +29,7 @@ import bisect
 import json
 import math
 import os
+import pickle
 import re
 import threading
 from collections import Counter
@@ -72,6 +73,7 @@ from agent_trading_core.execution import (
     EXIT_SUFFIX,
     SMALL_ACCOUNT,
     Prices,
+    agent_sell_orders,
     book_events,
     book_series,
     cancel_orders,
@@ -176,6 +178,8 @@ app.add_middleware(
 # is cached is kept per record kind and dropped when that kind's ``AuditLog.stamp()`` moves (a row appended by any
 # writer — the scheduler, the executor, another worker); the baseline summary and the memory log are files and keep
 # their mtime. Decisions are never cached whole: each call reads its range (``AuditLog.decisions_where``).
+# A replay of the book (positions_view, paper_progress, book_events, book_series) is kept the same way, under
+# ``book_key``: the records it reads plus its price files, the calendar files, the date and ``as_of`` (perf/replay-cache).
 
 class _Store:
     def __init__(self, market: str) -> None:
@@ -221,6 +225,35 @@ class _Store:
         if hit is None or hit[0] != stamp:
             hit = self._cache[key] = (stamp, load())
         return hit[1]
+
+    def book_key(self, *kinds: str, as_of: str | None = None) -> tuple:
+        """What a replay of this market's book reads, as a key: the order and operation records (a capital_set is an
+        operation) and ``kinds``, the price file serving each ticker the book ever traded and its index (a refresh
+        rewrites the file, a provisional row included — and the provisional list itself), the market's calendar files,
+        today (a default as_of falls back on it) and ``as_of``. Stamps as of ``refresh``: a record another process
+        appends after it is read in by the next request's refresh."""
+        tickers = self._get("book_tickers", ("orders",), lambda: sorted({o.ticker for o in self.order_rows}))
+        marks = PRICES.cache_dir / kis.PROVISIONAL_FILE
+        return (tuple(self._stamp.get(k) for k in ("orders", "operations", *kinds)),
+                PRICES.stamp([paper_config(self.market).index, *tickers]),
+                marks.stat().st_mtime_ns if marks.exists() else None,
+                tuple(sorted((p.name, p.stat().st_mtime_ns) for p in market_calendar.calendar_dir().glob(f"{self.market}-*.json"))),
+                _clock().astimezone().date().isoformat(), as_of)
+
+    def replayed(self, name: str, key: tuple, compute):
+        """``compute()`` once per ``key`` (``book_key``), in memory only. Kept pickled: each call gets its own copy, so
+        a caller labelling it never changes the kept one (a hit is the bytes a miss would give)."""
+        hit = self._cache.get(name)
+        if hit is None or hit[0] != key:
+            hit = self._cache[name] = (key, pickle.dumps(compute(), pickle.HIGHEST_PROTOCOL))
+        return pickle.loads(hit[1])
+
+    @property
+    def agent_sells(self) -> set[str]:
+        """The order ids of the agent's selling sell reviews (``execution.agent_sell_orders``), counted apart on the
+        포지션 screen: read from the Sell / Underweight agent decisions — a selling review is rated one of the two."""
+        return self._get("agent_sells", ("decisions",), lambda: agent_sell_orders(
+            [d for r in ("Sell", "Underweight") for d in self.audit.decisions_where(source="agent", rating=r)]))
 
     @property
     def screens(self) -> list[ScreenRun]:
@@ -298,6 +331,14 @@ def _market(value: str | None) -> str:
 
 def _store(market: str | None) -> _Store:
     return STORES[_market(market)].refresh()
+
+
+def _book(st: _Store, as_of: str | None = None) -> dict:
+    """``positions_view`` of the market's book, its agent sells apart — one replay shared by the home cards, the 포지션
+    screen, the ticker page, the peak reset and the capital check until its inputs move (``_Store.book_key``); a copy."""
+    return st.replayed("book" if as_of is None else "book@", st.book_key("decisions", as_of=as_of),
+                       lambda: positions_view(st.order_rows, PRICES, as_of=as_of, cfg=paper_config(st.market),
+                                              operations=st.operations, agent_sells=st.agent_sells))
 
 
 def _clock() -> datetime:
@@ -740,10 +781,14 @@ def markets() -> list[dict]:
                                               "schedule_error": f"{MARKET_KO[m]} 휴장 달력을 읽지 못함: {type(exc).__name__}: {exc}"[:300]}
         try:
             st = _store(m)
-            book = positions_view(st.order_rows, PRICES, cfg=paper_config(m), operations=st.operations)
+            # the flow cards' key before the book: a price file rewritten while it replays moves the next request's key
+            flow_key = st.book_key("decisions", "screens")
+            book = _book(st)
             card |= _price_out(m) | {"as_of": book["as_of"], "equity": book["equity"], "initial_cash": book["initial_cash"], "capital": book["capital"],
                      "day_return": book["day_return"], "drawdown": book["drawdown"], "positions": len(book["positions"]),
-                     "state": _state_out(m), "flow": _flow(st, book), "error": None}
+                     "state": _state_out(m), "flow": None, "error": None}
+            # the flow cards read the records only (no clock): kept with the book, under the same stamps
+            card["flow"] = st.replayed("flow", flow_key, lambda st=st, book=book: _flow(st, book))
         except ValueError as exc:                    # a cut-short line, or another market's record, in that book
             card |= dict.fromkeys(("as_of", "equity", "initial_cash", "capital", "day_return", "drawdown", "positions", "state",
                                    "flow")) | {
@@ -937,7 +982,7 @@ def _earnings(ticker: str, market: str) -> tuple[dict | None, str]:
 def _holding(st: _Store, ticker: str) -> dict | None:
     """The ticker's row of the paper book (``positions_view``, as the 포지션 screen has it) and its partial sales since
     entry; None when not held."""
-    view = positions_view(st.order_rows, PRICES, cfg=paper_config(st.market), operations=st.operations)
+    view = _book(st)
     row = next((r for r in view["positions"] if r["ticker"] == ticker), None)
     if row is None:
         return None
@@ -1099,15 +1144,14 @@ def _reference_equity(m: str) -> tuple[pd.DataFrame | None, tuple | None, str | 
 
 
 def _series(st: _Store) -> tuple[dict, bool]:
-    """The market's series, cached once per market until its orders or operations get a record, a price file it reads
-    is rewritten or the reference CSV changes (memory only — no table, no file). Returns (series, cache hit)."""
+    """The market's series, cached once per market until what its replay reads moves (``_Store.book_key``) or the
+    reference CSV changes (memory only — no table, no file). Returns (series, cache hit)."""
     m, cfg = st.market, paper_config(st.market)
     rows = st.order_rows
     path = DATA_DIR / PAPER_SUMMARY[m]
     # the summary and the variants' equity CSVs beside it (a rerun of paper_backtest.py rewrites them)
     ref_key = tuple((f.name, f.stat().st_mtime_ns) for f in [path, *sorted(path.parent.glob("*equity*.csv"))] if f.exists())
-    key = (st._stamp.get("orders"), st._stamp.get("operations"),
-           PRICES.stamp([cfg.index] + [o.ticker for o in rows]), ref_key)
+    key = (st.book_key(), ref_key)
     hit = st._cache.get("series")
     if hit is not None and hit[0] == key:
         return hit[1], True
@@ -1362,9 +1406,11 @@ def _progress(st: _Store, expected: bool = True) -> dict:
     """The market's paper-trading gate (execution.paper_progress) with its labels, and the reference table
     (``expected=False`` for the mode gate: the reference never reaches the verdict, not even by failing)."""
     m = st.market
-    start = paper_start(st.orders, st.operations, m)
-    p = paper_progress(st.orders, st.decisions(trade_date=(start, None)) if start else [], st.operations, PRICES,
-                       paper_config(m))
+    def gate() -> dict:
+        start = paper_start(st.orders, st.operations, m)
+        return paper_progress(st.orders, st.decisions(trade_date=(start, None)) if start else [], st.operations, PRICES,
+                              paper_config(m))
+    p = st.replayed("progress", st.book_key("decisions"), gate)
     for c in p["criteria"]:
         c |= {"label_ko": PAPER_CRITERIA_KO.get(c["id"], c["id"]), "threshold_ko": _threshold_ko(c["id"], c["threshold"]),
               "status_ko": PAPER_STATUS_KO[c["status"]]}
@@ -1466,20 +1512,27 @@ def positions(as_of: str | None = None, market: str | None = MarketQuery) -> dic
     """모의투자 장부(화면 5): 그 시장의 orders.jsonl 체결 기록을 캐시 종가로 재생한 보유·평가·드로다운·가드 상태. 저장된 상태 없음."""
     _date_param(as_of, "as_of")
     st = _store(market)
-    out = positions_view(st.order_rows, PRICES, as_of=as_of, cfg=paper_config(st.market), operations=st.operations)
-    for r in out["positions"] + out["closed"]:
-        r["name"] = st.name(r["ticker"])
-    for g in out["protections"]:
-        g["label_ko"] = RISK_RULE_KO.get(g["id"], g["id"])
-    out["exits_by_reason_ko"] = {EXIT_REASON_KO.get(k, k): n for k, n in out["exits_by_reason"].items()}
-    for r in out["positions"]:                   # the agent's latest sell review of it (its exit_signal is the rules')
-        r["last_review"] = _last_review(st, r["ticker"], out["as_of"], r["entry_date"])
+
+    def labelled() -> dict:
+        out = _book(st, as_of)
+        for r in out["positions"] + out["closed"]:
+            r["name"] = st.name(r["ticker"])
+        for g in out["protections"]:
+            g["label_ko"] = RISK_RULE_KO.get(g["id"], g["id"])
+        out["exits_by_reason_ko"] = {EXIT_REASON_KO.get(k, k): n for k, n in out["exits_by_reason"].items()}
+        for r in out["positions"]:               # the agent's latest sell review of it (its exit_signal is the rules')
+            r["last_review"] = _last_review(st, r["ticker"], out["as_of"], r["entry_date"])
+        out["mode"] = None                       # read per call below (the halt state moves with the clock)
+        out["sector_exposure"] = sector_exposure(out["positions"])
+        out["limits"]["max_sector_pct"] = RiskConfig().max_sector_pct      # the executor's sizing cap (size_targets)
+        out |= _price_out(st.market)
+        # a holding priced from another file than the market's own (KIS missing for it: the Yahoo file)
+        out["price_fallback"] = sorted(r["ticker"] for r in out["positions"] if PRICES.info(r["ticker"])["source"] != out["price_source"])
+        return out
+    # the book and what it is labelled with (names from the screens, the sell reviews from the decisions), kept as one
+    out = st.replayed("positions" if as_of is None else "positions@", st.book_key("decisions", "screens", as_of=as_of), labelled)
     out["mode"] = _state_out(st.market)
-    out["sector_exposure"] = sector_exposure(out["positions"])
-    out["limits"]["max_sector_pct"] = RiskConfig().max_sector_pct          # the executor's sizing cap (size_targets)
-    out |= _price_out(st.market)
-    # a holding priced from another file than the market's own (KIS missing for it: the Yahoo file)
-    out["price_fallback"] = sorted(r["ticker"] for r in out["positions"] if PRICES.info(r["ticker"])["source"] != out["price_source"])
+    out |= _price_out(st.market)               # the index file's provisional flag can move with its list alone
     return out
 
 
@@ -1543,7 +1596,8 @@ def events(market: str | None = MarketQuery, limit: int = Query(50, ge=1, le=500
     """가드·잠금 이력(화면 5): 그 시장의 주문·운영 기록에서 모은 가드 · 잠금 · Protections · 개입 · 피크 재설정, 최신순.
     저장된 이력은 없다(execution.book_events)."""
     st = _store(market)
-    rows = book_events(st.order_rows, st.operations, PRICES, cfg=paper_config(st.market))
+    rows = st.replayed("events", st.book_key(), lambda: book_events(st.order_rows, st.operations, PRICES,
+                                                                     cfg=paper_config(st.market)))
     for e in rows:
         e["kind_ko"] = BOOK_EVENT_KO[e["kind"]]
         e["name"] = st.name(e["ticker"]) if e["ticker"] else None
@@ -1651,7 +1705,7 @@ def halt(body: HaltRequest) -> dict:
 def _peak_reset(st: _Store) -> dict:
     """What a resume after a −20% stop resets the peak to: the book's equity at the last close. The preview and the
     resume both call this, so the preview is the resume's own number."""
-    book = positions_view(st.order_rows, PRICES, cfg=paper_config(st.market), operations=st.operations)
+    book = _book(st)
     return {"to": book["equity"], "at": book["as_of"], "before": book["peak"]}
 
 
@@ -1992,7 +2046,7 @@ def set_capital(body: CapitalRequest, market: str | None = MarketQuery,
             flow = amount - cur["amount"]
             if flow < 0:
                 cfg = paper_config(m)
-                book = positions_view(st.order_rows, PRICES, cfg=cfg, operations=st.operations)
+                book = _book(st)
                 # the cash at the last close, and the flows dated after it (they go in at a close not in the data yet),
                 # less the buys not in the book yet (open, or filling after it — they fill before the flow's close),
                 # at the decision-day close plus costs as the daily cap counts them

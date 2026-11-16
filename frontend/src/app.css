@@ -177,6 +177,8 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .xr.expired { background: var(--app-surface-2); color: var(--app-fg-2); }
 .xr.exit_signal { background: var(--app-down-bg); color: var(--app-down-strong); }
 .xr.force { background: var(--app-forced); color: var(--bv-color-common-100); }
+/* the agent's sale (sell-reasons' dashed 에이전트 매도 검토 tag), apart from the rules' solid badges */
+.xr.agent_sell { background: var(--app-surface); color: var(--app-fg); outline: 1px dashed var(--app-line); outline-offset: -1px; }  /* outline: the rules' badges' height */
 
 .regime { display: inline-flex; align-items: center; gap: 0.6rem; font-size: var(--app-fs-small); font-weight: var(--bv-font-weight-semibold); padding: 0.2rem 1rem; border-radius: var(--bv-radius-500); border: 1px solid transparent; white-space: nowrap; }
 .regime.on { background: var(--app-pass-bg); color: var(--app-pass-strong); border-color: var(--app-pass-strong); }
@@ -285,6 +287,7 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .xseg.expired, .xsw.expired { background: var(--app-fg-3); }
 .xseg.exit_signal, .xsw.exit_signal { background: var(--app-gauge); }
 .xseg.force, .xsw.force { background: var(--app-forced); }
+.xseg.agent_sell, .xsw.agent_sell { background: repeating-linear-gradient(135deg, var(--app-fg-3) 0 3px, var(--app-surface) 3px 6px); }
 .xseg, .xsw { background: var(--app-review); }
 .xlegend { list-style: none; margin: 0.8rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 1.6rem; }
 .xlegend li { display: flex; gap: 0.6rem; align-items: center; }

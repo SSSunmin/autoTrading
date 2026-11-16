@@ -21,7 +21,8 @@ export function gaugeState(value: number | null, limit: number): GaugeState {
   return m >= l - 1e-12 ? 'over' : m >= GAUGE_NEAR * l - 1e-12 ? 'near' : 'ok'
 }
 
-export const EXIT_REASONS = ['stop_loss', 'trailing', 'expired', 'exit_signal', 'force'] as const
+// the rules' five, then the agent's selling sell review (포지션 only, server execution.AGENT_SELL) — counted apart
+export const EXIT_REASONS = ['stop_loss', 'trailing', 'expired', 'exit_signal', 'force', 'agent_sell'] as const
 
 export type Source = 'example' | 'measured' | 'proposed'
 export const SOURCE_KO: Record<Source, string> = { example: '예시', measured: '실측', proposed: '제안' }

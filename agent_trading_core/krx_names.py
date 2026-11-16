@@ -122,6 +122,7 @@ _listed: dict[str, str] | None = None
 _history_names: dict[str, str] | None = None
 
 EXIT_REASON_KO["delisted"] = "상장폐지 청산"
+EXIT_REASON_KO["agent_sell"] = "에이전트 매도"     # 포지션 화면만: 에이전트 매도 검토의 매도(execution.AGENT_SELL)
 
 
 def load_listed_names(path=None) -> dict[str, str]:
