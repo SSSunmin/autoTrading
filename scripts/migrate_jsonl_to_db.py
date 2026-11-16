@@ -15,7 +15,9 @@ the store must not start from a book the files do not replay to.
 
 ``--verify``: per market, the records and their replay — ``latest_orders``, ``trading_state``, ``positions_view``,
 ``paper_progress`` (OHLCV cache data/cache) — dumped to JSON from each store and compared byte for byte (exit 5 on a
-difference). TRADING_DATA_DIR overrides data/.
+difference). Both replays run under one time read before them (``audit.fixed_clock``, printed): an old line without
+its own time (``placed_at`` …) takes that time in both, so a second boundary between the replays is no difference.
+TRADING_DATA_DIR overrides data/.
 
 Stop the scheduler and the backend first: a book written while lines are loading gets ids before the older lines.
 
@@ -43,6 +45,8 @@ from agent_trading_core.audit import (
     OrderRecord,
     RunRecord,
     ScreenRun,
+    _now,
+    fixed_clock,
     latest_orders,
     market_audit,
     trading_state,
@@ -195,11 +199,15 @@ def replay_dump(root: Path, market: str, kind: str, prices: Prices) -> bytes:
 
 
 def verify(data: Path) -> bool:
+    """Both stores' replays, per market, under one time fixed before the first: a line without its own time takes it
+    in both, so a second passing between the two replays is not a difference."""
     prices = Prices(data / "cache")
-    same = True
+    same, at = True, _now()
+    print(f"기준 시각(시각 없는 줄이 두 재생에서 받는 값): {at}")
     print("시장 · jsonl 바이트 · sqlite 바이트 · sha256(jsonl) · sha256(sqlite) · 동일")
     for market in MARKETS:
-        a, b = (replay_dump(data / "audit", market, k, prices) for k in ("jsonl", "sqlite"))
+        with fixed_clock(at):
+            a, b = (replay_dump(data / "audit", market, k, prices) for k in ("jsonl", "sqlite"))
         ha, hb = hashlib.sha256(a).hexdigest(), hashlib.sha256(b).hexdigest()
         print(f"{market} · {len(a)} · {len(b)} · {ha[:16]} · {hb[:16]} · {'예' if a == b else '아니오'}")
         same &= a == b

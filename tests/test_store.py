@@ -3,6 +3,7 @@ the JSON-lines files loaded once in their read order and written back byte for b
 to the same state, two writers at once losing nothing, and TRADING_STORE choosing the store."""
 
 import json
+import re
 import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
@@ -247,11 +248,42 @@ def test_verify_compares_the_same_book_however_the_clock_moves_between_its_two_r
     made = len(ticking_clock)
     assert migrate.main(["--data-dir", str(tmp_path), "--verify"]) == 0
     assert "재생 동일: 모든 시장" in capsys.readouterr().out
-    assert len(ticking_clock) == made                                # no line took the parse's time
+    assert len(ticking_clock) == made + 1                            # the base time only: no line took the parse's
     times = {"orders": "placed_at", "screens": "recorded_at"}
     for path in (tmp_path / "audit").rglob("*.jsonl"):
         for line in filter(str.strip, path.read_text(encoding="utf-8").splitlines()):
             assert times[path.stem] in json.loads(line), (path, line)
+
+
+@pytest.mark.unit
+def test_verify_fixes_one_time_for_both_replays_of_a_line_without_its_own(sqlite_store, tmp_path, ticking_clock,
+                                                                          monkeypatch, capsys):
+    """The product's own guard (verify-clock): an old order line with no placed_at takes the parse's time, the clock
+    moves a second on every read, and --verify still sees the same book — both replays got one base time."""
+    _legacy_book(tmp_path / "audit")
+    bare = {"order_id": "bare", "ticker": "000660.KS", "trade_date": "2026-05-28", "side": "Buy", "quantity": 1,
+            "status": "open"}                                       # no placed_at, as an old line could be
+    with open(tmp_path / "audit" / "orders.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(bare) + "\n")
+    dumps, real = [], migrate.replay_dump
+    monkeypatch.setattr(migrate, "replay_dump", lambda *a: dumps.append((a[1], a[2], real(*a))) or dumps[-1][2])
+    assert migrate.main(["--data-dir", str(tmp_path), "--verify"]) == 0
+    out = capsys.readouterr().out
+    at = re.search(r"기준 시각\(시각 없는 줄이 두 재생에서 받는 값\): (\S+)", out).group(1)
+    assert "재생 동일: 모든 시장" in out
+    krx = {kind: json.loads(d) for market, kind, d in dumps if market == "KRX"}
+    placed = {kind: next(o["placed_at"] for o in krx[kind]["records"]["orders"] if o["order_id"] == "bare")
+              for kind in ("jsonl", "sqlite")}
+    assert placed == {"jsonl": at, "sqlite": at}                     # one time, the printed one, in both replays
+    # the load itself keeps the line as it was read: no time added to the stored payload
+    con = connect(tmp_path / "trading.db")
+    try:
+        payload = con.execute("SELECT payload FROM orders WHERE order_id = 'bare'").fetchone()[0]
+    finally:
+        con.close()
+    assert json.loads(payload) == bare
+    # outside --verify the clock is the clock again
+    assert OrderRecord.model_validate(bare).placed_at != at
 
 
 @pytest.mark.unit
