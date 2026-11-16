@@ -61,6 +61,30 @@ export interface Outcome {
   reflection: string
 }
 
+/** One column of the decision card's 원안 vs 최종 grid (docs/10 단계 4). */
+export interface PlanSide {
+  side: 'Buy' | 'Sell' | 'Hold'
+  weight_pct: number | null
+  qty: number
+  amount: number
+}
+
+/** A hard rule that cut (before → after) or blocked (note only) an order. */
+export interface Intervention {
+  rule: string
+  before: string | null
+  after: string | null
+  note: string
+}
+
+export interface OrderPlan {
+  proposed: PlanSide
+  final: PlanSide
+  interventions: Intervention[]
+}
+
+export type ExceptionAction = 'rerun' | 'hold' | 'dismiss' | 'retry_next' | 'dismiss_order'
+
 /** One order the paper execution layer placed or refused (docs/02 v0.3 §9), in its current state. */
 export interface Order {
   order_id: string
@@ -87,6 +111,13 @@ export interface Order {
   fill_at_local: string | null
   fill_at_kst: string | null
   fill_planned: boolean
+  /** null: written before decision cards, or not sized (already held, no close, a sell) */
+  plan: OrderPlan | null
+  exception_action: ExceptionAction | null
+  exception_resolved: boolean
+  reruns: number
+  retries: number
+  retry_on: string | null
 }
 
 export interface Decision {
@@ -107,9 +138,15 @@ export interface Decision {
   hard_rule_overrides: string[]
   settings: Record<string, unknown>
   tradeable: boolean
-  /** agent: the manager's call; rule: a hard-rule exit (stop-loss, trailing, expiry, drawdown stop) the executor recorded */
-  source: 'agent' | 'rule'
+  /** agent: the manager's call; rule: a hard-rule exit (stop-loss, trailing, expiry, drawdown stop) the executor recorded;
+   *  human: an operator's "보유로 처리" of an exception (Hold only, never scored) */
+  source: 'agent' | 'rule' | 'human' | 'baseline'
   source_ko: string
+  /** the card's source badge: the rule-only baseline writes source agent, told apart by the server */
+  source_kind: 'agent' | 'rule' | 'human' | 'baseline'
+  source_kind_ko: string
+  /** a hard rule cut or blocked one of its orders (the 하드룰 개입 tab) */
+  has_intervention: boolean
   market: Market
   outcome: Outcome | null
   orders: Order[]
@@ -125,6 +162,24 @@ export interface ExceptionItem {
   summary: string
   detail: string
   ref: string | null
+  market: Market
+  /** the order the actions write to; null: a REVIEW decision the executor has not run yet */
+  order_id: string | null
+  actions: { action: ExceptionAction; label_ko: string; used: number | null; limit: number | null; available: boolean }[]
+  pending_action: 'rerun' | 'retry_next' | null
+  pending_action_ko: string | null
+  reruns: number
+  retries: number
+}
+
+export interface ExceptionActionResult {
+  order: Order
+  action: ExceptionAction
+  action_ko: string
+  replayed: boolean
+  attempt: number | null
+  limit: number | null
+  result_ko: string
 }
 
 export interface TradingState {
@@ -271,6 +326,8 @@ export interface Performance {
   by_rating: Record<string, RatingScore>
   per_date: { date: string; resolved: number; long_mean_alpha: number | null; short_mean_alpha: number | null }[]
   reflections: Reflection[]
+  /** a person's "보유로 처리" decisions: never in the scores above, counted apart */
+  human_handled: number
   caveat: string
 }
 
@@ -296,6 +353,7 @@ export interface Labels {
   mode_ko: Record<string, string>
   order_status_ko: Record<string, string>
   exception_kind_ko: Record<string, string>
+  exception_action_ko: Record<string, string>
   /** the rule's exit reasons (stop_loss · trailing · expired · exit_signal · force), not the agent's sell reasons */
   exit_reason_ko: Record<string, string>
   halt_target_ko: Record<string, string>

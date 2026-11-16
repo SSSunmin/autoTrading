@@ -1,6 +1,6 @@
 """API for the dashboard (docs/02 v0.3): the audit log, the memory log and the backtest summary served as
-recorded, plus the three write actions the plan allows — emergency halt, resume and mode change — each
-appended to the operations log. Korean labels are attached server-side so the frontend never translates
+recorded, plus the write actions the plan allows — emergency halt, resume, mode change and the exception queue's
+actions (docs/10 D7) — each appended to the operations log. Korean labels are attached server-side so the frontend never translates
 rule ids, rating values or order statuses.
 
 Markets (docs/08): KRX and US are separate books. Every read takes ``market`` (default KRX, anything else
@@ -15,7 +15,7 @@ Environment:
   TRADING_DATA_DIR      where data/ lives (default: <repo>/data)
   TRADING_MEMORY_LOG    memory log to read (default: the log named in data/baseline_summary.json; KRX only)
   TRADING_CORS          comma-separated origins allowed (default: localhost dev ports)
-  TRADING_ADMIN_TOKEN   when set, resume and mode change require header X-Admin-Token with this value.
+  TRADING_ADMIN_TOKEN   when set, resume, mode change and exception actions require header X-Admin-Token with this value.
                         Unset = development: anyone may, and the record says so (role "admin(dev, no token)").
 """
 
@@ -40,10 +40,12 @@ from agent_trading_core import __version__ as core_version
 from agent_trading_core.audit import (
     AuditLog,
     DecisionRecord,
+    EvidenceItem,
     OperationRecord,
     OrderRecord,
     ScreenRun,
     baseline_summary_path,
+    decision_source,
     latest_orders,
     market_audit,
     stage_counts,
@@ -64,13 +66,16 @@ from agent_trading_core.execution import (
     paper_expected,
     paper_progress,
     positions_view,
+    standing_halts,
 )
 from agent_trading_core.krx_names import (
     ACCOUNT_MODE_KO,
     AUTO_RULE_KO,
     BOOK_EVENT_KO,
     DECISION_SOURCE_KO,
+    EXCEPTION_ACTION_KO,
     EXCEPTION_KIND_KO,
+    EXCEPTION_PENDING_KO,
     EXECUTION_MODE_KO,
     EXIT_REASON_KO,
     HALT_SCOPE_KO,
@@ -115,7 +120,7 @@ ADMIN_TOKEN = os.environ.get("TRADING_ADMIN_TOKEN") or None
 
 app = FastAPI(title="agent-trading-core API", version=core_version,
               description="자동매매 대시보드 API. 선별·결정·주문·정산 기록을 시장(국내·미국)별로 그대로 서빙하고, "
-                          "쓰기는 긴급 정지·재가동·모드 변경만.")
+                          "쓰기는 긴급 정지·재가동·모드 변경·예외 처리만.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in (os.environ.get("TRADING_CORS") or
@@ -278,12 +283,18 @@ def _decision_out(d: DecisionRecord, st: _Store, memory_by_key: dict, orders_by_
     out["rating_ko"] = RATING_KO.get(d.rating, d.rating)
     out["tradeable"] = d.tradeable
     out["source_ko"] = DECISION_SOURCE_KO.get(d.source, d.source)
-    # the memory log scores the agent's call; a rule exit on the same ticker and day is not that call
+    kind = decision_source(d)                    # the baseline's records are stored as agent
+    out["source_kind"], out["source_kind_ko"] = kind, DECISION_SOURCE_KO.get(kind, kind)
+    # the memory log scores the agent's call; a rule exit or a person's Hold on the same ticker and day is not that call
     out["outcome"] = _outcome(memory_by_key.get((d.ticker, d.trade_date))) if d.source == "agent" else None
-    # an agent decision and a rule exit can share (ticker, day): each card shows its own order
+    # an agent decision and a rule exit can share (ticker, day): each card shows its own order. A person's Hold
+    # places none (the exception order it closed stays on the agent's card)
     rule = d.source == "rule"
-    out["orders"] = [_order_out(o, st) for o in orders_by_key.get((d.ticker, d.trade_date), [])
-                     if o.order_id.endswith(EXIT_SUFFIX) == rule]
+    orders = [] if d.source == "human" else [o for o in orders_by_key.get((d.ticker, d.trade_date), [])
+                                             if o.order_id.endswith(EXIT_SUFFIX) == rule]
+    out["orders"] = [_order_out(o, st) for o in orders]
+    # 하드룰 개입 tab: a rule cut or blocked one of its orders (OrderRecord.plan), or the agent listed one itself
+    out["has_intervention"] = bool(d.hard_rule_overrides) or any(o.plan and o.plan.interventions for o in orders)
     return out
 
 
@@ -348,21 +359,54 @@ def _exception_kind(o: OrderRecord) -> str:
     return "order_rejected"
 
 
+REVIEW_ACTIONS = ("rerun", "hold", "dismiss")            # an unreadable rating (docs/10 D7)
+ORDER_ACTIONS = ("retry_next", "dismiss_order")           # an order that did not go out: cap, vendor, LULD, rejected
+
+
+def _allowed_actions(o: OrderRecord | None, kind: str) -> tuple[str, ...]:
+    """A rule exit has no retry: the executor judges its signal again on the next close and places a new exit."""
+    if kind == "review":
+        return REVIEW_ACTIONS
+    return ("dismiss_order",) if o is not None and o.order_id.endswith(EXIT_SUFFIX) else ORDER_ACTIONS
+ACTION_LIMIT = 2                                          # reruns, and next-session retries, per exception
+
+
+def _queue_state(o: OrderRecord | None, kind: str) -> dict:
+    """What a person can do with one exception (POST /api/exceptions/{order_id}/action) and what is pending. No order
+    (a REVIEW decision the executor has not run yet): nothing to act on."""
+    if o is None:
+        return {"order_id": None, "actions": [], "pending_action": None, "pending_action_ko": None, "reruns": 0, "retries": 0}
+    pending = o.exception_action if o.exception_action in EXCEPTION_PENDING_KO and not o.exception_resolved else None
+    used = {"rerun": o.reruns, "retry_next": o.retries}
+    return {"order_id": o.order_id, "pending_action": pending, "pending_action_ko": EXCEPTION_PENDING_KO.get(pending or ""),
+            "reruns": o.reruns, "retries": o.retries,
+            "actions": [{"action": a, "label_ko": EXCEPTION_ACTION_KO[a], "used": used.get(a), "limit": ACTION_LIMIT if a in used else None,
+                         "available": used.get(a, 0) < ACTION_LIMIT} for a in _allowed_actions(o, kind)]}
+
+
 def _exceptions(st: _Store, date: str | None) -> list[dict]:
-    """REVIEW decisions and orders that were refused: what a human must look at (docs/02 화면 3, 예외 큐)."""
+    """REVIEW decisions and orders that were refused: what a human must look at (docs/02 화면 3, 예외 큐). An exception
+    a person closed (hold / dismiss — ``exception_resolved``) is off the queue; a pending rerun or retry stays on it."""
     items = []
+    by_id = {o.order_id: o for o in st.orders}
     for d in st.decisions:
-        if d.rating == RATING_REVIEW and (date is None or d.trade_date == date):
+        if d.source == "agent" and d.rating == RATING_REVIEW and (date is None or d.trade_date == date):
+            o = by_id.get(f"paper-{d.trade_date}-{d.ticker}")
+            if o is not None and o.exception_resolved:
+                continue
             items.append({"kind": "review", "kind_ko": EXCEPTION_KIND_KO["review"], "ticker": d.ticker,
-                          "name": _name(d.ticker, st.screens), "trade_date": d.trade_date,
-                          "summary": "등급을 읽을 수 없어 주문하지 않았습니다", "detail": d.thesis, "ref": d.screen_run_id})
+                          "name": _name(d.ticker, st.screens), "trade_date": d.trade_date, "market": st.market,
+                          "summary": "등급을 읽을 수 없어 주문하지 않았습니다", "detail": d.thesis, "ref": d.screen_run_id}
+                         | _queue_state(o if o is not None and o.exception_kind == "review" else None, "review"))
     for o in st.orders:
         # a REVIEW decision is listed above already; its exception order is the same item
-        if o.status in ("rejected", "exception") and o.exception_kind != "review" and (date is None or o.trade_date == date):
+        if (o.status in ("rejected", "exception") and o.exception_kind != "review" and not o.exception_resolved
+                and (date is None or o.trade_date == date)):
             kind = _exception_kind(o)
             items.append({"kind": kind, "kind_ko": EXCEPTION_KIND_KO[kind], "ticker": o.ticker,
-                          "name": _name(o.ticker, st.screens), "trade_date": o.trade_date,
-                          "summary": o.reason or ORDER_STATUS_KO[o.status], "detail": ", ".join(o.rules_applied), "ref": o.order_id})
+                          "name": _name(o.ticker, st.screens), "trade_date": o.trade_date, "market": st.market,
+                          "summary": o.reason or ORDER_STATUS_KO[o.status], "detail": ", ".join(o.rules_applied), "ref": o.order_id}
+                         | _queue_state(o, kind))
     return sorted(items, key=lambda x: (x["trade_date"], x["ticker"]), reverse=True)
 
 
@@ -455,7 +499,7 @@ def health(market: str | None = MarketQuery) -> dict:
     return {"ok": True, "core_version": core_version, "data_dir": str(DATA_DIR), "market": st.market,
             "market_ko": MARKET_KO.get(st.market, st.market), "markets": list(MARKETS), "screens": len(st.screens),
             "decisions": len(st.decisions),
-            "decisions_by_source": {s: sum(d.source == s for d in st.decisions) for s in ("agent", "rule")},
+            "decisions_by_source": {s: sum(d.source == s for d in st.decisions) for s in ("agent", "rule", "human")},
             "orders": len(st.orders), "memory_entries": len(st.memory),
             "memory_log": str(st.memory_log_path() or ""), "server_time": datetime.now(UTC).isoformat()}
 
@@ -468,6 +512,7 @@ def labels() -> dict:
             "rule_desc_ko": RULE_DESC_KO, "sell_reason_ko": SELL_REASON_KO, "mode_ko": MODE_KO,
             "order_status_ko": ORDER_STATUS_KO, "exception_kind_ko": EXCEPTION_KIND_KO, "exit_reason_ko": EXIT_REASON_KO,
             "risk_rule_ko": RISK_RULE_KO, "decision_source_ko": DECISION_SOURCE_KO, "market_ko": MARKET_KO,
+            "exception_action_ko": EXCEPTION_ACTION_KO, "auto_rule_ko": AUTO_RULE_KO,
             "halt_scope_ko": HALT_SCOPE_KO, "halt_target_ko": HALT_TARGET_KO, "book_event_ko": BOOK_EVENT_KO, "markets": {m: _market_labels(m, now) for m in MARKETS},
             # one convention for both markets (docs/08 §4 Q1): a person reading both books must not flip colours
             "color_convention": {"up": "red", "down": "blue",
@@ -535,24 +580,24 @@ def decision_dates(market: str | None = MarketQuery) -> list[str]:
 @app.get("/api/decisions", tags=["decisions"])
 def list_decisions(date: str | None = None, rating: str | None = None, review_only: bool = False,
                    ticker: str | None = None, overrides_only: bool = False,
-                   source: Literal["agent", "rule"] | None = None, market: str | None = MarketQuery) -> list[dict]:
+                   source: Literal["agent", "rule", "baseline", "human"] | None = None, market: str | None = MarketQuery) -> list[dict]:
+    """overrides_only: 하드룰 개입 탭 — 룰이 주문을 줄이거나 막은 결정(주문의 plan.interventions)과 에이전트가 적은 개입만."""
     st = _store(market)
     rows = st.decisions
     if source:
-        rows = [d for d in rows if d.source == source]
+        rows = [d for d in rows if decision_source(d) == source]
     if date:
         rows = [d for d in rows if d.trade_date == date]
     if rating:
         rows = [d for d in rows if d.rating == rating]
     if review_only:
         rows = [d for d in rows if d.rating == RATING_REVIEW]
-    if overrides_only:
-        rows = [d for d in rows if d.hard_rule_overrides]
     if ticker:
         rows = [d for d in rows if d.ticker == ticker.upper()]
     memory_by_key = {(e["ticker"], e["date"]): e for e in st.memory}
     orders_by_key = _orders_by_key(st)
-    return [_decision_out(d, st, memory_by_key, orders_by_key) for d in rows]
+    out = [_decision_out(d, st, memory_by_key, orders_by_key) for d in rows]
+    return [d for d in out if d["has_intervention"]] if overrides_only else out
 
 
 @app.get("/api/orders", tags=["execution"])
@@ -638,6 +683,9 @@ def performance(market: str | None = MarketQuery) -> dict:
         per_date.append({"date": d, "resolved": len(rows),
                          "long_mean_alpha": sum(longs) / len(longs) if longs else None,
                          "short_mean_alpha": sum(shorts) / len(shorts) if shorts else None})
+    # a person's "보유로 처리" (source human, docs/10 D7) is not the agent's call: the memory log never has it, so it is
+    # in no aggregate here; the scoring table shows it as its own count
+    human = sum(d.source == "human" for d in st.decisions)
     reflections = [{"date": e["date"], "ticker": e["ticker"], "name": _name(e["ticker"], st.screens),
                     "rating": e["rating"], "rating_ko": RATING_KO.get(e["rating"], e["rating"]),
                     "raw_return": _pct(e.get("raw")), "alpha": _pct(e.get("alpha")), "resolved": e.get("resolved"),
@@ -647,7 +695,7 @@ def performance(market: str | None = MarketQuery) -> dict:
     return {"run_id": s.get("run_id"), "cells_run": s.get("cells_run"), "resolved": s.get("resolved"),
             "pending": s.get("pending"), "unscored": s.get("unscored"), "holding": s.get("holding"),
             "dates": s.get("dates", []), "universe": s.get("universe", []), "by_rating": by_rating,
-            "per_date": per_date, "reflections": reflections[:50],
+            "per_date": per_date, "reflections": reflections[:50], "human_handled": human,
             "caveat": "알파는 결정일 다음 첫 종가 진입 기준. 규칙 전용 run은 재현 가능하지만 에이전트 run은 모델 샘플링과 피드 변동으로 재현값이 아니다."}
 
 
@@ -949,10 +997,12 @@ class ResumeRequest(BaseModel):
 
 @app.post("/api/trading/resume", tags=["trading"])
 def resume(body: ResumeRequest, x_admin_token: str | None = Header(default=None)) -> dict:
-    """재가동. 관리자만(kill_switch_reset = admin). scope=all이면 정지된 모든 시장, 시장 이름이면 그 시장만 — 다른 시장은 그대로."""
+    """재가동. 관리자만(kill_switch_reset = admin). scope=all이면 정지된 모든 시장, 시장 이름이면 그 시장만 — 다른 시장은 그대로.
+    일일 손실 자동 정지(target daily_loss)는 재가동하지 않는다: 다음 거래일 개장에 스스로 풀린다(docs/10 D10). 그 시장은
+    skipped에 auto_resume_at과 함께 남고, 재가동된 시장이 하나도 없으면 409(detail에 auto_resume_at)."""
     role = _require_admin(x_admin_token)
     markets = _scope_markets(body.scope)
-    resumed, skipped, peak_resets = [], [], {}
+    resumed, skipped, peak_resets, waiting = [], [], {}, []
     with _locks(markets):
         at = _now()
         for m in markets:
@@ -960,6 +1010,15 @@ def resume(body: ResumeRequest, x_admin_token: str | None = Header(default=None)
             state = st.state()
             if state["running"]:
                 skipped.append({"market": m, "reason": "이미 실행 중"})
+                continue
+            # a daily-loss halt stands until the next session, even under a person's halt over it (D2: no early restart)
+            dl = [h for h in standing_halts(st.operations) if h.operator == "system" and h.target == "daily_loss"]
+            early = _effective(m, dl[-1:]) if dl else None
+            if early is not None and not early["running"] and (early["auto_resume_at"] or state.get("halt_target") == "daily_loss"):
+                label = _state_out(m, early)["auto_resume_label_ko"]
+                waiting.append({"market": m, "auto_resume_at": early["auto_resume_at"], "auto_resume_label_ko": label,
+                                "reason": f"일일 손실 자동 정지 — {label}에 자동 해제됩니다(조기 재가동 없음)"})
+                skipped.append(waiting[-1])
                 continue
             # a halt that could not read the orders log left its open orders standing; they must not fill at an old open
             stale = [o for o in open_orders(st.audit, keep_sells=state["keep_exits"]) if o.placed_at <= state["halted_at"]]
@@ -973,10 +1032,100 @@ def resume(body: ResumeRequest, x_admin_token: str | None = Header(default=None)
                 target="manual", before={"running": False}, after=after))
             cancel_orders(st.audit, stale, f"정지 전 미체결 — 재가동 시 취소 ({body.operator})")
             resumed.append(m)
+        if not resumed and waiting:
+            raise HTTPException(409, {"message": "; ".join(f"{MARKET_KO[w['market']]}: {w['reason']}" for w in waiting),
+                                      "auto_resume_at": waiting[0]["auto_resume_at"], "waiting": waiting})
         if not resumed:
             raise HTTPException(409, "이미 실행 중입니다" + ("" if len(markets) == 1 else " (모든 시장)"))
     return {"scope": body.scope, "scope_ko": HALT_SCOPE_KO.get(body.scope, body.scope), "resumed": resumed,
             "skipped": skipped, "peak_resets": peak_resets, "states": {m: _state_out(m) for m in markets}}
+
+
+class ExceptionActionRequest(BaseModel):
+    action: Literal["rerun", "hold", "dismiss", "retry_next", "dismiss_order"] = Field(
+        description="REVIEW: rerun | hold | dismiss. 주문 예외(한도 · 벤더 · LULD · 거부): retry_next | dismiss_order")
+    operator: str = Field(min_length=1)
+    reason: str = Field(min_length=1, description="필수 · 감사 로그에 남는다")
+
+
+ACTION_TOPIC_KO = {"rerun": "재실행은", "retry_next": "다음 세션 재시도는"}
+ACTION_RESULT_KO = {
+    "rerun": "재실행을 예약했습니다 ({n}/{limit}). 재실행 경로가 아직 결정 루프에 연결되지 않아 지금은 실행하지 않습니다 — 연결되면 "
+             "같은 입력으로 다시 판단하고, 다시 읽지 못하면 예외 큐로 돌아옵니다",
+    "retry_next": "다음 세션 재시도를 예약했습니다 ({n}/{limit}). 다음 실행이 그날 한도 · 하드 룰을 다시 거쳐 처음 수량 이하로 "
+                  "주문하고, 그다음 세션 시가에 체결합니다",
+    "hold": "보유(Hold)로 기록했습니다(source=human) · 주문 없음 · 채점에서 제외 — 채점 표에는 '사람 처리'로 따로 셉니다",
+    "dismiss": "결정 없이 예외를 닫았습니다 · 주문 없음 · 결정 기록이 없어 채점 대상이 아닙니다",
+    "dismiss_order": "주문 없이 닫았습니다 · 결정은 미체결로 남고 5일 정산은 결정 기준 그대로입니다",
+}
+
+
+def _action_out(o: OrderRecord, st: _Store, action: str, replayed: bool) -> dict:
+    n = o.reruns if action == "rerun" else o.retries if action == "retry_next" else None
+    return {"order": _order_out(o, st), "action": action, "action_ko": EXCEPTION_ACTION_KO[action], "replayed": replayed,
+            "attempt": n, "limit": ACTION_LIMIT if n is not None else None,
+            "result_ko": ACTION_RESULT_KO[action].format(n=n, limit=ACTION_LIMIT)}
+
+
+@app.post("/api/exceptions/{order_id}/action", tags=["execution"])
+def exception_action(order_id: str, body: ExceptionActionRequest, market: str | None = MarketQuery,
+                     x_admin_token: str | None = Header(default=None)) -> dict:
+    """예외 큐 처리(docs/10 D7). REVIEW는 재실행 · 보유로 처리 · 무시, 주문 예외는 다음 세션 재시도 · 무시. 사유 필수,
+    운영 기록(kind exception_action, target = order_id)을 먼저 쓰고 주문 기록에 새 줄(exception_action · 횟수 ·
+    exception_resolved). 보유로 처리는 그보다 먼저 `source="human"` Hold 결정을 쓴다(주문 없음, 채점 제외).
+    재실행 · 재시도는 각 2회까지(넘으면 409). 마지막 처리와 같은 처리 · 운영자 · 사유를 다시 보내면 아무것도 쓰지 않고
+    그 결과를 돌려준다(replayed). 재실행은 예약만 한다: 결정 루프(daily_loop)의 재실행 경로는 후속.
+    ponytail: 운영자 역할이 아직 없어 관리자 토큰(X-Admin-Token)으로 받는다 — 역할 분리는 후속."""
+    role = _require_admin(x_admin_token)
+    m = _market(market)
+    with _locks([m]):                                # the executor reads and writes these orders under the same lock
+        st = STORES[m].refresh()
+        audit = st.audit
+        o = latest_orders(audit.orders()).get(order_id)
+        if o is None:
+            raise HTTPException(404, f"{MARKET_KO[m]} 주문 {order_id!r} 없음 (REVIEW 결정은 실행기가 돈 뒤에 처리할 수 있습니다)")
+        last = next((op for op in reversed(audit.operations()) if op.kind == "exception_action" and op.target == order_id), None)
+        if (last is not None and o.exception_action == body.action and last.after.get("action") == body.action
+                and (last.operator, last.reason) == (body.operator, body.reason)):
+            return _action_out(o, st, body.action, replayed=True)
+        if o.status not in ("exception", "rejected"):
+            raise HTTPException(409, f"예외 큐에 있는 주문이 아닙니다 (지금 {ORDER_STATUS_KO[o.status]})")
+        if o.exception_resolved:
+            raise HTTPException(409, f"이미 처리된 예외입니다 ({EXCEPTION_ACTION_KO.get(o.exception_action or '', '처리됨')})")
+        kind = _exception_kind(o)
+        allowed = _allowed_actions(o, kind)
+        if body.action not in allowed:
+            raise HTTPException(422, ("규칙 청산 주문은 실행기가 다음 종가에 신호를 다시 판정합니다 — " if o.order_id.endswith(
+                EXIT_SUFFIX) else "") + f"{EXCEPTION_KIND_KO[kind]} 예외에는 {' · '.join(EXCEPTION_ACTION_KO[a] for a in allowed)}만 "
+                                     f"쓸 수 있습니다: {body.action}")
+        update: dict = {"exception_action": body.action}
+        after: dict = {"action": body.action, "scored": False}
+        if body.action in ("rerun", "retry_next"):
+            field = "reruns" if body.action == "rerun" else "retries"
+            used = getattr(o, field)
+            if used >= ACTION_LIMIT:
+                raise HTTPException(409, f"{ACTION_TOPIC_KO[body.action]} 예외마다 {ACTION_LIMIT}회까지입니다 "
+                                         f"(이미 {used}회) — 보유로 처리하거나 무시하세요")
+            update[field] = used + 1
+            after |= {"attempt": used + 1, "limit": ACTION_LIMIT, "pending": True}
+        else:
+            update["exception_resolved"] = True
+        if body.action == "hold":
+            # the decision first: an order line that says "held" never stands without the decision it records
+            if not any(d.source == "human" and (d.ticker, d.trade_date) == (o.ticker, o.trade_date) for d in audit.decisions()):
+                audit.record_decision(DecisionRecord(
+                    ticker=o.ticker, trade_date=o.trade_date, rating="Hold", action=None, source="human", market=m,
+                    thesis="사람 처리: 보유", settings={"decider": "human", "operator": body.operator, "order_id": order_id},
+                    evidence=[EvidenceItem(source="other", summary=f"{body.operator}: {body.reason}", ref=order_id)]))
+            after["decision"] = {"rating": "Hold", "source": "human"}
+        audit.record_operation(OperationRecord(
+            kind="exception_action", operator=body.operator, role=role, reason=body.reason, market=m, target=order_id,
+            before={"status": o.status, "exception_kind": kind, "exception_action": o.exception_action,
+                    "reruns": o.reruns, "retries": o.retries},
+            after=after))
+        new = o.model_copy(update=update)
+        audit.record_order(new)
+    return _action_out(new, STORES[m].refresh(), body.action, replayed=False)
 
 
 class ModeRequest(BaseModel):

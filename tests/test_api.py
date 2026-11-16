@@ -386,7 +386,7 @@ def test_a_rule_exit_is_served_as_its_own_decision_with_its_own_order(tmp_path, 
     # the agent's own calls can be read without the rule exits, and the health count says which is which
     assert [d["source"] for d in c.get("/api/decisions", params={"source": "agent", "rating": "Sell"}).json()] == ["agent"]
     assert c.get("/api/decisions", params={"source": "robot"}).status_code == 422
-    assert c.get("/api/health").json()["decisions_by_source"] == {"agent": 2, "rule": 1}
+    assert c.get("/api/health").json()["decisions_by_source"] == {"agent": 2, "rule": 1, "human": 0}
 
 
 # --- screen 1 · 5 fields (ui-foundation): the numbers the screens show, counted by the server -------------------
@@ -524,7 +524,7 @@ def test_us_performance_is_404_without_its_summary_and_reads_its_own_summary_and
     assert us.status_code == 200
     body = us.json()
     assert set(body) == {"run_id", "cells_run", "resolved", "pending", "unscored", "holding", "dates", "universe",
-                         "by_rating", "per_date", "reflections", "caveat"}
+                         "by_rating", "per_date", "reflections", "human_handled", "caveat"}
     assert body["run_id"] == "us1" and body["by_rating"]["Sell"]["rating_ko"] == "매도"
     # a Sell's alpha counts on the short side; the reflection is the US log's, not the KRX one
     assert body["per_date"] == [{"date": "2026-06-05", "resolved": 1, "long_mean_alpha": None, "short_mean_alpha": pytest.approx(-0.021)}]

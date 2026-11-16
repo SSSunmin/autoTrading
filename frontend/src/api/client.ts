@@ -1,5 +1,5 @@
 import type {
-  BookEvents, Decision, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
+  BookEvents, Decision, ExceptionAction, ExceptionActionResult, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
   ResumePreview, ResumeResult, RulesSettings, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
 } from './types'
 
@@ -18,7 +18,9 @@ async function parse<T>(res: Response): Promise<T> {
     let detail = res.statusText
     try {
       const body = await res.json()
-      detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? body)
+      // a structured detail (resume 409 of a daily-loss halt) carries its own message
+      detail = typeof body.detail === 'string' ? body.detail
+        : typeof body.detail?.message === 'string' ? body.detail.message : JSON.stringify(body.detail ?? body)
     } catch { /* keep statusText */ }
     throw new ApiError(res.status, detail)
   }
@@ -31,7 +33,7 @@ async function get<T>(path: string, params?: Record<string, string | number | bo
   return parse<T>(await fetch(url.toString()))
 }
 
-/** The three write actions the plan allows (docs/02 §0-5). `adminToken` is only needed when the server has one set. */
+/** The write actions the plan allows (docs/02 §0-5, docs/10 D7). `adminToken` is only needed when the server has one set. */
 async function post<T>(path: string, body: unknown, adminToken?: string): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (adminToken) headers['X-Admin-Token'] = adminToken
@@ -68,6 +70,9 @@ export const api = {
     post<ResumeResult>('/api/trading/resume', body, adminToken),
   setMode: (body: { operator: string; mode: Mode; reason: string; market: Market }, adminToken?: string) =>
     post<{ state: TradingState; note: string | null }>('/api/trading/mode', body, adminToken),
+  /** The exception queue (docs/10 D7): REVIEW rerun · hold · dismiss, an order exception retry_next · dismiss_order. */
+  exceptionAction: (market: Market, orderId: string, body: { action: ExceptionAction; operator: string; reason: string }, adminToken?: string) =>
+    post<ExceptionActionResult>(`/api/exceptions/${encodeURIComponent(orderId)}/action?market=${market}`, body, adminToken),
   /** The account axis only (docs/10 D4). Paper → live is taken only when the server's gate is eligible, with `confirmed`. */
   setAccount: (body: { operator: string; account_mode: 'paper' | 'live'; reason: string; market: Market; confirmed: boolean }, adminToken?: string) =>
     post<{ state: TradingState; note: string | null }>('/api/trading/mode', body, adminToken),

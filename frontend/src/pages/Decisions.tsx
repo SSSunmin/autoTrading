@@ -1,16 +1,26 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AgentAlert, AgentButton, AgentEmptyState, AgentSectionPanel, AgentSelect, AgentTabs } from '@bv-ds/ui'
+import { AgentAlert, AgentEmptyState, AgentSectionPanel, AgentSelect, AgentTabs } from '@bv-ds/ui'
 
 import { api } from '../api/client'
+import type { Decision, ExceptionItem } from '../api/types'
 import { useApi } from '../hooks/useApi'
 import { useMarket } from '../hooks/useMarket'
-import { useTradingState } from '../hooks/useTradingState'
+import { useStateTick, useTradingState } from '../hooks/useTradingState'
 import { Loaded, TickerCell } from '../components/common'
 import { DecisionCard } from '../components/DecisionCard'
+import { ExceptionButtons } from '../components/decisionParts'
+
+/** The queue item a card acts on: its REVIEW, or one of its orders' exceptions. */
+function exceptionOf(d: Decision, items: ExceptionItem[]): ExceptionItem | undefined {
+  if (d.source !== 'agent') return undefined
+  return items.find((x) => x.trade_date === d.trade_date && x.ticker === d.ticker
+    && (x.kind === 'review' ? d.rating === 'REVIEW' : d.orders.some((o) => o.order_id === x.order_id)))
+}
 
 /** 3 (v0.3) 결정·실행: the day's decisions with their execution strip, the exception queue
- *  (REVIEW + cap exceeded + vendor failure), and hard-rule overrides (original vs final). No approval step in auto mode. */
+ *  (REVIEW + cap exceeded + vendor failure) with its write actions (docs/10 D7), and the decisions a hard rule cut or
+ *  blocked (원안 vs 최종). No approval step in auto mode. */
 export default function Decisions() {
   const [params, setParams] = useSearchParams()
   const [market] = useMarket()
@@ -18,8 +28,9 @@ export default function Decisions() {
   // a date picked on one market's list is that market's trading day; it does not carry over to the other market
   const [picked, setPicked] = useState<{ market: string; date: string } | null>(null)
   const day = (picked?.market === market ? picked.date : null) ?? dates.data?.[0] ?? null
-  const all = useApi(() => (day ? api.decisions(market, { date: day }) : Promise.resolve([])), [market, day])
-  const exceptions = useApi(() => (day ? api.exceptions(market, { date: day }) : Promise.resolve([])), [market, day])
+  const tick = useStateTick()                              // an exception action announces itself: reload both
+  const all = useApi(() => (day ? api.decisions(market, { date: day }) : Promise.resolve([])), [market, day, tick])
+  const exceptions = useApi(() => (day ? api.exceptions(market, { date: day }) : Promise.resolve([])), [market, day, tick])
   const mode = useTradingState(market)
   const tab = params.get('tab') ?? 'all'
   const setTab = (t: string) => setParams((p) => {
@@ -30,8 +41,11 @@ export default function Decisions() {
   })
 
   const rows = all.data ?? []
-  const overrides = rows.filter((d) => d.hard_rule_overrides.length > 0)
+  const overrides = rows.filter((d) => d.has_intervention)
   const nExc = exceptions.data?.length ?? 0
+  const items = exceptions.data ?? []
+  const token = mode.data?.admin_token_required ?? false
+  const card = (d: Decision) => <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} exception={exceptionOf(d, items)} tokenRequired={token} />
 
   return (
     <>
@@ -54,13 +68,13 @@ export default function Decisions() {
       <div className="section">
         {tab === 'all' && (
           <Loaded state={all} empty="이 날짜의 결정이 없습니다">
-            {() => <div className="cards">{rows.map((d) => <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} />)}</div>}
+            {() => <div className="cards">{rows.map(card)}</div>}
           </Loaded>
         )}
 
         {tab === 'exceptions' && (
           <Loaded state={exceptions} empty="예외가 없습니다"
-            emptyDescription="모든 결정의 등급을 읽을 수 있었고 거부된 주문도 없습니다. REVIEW·자동 실행 한도 초과·벤더 장애가 생기면 여기에 올라옵니다.">
+            emptyDescription="모든 결정의 등급을 읽을 수 있었고 거부된 주문도 없습니다(처리한 예외는 빠집니다). REVIEW·자동 실행 한도 초과·벤더 장애가 생기면 여기에 올라옵니다.">
             {(items) => (
               <div className="cards">
                 {items.map((x) => {
@@ -71,7 +85,7 @@ export default function Decisions() {
                         <TickerCell ticker={x.ticker} name={x.name} />
                         <span className="rating REVIEW">{x.kind_ko}</span>
                       </div>
-                      <div className="exec exception">{x.summary} · 자동 주문하지 않았습니다.</div>
+                      <div className="exec exception">{x.summary} · {x.pending_action_ko ?? '자동 주문하지 않았습니다.'}</div>
                       {x.kind === 'review' && d && (
                         <AgentSectionPanel title="에이전트 원문 전체" description="등급 파서가 읽지 못한 텍스트. Hold로 뭉개지 않고 사람이 봅니다">
                           <pre className="raw">{d.thesis}</pre>
@@ -79,10 +93,7 @@ export default function Decisions() {
                       )}
                       {x.kind !== 'review' && x.detail && <div className="memo">{x.detail}</div>}
                       <div className="meta">
-                        {/* ponytail: these write actions arrive with the execution layer; until then they are shown disabled, as the plan lists them */}
-                        <AgentButton size="sm" variant="secondary" disabled title="실행 레이어 연결 후 활성화">재실행</AgentButton>
-                        <AgentButton size="sm" variant="secondary" disabled title="실행 레이어 연결 후 활성화">수동 등급 지정</AgentButton>
-                        <AgentButton size="sm" variant="ghost" disabled title="실행 레이어 연결 후 활성화">무시</AgentButton>
+                        <ExceptionButtons item={x} tokenRequired={token} />
                         <span className="muted num" style={{ marginLeft: 'auto' }}>{x.trade_date}</span>
                       </div>
                     </article>
@@ -96,9 +107,9 @@ export default function Decisions() {
         {tab === 'override' && (
           <Loaded state={all} empty="이 날짜의 결정이 없습니다">
             {() => overrides.length === 0 ? (
-              <AgentEmptyState title="하드룰 개입이 없습니다" description="하드 룰 레이어가 아직 연결되지 않았습니다. 연결되면 원안(에이전트)과 최종(룰 적용 후)이 나란히 표시됩니다." />
+              <AgentEmptyState title="하드룰 개입이 없습니다" description="이 날짜에 하드 룰이 비중·수량을 줄이거나 매수를 막은 주문이 없습니다. 개입이 있으면 원안(에이전트)과 최종(룰 적용 후)이 나란히 표시됩니다." />
             ) : (
-              <div className="cards">{overrides.map((d) => <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} />)}</div>
+              <div className="cards">{overrides.map(card)}</div>
             )}
           </Loaded>
         )}

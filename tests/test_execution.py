@@ -204,13 +204,7 @@ def test_review_and_missing_open_are_exceptions(audit):
     assert "2026-06-04 시가 없음" in by["H.KS"].reason and by["H.KS"].filled_quantity == 0
 
 
-@pytest.mark.unit
-def test_auto_execution_caps_make_exceptions_not_smaller_orders(audit):
-    # 1e9 equity × 10% = 100M per order > 30M per-order cap
-    _decide(audit, "A.KS", "2026-06-02")
-    (o,) = execute_date(audit, "2026-06-02", _prices(A_KS=_flat()), risk=RISK, cfg=PaperConfig(initial_cash=1e9))
-    assert o.status == "exception" and o.exception_kind == "cap_exceeded" and o.rules_applied[-1] == "auto_order_max"
-    assert o.quantity > 0 and o.filled_quantity == 0
+# the per-order cap shrinks the order (docs/10 D1): tests/test_decision_cards.py
 
 
 @pytest.mark.unit

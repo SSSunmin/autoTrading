@@ -187,3 +187,12 @@ EXCEPTION_KIND_KO |= {"data_delayed": "데이터 지연", "luld_halt": "LULD 거
 # The guard / lock history on screen 5 (execution.book_events).
 BOOK_EVENT_KO: dict[str, str] = {"guard": "가드", "lock": "잠금", "protections": "Protections", "intervention": "개입",
                                  "peak_reset": "피크 재설정"}
+
+# Decision cards (docs/10 단계 4): who made a decision, the exception queue's write actions (D7) and the per-order
+# cap's shrink to nothing (D1).
+DECISION_SOURCE_KO["human"] = "사람 처리"
+EXCEPTION_ACTION_KO: dict[str, str] = {"rerun": "재실행", "hold": "보유로 처리", "dismiss": "무시",
+                                       "retry_next": "다음 세션 재시도", "dismiss_order": "무시"}
+EXCEPTION_PENDING_KO: dict[str, str] = {"rerun": "재실행 대기 (재실행 경로 미연결)", "retry_next": "다음 세션 재시도 예약"}
+OPERATION_KO["exception_action"] = "예외 처리"
+AUTO_RULE_KO["cap_zero"] = "주문당 상한 — 1주도 살 수 없음"

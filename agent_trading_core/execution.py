@@ -19,7 +19,12 @@ One run executes one trading day (docs/02 화면 3 실행 흐름):
 5. each agent decision of the date becomes one order keyed ``paper-<date>-<ticker>``, so a second run writes
    nothing: Buy/Overweight buy names not held, sized by ``risk.size_targets`` under the guards (drawdown,
    daily loss, regime, Protections); Sell/Underweight sell the whole holding; Hold places nothing; REVIEW
-   is an exception. A buy over an ``auto_execution(market)`` cap is an exception, not shrunk; sells reduce risk and are not capped.
+   is an exception. A buy over the per-order cap ``auto_order_max`` is shrunk to the most whole shares under it
+   (docs/10 D1; none left: blocked ``cap_zero``); one past the session's ``auto_daily_order_cap`` is an exception.
+   Sells reduce risk and are not capped. Each sized buy keeps its 원안 vs 최종 (``OrderRecord.plan``).
+   An exception a person asked to retry (``retry_next``) goes through the guards and caps again here under its
+   original order id (``retry_on`` = this date): at most its original quantity, sized on its decision day's buy list
+   at this date's scale and caps (a zero-quantity exception: the day's target)
 6. the order fills at the next trading day's open (slippage, commission, sell tax), or stays open when that
    day has not happened yet. A halt cancels the open ones (``open_orders`` → ``cancel_orders``).
 
@@ -51,8 +56,11 @@ from agent_trading_core.audit import (
     AuditLog,
     DecisionRecord,
     EvidenceItem,
+    Intervention,
     OperationRecord,
+    OrderPlan,
     OrderRecord,
+    PlanSide,
     latest_orders,
     trading_state,
 )
@@ -188,8 +196,8 @@ def session_amounts(orders, prices: Prices, calendar: list[str], date: str) -> t
     session = next_session(calendar, date)
     buy = sell = 0.0
     for o in orders:
-        if o.status in ("filled", "partial", "open") and next_session(calendar, o.trade_date) == session:
-            amount = o.amount if o.amount is not None else o.quantity * (prices.close_asof(o.ticker, o.trade_date) or 0.0)
+        if o.status in ("filled", "partial", "open") and next_session(calendar, o.placed_on) == session:
+            amount = o.amount if o.amount is not None else o.quantity * (prices.close_asof(o.ticker, o.placed_on) or 0.0)
             if o.side == "Buy":
                 buy += amount
             else:
@@ -527,11 +535,34 @@ def _dd_halt(audit: AuditLog, date: str, equity: float, peak: float, cfg: PaperC
     return True
 
 
+def _short(v: float, market: str) -> str:
+    """An amount in an intervention text, as the decision card's box words it: 9,845만 / $12,345."""
+    return f"${v:,.0f}" if MARKETS[market]["currency"] == "USD" else f"{v / 1e4:,.0f}만"
+
+
+def _intervention(text: str) -> Intervention:
+    """A hard rule's text → its id and the before / after the text names ("max_position_pct: X 12.5% → 10.0%",
+    "가드 스케일 ×0.5"). A text without either is a lock: the note alone."""
+    rule = _rule_ids([text])[0]
+    if "→" in text:
+        left, right = text.split("→", 1)
+        return Intervention(rule=rule, before=left.split()[-1], after=right.split()[0], note=text)
+    if m := re.search(r"×([\d.]+)", text):
+        return Intervention(rule=rule, before="×1", after=f"×{m.group(1)}", note=text)
+    return Intervention(rule=rule, note=text)
+
+
 def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderRecord], prices: Prices,
            risk: RiskConfig, cfg: PaperConfig, calendar: list[str],
-           base: tuple[str, float] | None = None) -> list[OrderRecord]:
+           base: tuple[str, float] | None = None, retries: dict[str, OrderRecord] | None = None,
+           sizing: dict[str, list[str]] | None = None) -> list[OrderRecord]:
     """One order per decision not ordered yet, open or already refused, sized from the book as of ``date``'s close.
-    ``decisions`` is the whole day, so a rerun after a crash sizes the rest against the same denominator."""
+    ``decisions`` is the whole day, so a rerun after a crash sizes the rest against the same denominator.
+    ``retries``: exceptions a person asked to retry next session, by ticker, with their decisions in ``decisions`` —
+    each goes through the guards and caps of ``date`` again under its original order id, sized like a fresh call:
+    ``sizing`` gives its decision day's buy-rated names (the equal-weight denominator), ``date``'s guard scale and
+    caps apply, and a first quantity above 0 is an upper bound (a retry never buys more than it was placed at)."""
+    retries = retries or {}
     book = replay(list(current.values()), prices, cfg, until=date)
     equity, peak, _, day_ret = _marks(book, cfg, date, base)
 
@@ -567,9 +598,12 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
 
     out: list[OrderRecord] = []
     for d in sorted(decisions, key=lambda d: d.rating not in SELL_RATINGS):   # sells first, then decision order
-        if _order_id(d) in current:
+        retry = retries.get(d.ticker)
+        if retry is None and _order_id(d) in current:
             continue
         base = {"order_id": _order_id(d), "ticker": d.ticker, "trade_date": date, "market": cfg.market}
+        if retry is not None:
+            base |= {"trade_date": retry.trade_date, "retry_on": date, "reruns": retry.reruns, "retries": retry.retries}
         if d.rating == RATING_REVIEW or not d.tradeable:
             out.append(OrderRecord(**base, side="Sell" if d.action == "Sell" else "Buy", quantity=0, status="exception",
                                    exception_kind="review", reason="등급을 읽을 수 없어 주문하지 않았습니다"))
@@ -591,53 +625,85 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
                 out.append(OrderRecord(**base, side="Sell", quantity=0, status="blocked", rules_applied=["no_short"],
                                        reason="보유 없음 — 매도할 수량이 없습니다 (공매도하지 않음)"))
                 continue
-            side, qty, rules, note = "Sell", held.quantity, [], f"보유 {held.quantity}주 전량 매도"
-        else:
-            if d.ticker in book.holdings or d.ticker in pending_buys:
-                out.append(OrderRecord(**base, side="Buy", quantity=0, status="blocked", rules_applied=["already_held"],
-                                       reason="이미 보유 중 — 추가 매수 없음"))
-                continue
-            if locks:
-                out.append(OrderRecord(**base, side="Buy", quantity=0, status="blocked", rules_applied=list(locks),
-                                       reason=" · ".join(locks.values())))
-                continue
-            if tl := protections.locked_ticker(d.ticker, day):
-                out.append(OrderRecord(**base, side="Buy", quantity=0, status="blocked",
-                                       rules_applied=[tl.split(":")[0]], reason=tl))
-                continue
-            mine = [o for o in overrides if o.startswith(f"max_position_pct: {d.ticker} ")] + shared
-            if ref is None:
-                out.append(OrderRecord(**base, side="Buy", quantity=0, status="exception", exception_kind="vendor_unavailable",
-                                       reason=f"결정일 {date} 종가 없음 — 수량을 정할 수 없어 주문하지 않았습니다"))
-                continue
-            target = weights.get(d.ticker, 0.0) * equity
-            unit = ref * (1 + cfg.slippage) * (1 + cfg.commission)
-            qty = int(target // unit)
-            rules = _rule_ids(mine)
-            if qty <= 0:
-                out.append(OrderRecord(**base, side="Buy", quantity=0, status="blocked", rules_applied=rules,
-                                       reason=f"목표 금액 {money(target)} < 1주 {money(unit)}" + (f" · {' · '.join(mine)}" if mine else "")))
-                continue
-            side, note = "Buy", f"목표 비중 {weights[d.ticker]:.1%} × 평가 {money(equity)}" + (f" · {' · '.join(mine)}" if mine else "")
-        if side == "Sell":                     # risk-reducing: the auto-execution caps limit buys only
-            out.append(OrderRecord(**base, side=side, quantity=qty, status="open", rules_applied=rules,
-                                   reason=f"모의 주문: {note} · 다음 거래일 시가"))
+            # risk-reducing: the auto-execution caps limit buys only
+            out.append(OrderRecord(**base, side="Sell", quantity=held.quantity, status="open",
+                                   reason=f"모의 주문: 보유 {held.quantity}주 전량 매도 · 다음 거래일 시가"))
             continue
+
+        if d.ticker in book.holdings or d.ticker in pending_buys:
+            out.append(OrderRecord(**base, side="Buy", quantity=0, status="blocked", rules_applied=["already_held"],
+                                   reason="이미 보유 중 — 추가 매수 없음"))
+            continue
+        if ref is None:
+            out.append(OrderRecord(**base, side="Buy", quantity=0, status="exception", exception_kind="vendor_unavailable",
+                                   reason=f"결정일 {date} 종가 없음 — 수량을 정할 수 없어 주문하지 않았습니다"))
+            continue
+        unit = ref * (1 + cfg.slippage) * (1 + cfg.commission)
+        # the agent's call before any rule: equal weight (a retry: the quantity it was placed at the first time)
+        fixed = retry.quantity if retry is not None and retry.quantity > 0 else None
+        if retry is not None and (orig := (sizing or {}).get(d.ticker)):
+            # the denominator of its own decision day, at today's scale: a retry is sized as that call would be today
+            w_day, ov_day = size_targets(orig, risk, scale=scale if scale > 0 else 1.0)
+            sh_day, n = [o for o in ov_day if not o.startswith("max_position_pct")], len(orig)
+        else:
+            w_day, ov_day, sh_day, n = weights, overrides, shared, len(buys)
+        raw = 1.0 / n
+        pq = fixed if fixed is not None else int(raw * equity // unit)
+        proposed = PlanSide(side="Buy", weight_pct=pq * ref / equity if fixed is not None and equity > 0 else raw,
+                            qty=pq, amount=pq * ref)
+
+        def refuse(status: str, rules: list[str], reason: str, ivs: list[Intervention], qty: int = 0,
+                   kind: str | None = None, rec: dict = base, proposed: PlanSide = proposed) -> OrderRecord:
+            return OrderRecord(**rec, side="Buy", quantity=qty, status=status, exception_kind=kind, rules_applied=rules,
+                               reason=reason, plan=OrderPlan(proposed=proposed, final=PlanSide(side="Hold"), interventions=ivs))
+
+        if locks:
+            out.append(refuse("blocked", list(locks), " · ".join(locks.values()),
+                              [Intervention(rule=r, note=t) for r, t in locks.items()]))
+            continue
+        if tl := protections.locked_ticker(d.ticker, day):
+            out.append(refuse("blocked", [tl.split(":")[0]], tl, [Intervention(rule=tl.split(":")[0], note=tl)]))
+            continue
+        mine = [o for o in ov_day if o.startswith(f"max_position_pct: {d.ticker} ")] + sh_day
+        target = w_day.get(d.ticker, 0.0) * equity
+        qty = int(target // unit)
+        if fixed is not None and qty >= fixed:
+            mine, qty = [], fixed          # a retry: the day's sizing (scale · caps) can cut its first quantity, never raise it
+        ivs = [_intervention(t) for t in mine]
+        rules = _rule_ids(mine)
+        if qty <= 0:
+            out.append(refuse("blocked", rules, f"목표 금액 {money(target)} < 1주 {money(unit)}"
+                              + (f" · {' · '.join(mine)}" if mine else ""), ivs))
+            continue
+        if fixed is not None:
+            note = (f"다음 세션 재시도 {retry.retries}/2 · 처음 수량 {fixed}주"
+                    + (f" → 그날 목표 {qty}주 · {' · '.join(mine)}" if qty < fixed else ""))
+        else:
+            note = (("다음 세션 재시도 " + f"{retry.retries}/2 · " if retry is not None else "")
+                    + f"목표 비중 {w_day[d.ticker]:.1%} × 평가 {money(equity)}" + (f" · {' · '.join(mine)}" if mine else ""))
         amount = qty * ref                     # in the market's currency, against that market's caps
         if amount > caps["auto_order_max"]:
-            out.append(OrderRecord(**base, side=side, quantity=qty, status="exception", exception_kind="cap_exceeded",
-                                   rules_applied=rules + ["auto_order_max"],
-                                   reason=f"주문 금액 {money(amount)} > 주문당 상한 {money(caps['auto_order_max'])}"))
-            continue
+            # D1: shrink to the most whole shares under the per-order cap instead of an exception
+            cut = int(caps["auto_order_max"] // ref)
+            text = (f"auto_order_max: {_short(amount, cfg.market)} → {_short(caps['auto_order_max'], cfg.market)} "
+                    f"({qty}주 → {cut}주)")
+            ivs.append(_intervention(text))
+            if cut <= 0:
+                out.append(refuse("blocked", rules + ["auto_order_max", "cap_zero"],
+                                  f"{text} · 1주 {money(ref)} > 주문당 상한 {money(caps['auto_order_max'])}", ivs))
+                continue
+            rules, qty, amount, note = rules + ["auto_order_max"], cut, cut * ref, f"{note} · {text}"
         if day_amount + amount > caps["auto_daily_order_cap"]:
-            out.append(OrderRecord(**base, side=side, quantity=qty, status="exception", exception_kind="cap_exceeded",
-                                   rules_applied=rules + ["auto_daily_order_cap"],
-                                   reason=f"{session or '다음 거래일'} 매수 금액 {money(day_amount + amount)} > "
-                                          f"일일 상한 {money(caps['auto_daily_order_cap'])}"))
+            reason = (f"{session or '다음 거래일'} 매수 금액 {money(day_amount + amount)} > "
+                      f"일일 상한 {money(caps['auto_daily_order_cap'])}")
+            out.append(refuse("exception", rules + ["auto_daily_order_cap"], reason,
+                              ivs + [Intervention(rule="auto_daily_order_cap", note=reason)], qty=qty, kind="cap_exceeded"))
             continue
         day_amount += amount
-        out.append(OrderRecord(**base, side=side, quantity=qty, status="open", rules_applied=rules,
-                               reason=f"모의 주문: {note} · 다음 거래일 시가"))
+        out.append(OrderRecord(**base, side="Buy", quantity=qty, status="open", rules_applied=rules,
+                               reason=f"모의 주문: {note} · 다음 거래일 시가",
+                               plan=OrderPlan(proposed=proposed, interventions=ivs, final=PlanSide(
+                                   side="Buy", weight_pct=amount / equity if equity > 0 else None, qty=qty, amount=amount))))
     return out
 
 
@@ -647,7 +713,7 @@ def _fill(pending: list[OrderRecord], current: dict[str, OrderRecord], prices: P
     returns the new versions. Orders whose fill day is not in the data yet stay open."""
     by_day: dict[str, list[OrderRecord]] = {}
     for o in pending:
-        if (f := next_session(calendar, o.trade_date)) is not None:
+        if (f := next_session(calendar, o.placed_on)) is not None:
             by_day.setdefault(f, []).append(o)
     out = []
     for day in sorted(by_day):
@@ -763,11 +829,34 @@ def execute_date(audit: AuditLog, date: str, prices: Prices, *, risk: RiskConfig
             for o in agent:
                 current[o.order_id] = o
             placed += agent
+            if due := _retries_due(current, calendar, date):
+                agent_calls = {(d.ticker, d.trade_date): d for d in audit.decisions() if d.source == "agent"}
+                # only the agent order of that decision: a rule exit (or an order whose decision is gone) has no retry
+                pairs = {o.ticker: (d, o) for o in due if (d := agent_calls.get((o.ticker, o.trade_date))) is not None
+                         and _order_id(d) == o.order_id}
+                day_buys = {o.trade_date: [t for (t, day), d in agent_calls.items() if day == o.trade_date
+                                           and d.rating in BUY_RATINGS] for _, o in pairs.values()}
+                again = _place([d for d, _ in pairs.values()], date, current, prices, risk, cfg, calendar, base,
+                               retries={t: o for t, (_, o) in pairs.items()},
+                               sizing={t: day_buys[o.trade_date] for t, (_, o) in pairs.items()})
+                done = {o.order_id for o in again}
+                again += [o.model_copy(update={"exception_action": None, "reason": f"{o.reason} · 다음 세션 재시도를 낼 "
+                                               "에이전트 주문이 없어 예외 큐로 돌아옴"}) for o in due if o.order_id not in done]
+                for o in again:
+                    current[o.order_id] = o
+                placed += again
         filled = {o.order_id: o for o in _fill([o for o in placed if o.status == "open"], current, prices, cfg, calendar)}
         placed = [filled.get(o.order_id, o) for o in placed]
         for o in placed:
             audit.record_order(o)
         return written + placed
+
+
+def _retries_due(current: dict[str, OrderRecord], calendar: list[str], date: str) -> list[OrderRecord]:
+    """Exceptions a person asked to retry next session (``retry_next``) that ``date``'s run places again: the session
+    they failed at (or would have filled at) is ``date`` or earlier, so the retry fills at a later one."""
+    return [o for o in current.values() if o.exception_action == "retry_next" and o.status in ("exception", "rejected")
+            and (s := next_session(calendar, o.placed_on)) is not None and s <= date]
 
 
 def unexplained_orders(orders: list[OrderRecord], decisions: list[DecisionRecord]) -> list[OrderRecord]:
@@ -911,7 +1000,7 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
 
 LOCK_RULES = ("dd_stop", "daily_loss_limit", "regime", "StoplossGuard")          # a lock on every new buy
 TICKER_LOCK_RULES = ("Cooldown", "LowProfit")                                     # a lock on one name
-INTERVENTION_RULES = ("max_position_pct", "sector_cap", "max_gross_pct", "dd_halve")
+INTERVENTION_RULES = ("max_position_pct", "sector_cap", "max_gross_pct", "dd_halve", "auto_order_max")
 
 
 def book_events(orders: list[OrderRecord], operations: list[OperationRecord], prices: Prices, *,
@@ -954,9 +1043,9 @@ def book_events(orders: list[OrderRecord], operations: list[OperationRecord], pr
             continue
         if o.status == "blocked" and (rules := tuple(r for r in o.rules_applied if r in LOCK_RULES)):
             locks.setdefault((o.trade_date, rules), []).append(o)
-        elif o.status == "blocked" and any(r in TICKER_LOCK_RULES for r in o.rules_applied):
+        elif o.status == "blocked" and any(r in TICKER_LOCK_RULES or r == "cap_zero" for r in o.rules_applied):
             add(o.trade_date, "lock", f"{o.ticker} 신규 매수 차단 · {o.reason}", o.ticker)
-        elif cuts := [r for r in o.rules_applied if r in INTERVENTION_RULES]:
+        elif cuts := [r for r in o.rules_applied if r in INTERVENTION_RULES and (r != "auto_order_max" or o.plan)]:
             parts = [s for s in o.reason.split(" · ") if s.split(":")[0] in INTERVENTION_RULES or s.startswith("가드 스케일")]
             add(o.trade_date, "intervention", f"{o.ticker} 비중 축소 · {' · '.join(parts) or ', '.join(cuts)}", o.ticker)
     for (date, _), group in locks.items():

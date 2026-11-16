@@ -133,15 +133,16 @@ def test_us_trading_days_come_from_the_sp500_calendar_not_the_kospi_one(root):
 
 
 @pytest.mark.unit
-def test_the_us_caps_are_dollars_and_an_order_over_20000_is_an_exception(root):
+def test_the_us_caps_are_dollars_and_an_order_over_20000_is_shrunk_to_it(root):
     days = ["2026-06-01", "2026-06-02"]
     prices = Prices(frames={"^GSPC": _rising(days), "AAPL": _flat(days, 100.0)})
     us = market_audit(root, "US")
     _decide(us, "AAPL", "2026-06-01", market="US")
     big = replace(paper_config("US"), initial_cash=1_000_000.0)            # 10% = $100,000 target
     (o,) = execute_date(us, "2026-06-01", prices, risk=RISK, cfg=big)
-    assert o.status == "exception" and o.rules_applied[-1] == "auto_order_max"
-    assert o.reason == "주문 금액 $99,900.00 > 주문당 상한 $20,000.00"          # 999 shares x $100, against $20,000
+    # 999 shares x $100 = $99,900 > $20,000: the most whole shares under the cap, 20,000 // 100 = 200 (docs/10 D1)
+    assert o.status == "filled" and o.quantity == 200 and o.rules_applied[-1] == "auto_order_max"
+    assert "auto_order_max: $99,900 → $20,000 (999주 → 200주)" in o.reason
 
 
 @pytest.mark.unit
