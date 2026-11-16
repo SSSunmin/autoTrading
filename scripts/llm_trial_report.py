@@ -33,6 +33,7 @@ import daily_loop as dl
 from agent_trading_core import agent
 from agent_trading_core.audit import latest_orders, market_audit
 from agent_trading_core.config import LLM, MARKETS
+from agent_trading_core.execution import Prices
 from agent_trading_core.memory import settlement
 from agent_trading_core.rating import RATING_REVIEW
 
@@ -43,11 +44,14 @@ BUY_SIDE = ("Buy", "Overweight")
 @contextmanager
 def kis_closes(cache: Path):
     """``settlement.fetch_returns`` reads Yahoo (``get_closes``, the network); the daily loop's prices are the KIS
-    cache. ponytail: swaps the module's ``get_closes`` for the length of the report — drop it once fetch_returns
-    takes its price source as an argument."""
-    prices = dl.KisPrices(cache)
+    cache — the KIS file only: a name without one has no prices here (pending), never Yahoo's adjusted closes.
+    ponytail: swaps the module's ``get_closes`` for the length of the report — drop it once fetch_returns takes its
+    price source as an argument."""
+    prices = Prices(cache, source="kis")
 
     def closes(symbol: str, start: str, end: str) -> pd.Series:
+        if prices.info(symbol)["source"] != "kis":
+            return pd.Series(dtype=float)
         c = prices.frame(symbol)["Close"].dropna()
         c = c[(c.index >= start) & (c.index < end)]
         return pd.Series(c.to_numpy(dtype=float), index=pd.DatetimeIndex(c.index))

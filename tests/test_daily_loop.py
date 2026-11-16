@@ -410,7 +410,7 @@ def test_prices_come_from_the_kis_cache_not_the_yahoo_file(tmp_path):
     client = _market()
     kis.update_cache("^KS11", tmp_path, client, now=at("2026-08-05", "09:00"))
     (tmp_path / "^KS11-YFin-data.csv").write_text("Date,Open,Close\n2026-08-04,1,1\n", encoding="utf-8")
-    p = dl.KisPrices(tmp_path)
+    p = dl.Prices(tmp_path, source="kis")                  # the loop's prices: KIS first
     assert p.calendar("^KS11")[-1] == "2026-08-04"
     assert p.close_asof("^KS11", "2026-08-04") == final(client, "^KS11", "2026-08-04")
     assert p.open_on("^KS11", "2026-08-04") == final(client, "^KS11", "2026-08-04", "Open")

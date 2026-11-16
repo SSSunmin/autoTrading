@@ -31,7 +31,8 @@ restart, a late call or a retry in that window runs it once more if it is not do
 no bar is settled as a holiday on final bars. Weekdays before it that nobody ran get ``skipped`` (``missed``).
 ``decide`` also compares the fills of the session before with that day's final Open (``check_fill_opens``): a fill
 priced from a provisional row is reported in ``notes`` when they differ, never rewritten. Prices come from the KIS
-cache (``<symbol>-KIS-data.csv``), never the Yahoo files.
+cache (``<symbol>-KIS-data.csv``, ``execution.Prices(source="kis")``); a name with no KIS file falls back to its Yahoo
+file, and the run's ``notes`` names it (``fallback_notes``) — never a silent switch to adjusted prices.
 
 Exit codes: 0 ok / skipped(holiday, missed) / nothing to do, 1 failed, 2 bad arguments, 3 skipped (executor
 refused). TRADING_DATA_DIR overrides data/.
@@ -46,8 +47,6 @@ from collections import Counter
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
-
-import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -124,28 +123,15 @@ def due_day(market: str, stage: str, now: datetime) -> str | None:
     return None
 
 
-class KisPrices(Prices):
-    """``execution.Prices`` over the KIS cache (``<symbol>-KIS-data.csv``) instead of the Yahoo files.
-
-    ponytail: copies ``Prices.frame`` and its private ``_frames`` · ``_files`` (execution.py, api's). Drop this
-    class once ``Prices`` takes its price source as an argument (stage 4, when the executor reads KIS)."""
-
-    def frame(self, ticker: str) -> pd.DataFrame:
-        if ticker in self._frames or self.cache_dir is None:
-            return super().frame(ticker)
-        path = kis.cache_path(ticker, self.cache_dir)
-        if not path.exists():
-            return pd.DataFrame({"Open": [], "Close": []}, index=pd.Index([], dtype=object), dtype=float)
-        stamp = path.stat().st_mtime_ns
-        hit = self._files.get(ticker)
-        if hit and hit[0] == stamp:
-            return hit[1]
-        raw = kis.read_cache(path)
-        f = pd.DataFrame({"Open": raw["Open"].to_numpy(dtype=float), "Close": raw["Close"].to_numpy(dtype=float)},
-                         index=raw["Date"].dt.strftime("%Y-%m-%d"))
-        f = f[~f.index.duplicated(keep="last")].sort_index()
-        self._files[ticker] = (stamp, f)
-        return f
+def fallback_notes(prices: Prices, tickers, day: str) -> list[str]:
+    """The tickers ``prices`` serves from the Yahoo file (no KIS file of them: ``Prices(source="kis")`` falls back) —
+    adjusted prices where a live run trades the real ones, so the run says so, one line each; none: no line."""
+    out = []
+    for t in dict.fromkeys(tickers):
+        info = prices.info(t)
+        if info["source"] == "yahoo":
+            out.append(f"가격 Yahoo 폴백(KIS 파일 없음): {t} — {day} 실행, Yahoo 마지막 행 {info['as_of']}")
+    return out
 
 
 def _counts(orders, prefix: str) -> dict[str, int]:
@@ -182,8 +168,17 @@ def _run(audit: AuditLog, market: str, stage: str, day: str, cache: Path, client
          today: bool, decider: str = "rule", llm=None, notes: list[str] | None = None) -> RunRecord:
     started, counts, notes = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), {}, list(notes or [])
     bench = MARKETS[market]["benchmark"]
+    prices = None
 
     def done(status: str, reason: str | None = None, error: str | None = None) -> RunRecord:
+        if prices is not None:          # every name the run priced: the refreshed ones, the book's, the day's calls
+            try:
+                notes.extend(fallback_notes(prices, [*symbols, *SETUPS[market]["universe"],
+                                                     *sorted({o.ticker for o in orders}),
+                                                     *sorted({d.ticker for d in audit.decisions_where(trade_date=day)})],
+                                            day))
+            except Exception as e:  # the file that failed the run may fail the check too: the record is still written
+                notes.append(f"가격 폴백 확인 실패: {type(e).__name__}: {e}"[:200])
         record = RunRecord(market=market, stage=stage, trade_date=day, started_at=started, status=status,
                            reason=reason, error=error, counts=counts, notes=notes)
         audit.record_run(record)
@@ -218,7 +213,7 @@ def _run(audit: AuditLog, market: str, stage: str, day: str, cache: Path, client
             late = [t for t in got["missing"] if t in open_before and stage == "fill" and in_session]
             if late:
                 return done("failed", error="미체결 주문 종목 당일 행 없음(장중) " + ", ".join(late))
-        prices = KisPrices(cache)
+        prices = Prices(cache, source="kis")
         calendar = prices.calendar(bench)
         if day not in calendar:
             return done("skipped", reason="holiday")
@@ -541,8 +536,16 @@ def dry_run(market: str, day: str, data: Path, llm=None) -> int:
     if run is None:
         print(f"{market} {day}: 기록된 선별({RUN_IDS[market]}_{day}) 없음 — decide 단계가 먼저", file=sys.stderr)
         return 1
-    records, counts = agent_decide(audit, market, run, day, data / "cache", KisPrices(data / "cache"),
-                                   paper_config(market), llm)
+    prices = Prices(data / "cache", source="kis")
+    records, counts = agent_decide(audit, market, run, day, data / "cache", prices, paper_config(market), llm)
+    # no run record to carry it: a fallback to Yahoo's adjusted prices goes to stderr, never unsaid
+    try:
+        lines = fallback_notes(prices, [MARKETS[market]["benchmark"], *(c.ticker for c in run.candidates),
+                                        *sorted({o.ticker for o in audit.orders()})], day)
+    except Exception as e:  # after the paid calls: an unreadable file of some old name must not lose the table
+        lines = [f"가격 폴백 확인 실패: {type(e).__name__}: {e}"[:200]]
+    for line in lines:
+        print(line, file=sys.stderr)
     print(f"{market} {day} 드라이런 — {LLM['model']} effort {LLM['effort']} {agent.PROMPT_VERSION}")
     print("| 종목 | 종류 | 등급 | 매도 사유 | 확신도 | REVIEW·폴백 | 입력 | 출력 | 캐시 읽기 | 캐시 쓰기 | 초 | 비용 $ |")
     print("|---|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|")
