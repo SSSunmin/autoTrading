@@ -398,4 +398,4 @@ def test_the_state_serves_when_a_daily_loss_halt_ends(tmp_path, monkeypatch):
     assert (st["running"], st["auto_resume_at"], st["halt_target"]) == (False, "2026-06-05T00:00:00+09:00", "daily_loss")
     monkeypatch.setattr(main, "_clock", lambda: datetime(2026, 6, 5, 0, 0, tzinfo=KST))
     st = c.get("/api/trading/mode").json()
-    assert (st["running"], st["auto_resumed"], st["label_ko"]) == (True, True, "국내 모의투자 모드")
+    assert (st["running"], st["auto_resumed"], st["label_ko"]) == (True, True, "국내 모의투자 · 자동 실행 중")

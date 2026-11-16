@@ -53,7 +53,7 @@ export default function Positions() {
               </AgentSectionPanel>
             </div>
             <div className="cards section">
-              <AgentSectionPanel title="리스크 게이지" description={`피크 ${amt(b.peak)} · 실현 손익 ${amt(b.realized_pnl)}(시작 자본 ${amt(b.initial_cash)})`}
+              <AgentSectionPanel title="리스크 게이지" description={`피크 ${amt(b.peak)} · 실현 손익 ${amt(b.realized_pnl)}(자본 ${amt(b.capital)}${b.capital !== b.initial_cash ? ` · 시작 ${amt(b.initial_cash)} + 입출금` : ''})`}
                 action={<AsOfStamp asOf={b.as_of} />}>
                 <RiskGauges p={b} amt={amt} />
               </AgentSectionPanel>

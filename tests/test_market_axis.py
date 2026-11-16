@@ -209,7 +209,7 @@ def test_market_us_serves_the_us_book_and_krx_stays_empty(api, tmp_path):
     assert api.get("/api/orders").json() == []                               # KRX is the default and has none
     pos = api.get("/api/positions", params={"market": "US"}).json()
     assert (pos["currency"], pos["initial_cash"], pos["limits"]["auto_daily_order_cap"]) == ("USD", 100_000.0, 70_000)
-    assert [p["ticker"] for p in pos["positions"]] == ["AAPL"] and pos["mode"]["label_ko"] == "미국 모의투자 모드"
+    assert [p["ticker"] for p in pos["positions"]] == ["AAPL"] and pos["mode"]["label_ko"] == "미국 모의투자 · 자동 실행 중"
     assert api.get("/api/positions").json()["currency"] == "KRW"
 
     r = api.get("/api/paper", params={"market": "US"})

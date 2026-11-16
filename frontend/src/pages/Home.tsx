@@ -205,7 +205,7 @@ function MarketCard({ m, current }: { m: MarketSummary; current: boolean }) {
     <AgentSectionPanel title={`${MARKET_KO[m.market]} · ${m.currency}`} description={m.error ? m.benchmark_name_ko : `${m.benchmark_name_ko} · ${m.as_of} 종가 · 보유 ${m.positions}종목`}
       action={current ? <span className="muted">보는 중</span> : <a href={`?market=${m.market}`} onClick={(e) => { e.preventDefault(); setMarket(m.market) }}>{MARKET_KO[m.market]} 보기 →</a>}>
       {m.error ? <AgentAlert tone="error" title="기록 파손">{m.error}</AgentAlert> : <div className="matrix"><table><tbody>
-        <tr><td>평가액</td><td className="r num">{money(m.equity, m.market)}</td><td className="muted">시작 {money(m.initial_cash, m.market)}</td></tr>
+        <tr><td>평가액</td><td className="r num">{money(m.equity, m.market)}</td><td className="muted">자본 {money(m.capital ?? m.initial_cash, m.market)}{m.capital != null && m.capital !== m.initial_cash ? ` (시작 ${money(m.initial_cash, m.market)} + 입출금)` : ''}</td></tr>
         <tr><td>오늘 손익</td><td className="r"><Pct value={m.day_return} digits={2} /></td><td className="muted">전일 종가 평가 대비</td></tr>
         <tr><td>드로다운</td><td className="r"><Pct value={m.drawdown} /></td><td className="muted">피크 대비</td></tr>
         <tr><td>운용</td><td className="r"><ModeBadge state={m.state} /></td><td className="muted">{m.state?.running ? '' : m.state?.halt_reason}</td></tr>

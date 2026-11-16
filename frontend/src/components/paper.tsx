@@ -19,7 +19,7 @@ export function VerdictBanner({ p, day }: { p: PaperProgress; day: Day }) {
       <span className="verdict-t">{p.verdict_ko}</span>
       <span>{p.summary_ko}</span>
       <span className="verdict-r">
-        {p.started ? `모의 시작 ${day(p.start)} · 모의 자본 ${money(p.initial_cash, p.market)} · 마지막 갱신 ${day(p.as_of)} 장 마감`
+        {p.started ? `모의 시작 ${day(p.start)} · 모의 자본 ${money(p.capital, p.market)} · 마지막 갱신 ${day(p.as_of)} 장 마감`
           : '모의 운용 기록 없음 · 첫 모의 주문(또는 모의투자 모드 전환)부터 기간을 셉니다'}
       </span>
     </div>

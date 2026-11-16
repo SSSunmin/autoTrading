@@ -196,3 +196,11 @@ EXCEPTION_ACTION_KO: dict[str, str] = {"rerun": "재실행", "hold": "보유로 
 EXCEPTION_PENDING_KO: dict[str, str] = {"rerun": "재실행 대기 (재실행 경로 미연결)", "retry_next": "다음 세션 재시도 예약"}
 OPERATION_KO["exception_action"] = "예외 처리"
 AUTO_RULE_KO["cap_zero"] = "주문당 상한 — 1주도 살 수 없음"
+
+# Capital (docs/10 D5, live-capital): the two accounts' capital set from the operations log, how a change applied,
+# the small-account single-position mode, the decider (GET /api/model).
+OPERATION_KO["capital_set"] = "자본 설정"
+CAPITAL_ACCOUNT_KO: dict[str, str] = {"paper": "모의투자 자본", "live": "실거래 자본"}
+CAPITAL_CHANGE_KO: dict[str, str] = {"start": "시작 자본 교체", "flow": "입출금(현금 흐름)", "live": "실거래 자본 저장"}
+AUTO_RULE_KO["small_account"] = "소액 1종목 모드"
+DECIDER_KO: dict[str, str] = {"rule": "규칙 베이스라인", "llm": "LLM 에이전트"}

@@ -7,12 +7,14 @@ import { useApi } from '../hooks/useApi'
 import { MARKETS, useMarket } from '../hooks/useMarket'
 import { ModeBadge, Loaded } from '../components/common'
 import { ResumeButton } from '../components/risk'
+import { CapitalPanel } from '../components/capital'
+import { ACCOUNTS, axesMode, EXECUTIONS, modeAxes } from '../components/capitalLogic'
 
-const MODES: { value: Mode; label: string; desc: string }[] = [
-  { value: 'auto', label: '자동', desc: '결정 후 다음 거래일 시가에 자동 주문. 예외(REVIEW · 한도 초과 · 벤더 장애)는 주문하지 않고 예외 큐로.' },
-  { value: 'manual', label: '수동 승인', desc: '결정마다 운영자가 주문 요약을 확인하고 승인해야 주문.' },
-  { value: 'paper', label: '모의투자', desc: '같은 자동 루프를 실제 주문 없이 돌림. 실거래 전환 전 검증 기간.' },
-]
+const MODE_DESC: Record<Mode, string> = {
+  paper: '같은 자동 루프를 실제 주문 없이 돌림. 실거래 전환 전 검증 기간.',
+  auto: '결정 후 다음 거래일 시가에 자동 주문. 예외(REVIEW · 한도 초과 · 벤더 장애)는 주문하지 않고 예외 큐로.',
+  manual: '결정마다 운영자가 주문 요약을 확인하고 승인해야 주문.',
+}
 
 const MARKET_KO: Record<Market, string> = { KRX: '국내', US: '미국' }
 
@@ -34,22 +36,23 @@ export default function Settings() {
         {(r) => (
           <div className="stack-gap">
             <ModePanel key={r.market_code} market={r.market_code} state={r.mode} onChanged={reload} />
+            <CapitalPanel market={r.market_code} />
 
             <AgentSectionPanel title="규칙 레지스트리" description="선별 규칙은 실측 파라미터, 자동 실행 규칙은 config.AUTO_EXECUTION 상수(금액 한도는 시장마다 그 통화로). 수정 UI는 규칙 변경이 운영 기록에 쓰이는 단계에서 열립니다">
               <div className="matrix"><table>
-                <thead><tr><th>규칙</th><th>설명</th><th className="r">현재 파라미터</th><th>레이어</th><th>마지막 변경</th></tr></thead>
+                <thead><tr><th>규칙</th><th>설명</th><th className="r">국내</th><th className="r">미국</th><th>레이어</th><th>마지막 변경</th></tr></thead>
                 <tbody>
                   {r.screen_rules.map((x) => (
                     <tr key={x.id}><td><b>{x.label_ko}</b> <span className="muted num">{x.id}</span></td><td className="wrap">{x.description_ko}</td>
-                      <td className="r num">{paramsFor(x.id, r.screen_params)}</td><td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
+                      {MARKETS.map((m) => <td key={m} className="r num">{paramsFor(x.id, r.screen_params_by_market[m])}</td>)}<td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
                   ))}
                   {r.risk_rules.map((x) => (
                     <tr key={x.id}><td><b>{x.label_ko}</b> <span className="muted num">{x.id}</span></td><td className="wrap muted">risk.py · 청산은 손절 → 트레일링 → 기간 만료 순, 가드는 포트폴리오 드로다운 기준</td>
-                      <td className="r num">{fmtRule(x.id, x.value)}</td><td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
+                      <td className="r num" colSpan={2}>{fmtRule(x.id, x.value)} <span className="muted">· 두 시장 같음</span></td><td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
                   ))}
                   {r.auto_rules.map((x) => (
                     <tr key={x.id}><td><b>{x.label_ko}</b> <span className="muted num">{x.id}</span></td><td className="wrap muted">한도를 넘으면 주문을 축소·차단하고 예외 큐에 기록</td>
-                      <td className="r num">{autoValue(x, r)}</td><td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
+                      {autoCells(x, r)}<td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
                   ))}
                 </tbody>
               </table></div>
@@ -62,14 +65,7 @@ export default function Settings() {
             </AgentSectionPanel>
 
             <div className="cards">
-              <AgentSectionPanel title="모델 설정" description="DecisionRecord.settings와 같은 키">
-                <div className="matrix"><table><tbody>
-                  <tr><td className="num">decider</td><td className="r num">rule_momentum_baseline</td></tr>
-                  <tr><td className="num">provider · quick_think_llm · deep_think_llm</td><td className="r muted">미연결 · LLM 에이전트 연결 시 표시</td></tr>
-                  <tr><td className="num">output_language</td><td className="r num">ko</td></tr>
-                  <tr><td className="num">approval_mode</td><td className="r num">{r.mode.mode}</td></tr>
-                </tbody></table></div>
-              </AgentSectionPanel>
+              <ModelPanel market={r.market_code} mode={r.mode.mode} />
             </div>
             <div className="cards">
               {MARKETS.map((m) => (
@@ -155,13 +151,15 @@ function DataTables({ d }: { d: DataStatus }) {
 }
 
 function ModePanel({ market, state, onChanged }: { market: Market; state: TradingState; onChanged: (msg?: string) => void }) {
-  const [mode, setMode] = useState<Mode>(state.mode)
+  const axes = modeAxes(state)
+  const [account, setAccount] = useState(axes.account)
+  const [execution, setExecution] = useState(axes.execution)
+  const mode = axesMode(account, execution)
   const [operator, setOperator] = useState('')
   const [reason, setReason] = useState('')
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const current = MODES.find((m) => m.value === state.mode)
 
   const run = async (fn: () => Promise<string | void>) => {
     setBusy(true); setError(null)
@@ -174,7 +172,7 @@ function ModePanel({ market, state, onChanged }: { market: Market; state: Tradin
       <div className="stack-gap" style={{ gap: '1rem' }}>
         <div className="toolbar" style={{ marginBottom: 0 }}>
           <ModeBadge state={state} />
-          <span className="muted">{current?.desc}</span>
+          <span className="muted">{MODE_DESC[state.mode]}</span>
         </div>
         {!state.running && (
           <AgentAlert tone="warning" title={`정지됨 · ${utc(state.halted_at)} · ${state.halt_target_ko ?? state.halted_by_ko ?? state.halted_by}`}>
@@ -184,20 +182,34 @@ function ModePanel({ market, state, onChanged }: { market: Market; state: Tradin
               label={state.auto_resume_label_ko ? `${state.auto_resume_label_ko} 자동 해제 · 재가동 불필요` : undefined} /></div>
           </AgentAlert>
         )}
-        <AgentSegmentedControl size="sm" value={mode} onChange={(v) => setMode(v as Mode)} options={MODES.map((m) => ({ value: m.value, label: m.label }))} />
+        <div className="toolbar mode-axes" style={{ marginBottom: 0 }}>
+          <span className="muted">계좌</span>
+          <AgentSegmentedControl size="sm" value={account} onChange={(v) => setAccount(v as 'paper' | 'live')} options={ACCOUNTS} />
+          <span className="muted">실행</span>
+          {account === 'paper' ? <span className="mode-locked">자동 실행 <span className="muted">· {axes.executionLocked ?? PAPER_LOCKED}</span></span>
+            : <AgentSegmentedControl size="sm" value={execution} onChange={(v) => setExecution(v as 'auto' | 'manual')} options={EXECUTIONS} />}
+        </div>
+        {account === 'live' && state.account_mode === 'paper' && <div className="muted">모의투자 → 실거래는 모의 판정을 통과해야 서버가 받습니다(409) — 성과 화면의 실거래 전환 모달을 쓰세요.</div>}
         <div className="toolbar" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
           <AgentTextField label="관리자" size="sm" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
           <AgentTextField label="사유" size="sm" placeholder="변경 이력에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} style={{ minWidth: '28rem' }} />
           {state.admin_token_required && <AgentTextField label="관리자 토큰" size="sm" type="password" value={token} onChange={(e) => setToken(e.target.value)} />}
           <AgentButton size="sm" variant="primary" disabled={!ready || mode === state.mode}
             onClick={() => run(async () => { await api.setMode({ operator: operator.trim(), mode, reason: reason.trim(), market }, token || undefined) })}>
-            {mode === state.mode ? '현재 모드' : `${MODES.find((m) => m.value === mode)?.label} 모드로 전환`}
+            {mode === state.mode ? '현재 모드' : `${axesLabel(mode)}으로 전환`}
           </AgentButton>
         </div>
         {error && <AgentAlert tone="error" title="실패">{error}</AgentAlert>}
       </div>
     </AgentSectionPanel>
   )
+}
+
+const PAPER_LOCKED = '모의투자는 자동 실행만 — 수동 승인은 실거래 계좌에서 고릅니다'
+function axesLabel(mode: Mode): string {
+  const a = ACCOUNTS.find((x) => x.value === (mode === 'paper' ? 'paper' : 'live'))?.label
+  const e = EXECUTIONS.find((x) => x.value === (mode === 'manual' ? 'manual' : 'auto'))?.label
+  return `${a} · ${e}`
 }
 
 const PARAMS: Record<string, string[]> = {
@@ -208,10 +220,33 @@ const PARAMS: Record<string, string[]> = {
 function paramsFor(rule: string, params: Record<string, number | string>): string {
   return (PARAMS[rule] ?? []).map((k) => `${k}=${fmt(params[k])}`).join(' · ') || '–'
 }
-/** Money limits show both markets, each in its own currency (docs/08 §4 Q3); shared keys stay plain. */
-function autoValue(x: RuleRow, r: RulesSettings): string {
-  if (!x.currency) return fmtRule(x.id, x.value)
-  return MARKETS.map((m) => `${MARKET_KO[m]} ${money(Number(r.auto_by_market[m][x.id]), m)}`).join(' · ')
+/** Money limits per market, each in its own currency (docs/08 §4 Q3); a shared key spans both columns. */
+function autoCells(x: RuleRow, r: RulesSettings) {
+  if (!x.currency) return <td className="r num" colSpan={2}>{fmtRule(x.id, x.value)} <span className="muted">· 두 시장 같음</span></td>
+  return MARKETS.map((m) => <td key={m} className="r num">{money(Number(r.auto_by_market[m][x.id]), m)}</td>)
+}
+
+/** 모델 설정: the server's config.LLM (GET /api/model), read only — nothing hardcoded here. */
+function ModelPanel({ market, mode }: { market: Market; mode: Mode }) {
+  const model = useApi(() => api.model(market), [market])
+  return (
+    <AgentSectionPanel title="모델 설정" description="config.LLM 읽기 전용 · 바꾸는 곳은 코드 설정">
+      <Loaded state={model}>
+        {(x) => (
+          <div className="matrix"><table><tbody>
+            <tr><td className="num">decider</td><td className="r num">{x.decider_ko} · {x.decider_id}</td></tr>
+            <tr><td className="num">model · effort</td><td className="r num">{x.model ?? '–'} · {x.effort ?? '–'}</td></tr>
+            <tr><td className="num">max_calls_per_run · timeout</td><td className="r num">{fmt(x.max_calls_per_run)} · {fmt(x.timeout)}s</td></tr>
+            <tr><td className="num">시험 모드</td><td className="r num">{x.trial ? `켜짐 · 모델 결정 ${x.trial.days.length}/${x.trial.sessions ?? '∞'}거래일 · 남은 ${x.trial.remaining ?? '∞'}` : '꺼짐'}</td></tr>
+            <tr><td className="num">ANTHROPIC_API_KEY</td><td className="r num">{x.keys.ANTHROPIC_API_KEY ? '설정됨' : '없음'}</td></tr>
+            <tr><td className="num">output_language</td><td className="r num">{x.output_language}</td></tr>
+            <tr><td className="num">approval_mode</td><td className="r num">{mode}</td></tr>
+          </tbody></table></div>
+        )}
+      </Loaded>
+      {model.data && <div className="muted" style={{ marginTop: '0.6rem' }}>{model.data.note_ko}</div>}
+    </AgentSectionPanel>
+  )
 }
 function fmt(v: unknown): string {
   return typeof v === 'number' ? v.toLocaleString('ko-KR') : v == null ? '–' : String(v)

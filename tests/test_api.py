@@ -168,7 +168,7 @@ def test_exception_queue_lists_review_decisions_for_the_latest_date(client):
 def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client, monkeypatch):
     assert client.get("/api/trading/mode").json() == {
         "mode": "paper", "mode_ko": "모의투자", "running": True, "halted_at": None, "halted_by": None, "halted_by_ko": None, "halt_reason": None,
-        "keep_exits": True, "mode_changed_at": None, "label_ko": "국내 모의투자 모드", "admin_token_required": False,
+        "keep_exits": True, "mode_changed_at": None, "label_ko": "국내 모의투자 · 자동 실행 중", "admin_token_required": False,
         "market": "KRX", "market_ko": "국내", "halt_target": None, "halt_target_ko": None, "dd_stop": False,
         "auto_resume_at": None, "auto_resumed": False, "account_mode": "paper", "account_mode_ko": "모의투자",
         "execution_mode": "auto", "execution_mode_ko": "자동 실행", "halt_scope": None, "halt_scope_ko": None,
@@ -190,7 +190,7 @@ def test_halt_resume_and_mode_change_are_replayed_from_the_operations_log(client
     _open_gate(monkeypatch)
     r = client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "모의투자 4주 통과", "market": "KRX",
                                                "confirmed": True})
-    assert r.json()["state"]["mode"] == "auto" and r.json()["state"]["label_ko"] == "국내 자동 매매 실행 중"
+    assert r.json()["state"]["mode"] == "auto" and r.json()["state"]["label_ko"] == "국내 실거래 · 자동 실행 중"
     assert (r.json()["state"]["account_mode"], r.json()["state"]["execution_mode"]) == ("live", "auto")
     assert client.get("/api/trading/mode", params={"market": "US"}).json()["mode"] == "paper"  # modes are per market
     assert client.post("/api/trading/mode", json={"operator": "관리자", "mode": "auto", "reason": "dup", "market": "KRX"}).status_code == 409

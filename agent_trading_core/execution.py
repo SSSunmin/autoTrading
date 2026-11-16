@@ -34,6 +34,16 @@ calendar, currency, sell costs and caps (``paper_config``). Amounts in reasons a
 The drawdown peak is the highest close-of-day equity since the last peak reset (the initial cash before any):
 the −10% halving, the −20% stop and the sizing scale all read that one peak (``_peak``).
 
+The starting cash is replayed from the operations log too (``capital_set``, docs/10 D5 — ``with_capital``): with no
+record it is the book's default (``PAPER_BOOKS``). A change while the book has no order replaces the starting cash;
+once it has orders it is a cash flow (deposit / withdrawal) added at the close of its day (``effective_from``).
+Returns, the drawdown peak and the paper gate are then time-weighted: each flow buys units at that close's value
+(``Book.units``), a day's return leaves its own flow out, and the peak is the highest unit value in today's money —
+a deposit is not a gain and a withdrawal is not a loss. Sizing reads the equity, flows included. With no flow
+every figure is the one before this (a flow-free book takes the same arithmetic path). Under ``SMALL_ACCOUNT``
+capital the book holds one name (D5 소액 1종목 모드): ``_place`` buys only the day's first buy-rated name while
+nothing is held, at full weight — the per-name and sector caps (10% · 20%) give way to that one holding.
+
 Buys are capped per sector (``RiskConfig.max_sector_pct``) by ``universe.sector_of`` — the sector file only, no
 network; a ticker the file does not list has no sector and no cap, as in the backtest. After a −20% stop the backtest (simulate.py) also resets
 the peak after ``dd_stop_lock_days`` (20) trading days and goes back to normal weight (RiskConfig.dd_stop_recovery=
@@ -45,7 +55,7 @@ from __future__ import annotations
 import bisect
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date as Date
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -104,6 +114,11 @@ class PaperConfig:
     regime_filter: bool = True               # docs/05 교훈 2: on by default
     index: str = "^KS11"                     # sets the trading calendar and feeds the regime filter
     market: str = "KRX"                      # config.MARKETS key: currency, regulatory sell fees, caps
+    cash_flows: tuple[tuple[str, float], ...] = ()   # (day, amount) deposits (+) / withdrawals (−), ``with_capital``
+
+    def capital_on(self, date: str) -> float:
+        """The capital put in by ``date``: the starting cash plus the flows dated on or before it."""
+        return self.initial_cash + sum(a for d, a in self.cash_flows if d <= date)
 
 
 # Starting cash and commission per book, as the 2nd (KRX) and 3rd (US) measurements ran them
@@ -116,6 +131,43 @@ def paper_config(market: str) -> PaperConfig:
     """The paper book of one market: its index calendar, sell tax and starting cash. KeyError for an unknown market."""
     m = MARKETS[market]
     return PaperConfig(market=market, index=m["benchmark"], sell_tax=m["sell_tax"], **PAPER_BOOKS[market])
+
+
+# 소액 1종목 모드 (docs/10 D5, 사용자 결정 2026-11-13): capital under this holds one name with all of it
+SMALL_ACCOUNT = {"KRX": 1_000_000.0, "US": 1_000.0}
+# a typo guard on capital input (POST /api/capital): above this the amount is refused (422), in the market's currency
+CAPITAL_MAX = {"KRX": 100_000_000_000.0, "US": 100_000_000.0}
+
+
+def capital_state(operations: list[OperationRecord], market: str) -> dict:
+    """The market's capital replayed from its ``capital_set`` records (docs/10 D5): ``paper`` {start, amount, record}
+    — the starting cash and the capital after the flows (``record``: the last line that set it, None = the default) —,
+    ``live`` {amount, record} (stored and shown only: there is no live order path), and ``flows`` [(day, amount,
+    record)] in log order."""
+    default = PAPER_BOOKS[market]["initial_cash"]
+    out: dict = {"paper": {"start": default, "amount": default, "record": None},
+                 "live": {"amount": None, "record": None}, "flows": []}
+    for op in operations:
+        if op.kind != "capital_set":
+            continue
+        amount = float(op.after["amount"])
+        if op.target == "live":
+            out["live"] = {"amount": amount, "record": op}
+        elif op.after.get("change") == "flow":
+            out["flows"].append((op.effective_from, float(op.after["flow"]), op))
+            out["paper"] |= {"amount": amount, "record": op}
+        else:                                # the book had no order: a new starting cash
+            out["paper"] = {"start": amount, "amount": amount, "record": op}
+            out["flows"] = []
+    return out
+
+
+def with_capital(cfg: PaperConfig, operations: list[OperationRecord]) -> PaperConfig:
+    """``cfg`` with the starting cash and cash flows the operations log sets; unchanged when it sets none."""
+    if not any(op.kind == "capital_set" and op.target == "paper" for op in operations):
+        return cfg
+    st = capital_state(operations, cfg.market)
+    return replace(cfg, initial_cash=st["paper"]["start"], cash_flows=tuple((d, a) for d, a, _ in st["flows"]))
 
 
 def fmt_money(v: float, market: str) -> str:
@@ -314,6 +366,12 @@ class Book:
     closed: list[ClosedTrade]
     equity: list[tuple[str, float]]          # close-of-day equity, each trading day from the first fill to ``until``
     exposure: list[tuple[str, float]] = field(default_factory=list)   # holdings value / equity, the same days
+    # cash flows (PaperConfig.cash_flows): the day each was added at, and the units of the time-weighted value —
+    # the starting cash is that many units of 1; a flow buys units at its close's value. ``unit_days``: the units
+    # after each equity day's close; ``units``: after ``until`` (a flow past the calendar's end included)
+    flows: dict[str, float] = field(default_factory=dict)
+    units: float = 0.0
+    unit_days: list[tuple[str, float]] = field(default_factory=list)
 
 
 def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: str) -> Book:
@@ -322,7 +380,8 @@ def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: s
                     if o.status in ("filled", "partial") and o.filled_quantity > 0 and o.filled_price
                     and o.fill_date and o.fill_date <= until),
                    key=lambda o: (o.fill_date, o.side != "Sell"))
-    book = Book(cfg.initial_cash, {}, [], [])
+    book = Book(cfg.initial_cash, {}, [], [], units=cfg.initial_cash)
+    flows = sorted((d, a) for d, a in cfg.cash_flows if d <= until)
 
     def apply(o: OrderRecord) -> None:
         q, px = o.filled_quantity, float(o.filled_price)
@@ -345,18 +404,54 @@ def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: s
         if held.quantity == 0:
             del book.holdings[o.ticker]
 
-    i = 0
-    if fills:
-        for day in (d for d in prices.calendar(cfg.index) if fills[0].fill_date <= d <= until):
+    def flow(day: str, value: float) -> None:
+        """The flows dated on or before ``day`` go in at its close; the units grow by what they bought."""
+        nonlocal j
+        added = 0.0
+        while j < len(flows) and flows[j][0] <= day:
+            added += flows[j][1]
+            j += 1
+        if added:
+            book.cash += added
+            book.flows[day] = book.flows.get(day, 0.0) + added
+            equity = book.cash + value
+            # an equity at or below zero before or after the flow has no unit value to keep: units stay (the API
+            # refuses such a withdrawal; this keeps a replay from dividing by zero if one is ever recorded)
+            if equity > EPS and equity - added > EPS:
+                book.units *= equity / (equity - added)
+
+    i, j = 0, 0
+    first = min([o.fill_date for o in fills[:1]] + [d for d, _ in flows[:1]], default=None)
+    if first is not None:
+        for day in (d for d in prices.calendar(cfg.index) if first <= d <= until):
             while i < len(fills) and fills[i].fill_date <= day:
                 apply(fills[i])
                 i += 1
             value = sum(h.quantity * (prices.close_asof(h.ticker, day) or h.avg_price) for h in book.holdings.values())
+            if flows:
+                flow(day, value)
             book.equity.append((day, book.cash + value))
             book.exposure.append((day, value / (book.cash + value) if book.cash + value > 0 else 0.0))
+            book.unit_days.append((day, book.units))
     for o in fills[i:]:                      # fills on days the index calendar does not have
         apply(o)
+    if j < len(flows):                       # a flow past the calendar's end: at the last known closes
+        flow(until, sum(h.quantity * (prices.close_asof(h.ticker, until) or h.avg_price) for h in book.holdings.values()))
     return book
+
+
+def _unit_at(book: Book, cfg: PaperConfig, day: str) -> float:
+    """The units after ``day``'s close (before the first equity day: the starting cash)."""
+    i = bisect.bisect_right([d for d, _ in book.unit_days], day)
+    return book.unit_days[i - 1][1] if i else cfg.initial_cash
+
+
+def unit_values(book: Book, cfg: PaperConfig) -> list[tuple[str, float]]:
+    """Each close's equity per unit, in starting-cash money (the time-weighted value: a flow moves the equity, not
+    this). Without flows it is the equity itself."""
+    if not cfg.cash_flows:
+        return book.equity
+    return [(d, e * (cfg.initial_cash / u)) for (d, e), (_, u) in zip(book.equity, book.unit_days, strict=True)]
 
 
 def _protections(closed: list[ClosedTrade], calendar: list[str], risk: RiskConfig) -> Protections:
@@ -388,10 +483,19 @@ def peak_base(operations: list[OperationRecord], date: str) -> tuple[str, float]
 
 
 def _peak(book: Book, cfg: PaperConfig, base: tuple[str, float] | None, *also: float) -> float:
-    """Highest close-of-day equity since the reset (its own value included), or since the start (initial cash)."""
+    """Highest close-of-day equity since the reset (its own value included), or since the start (initial cash).
+    With cash flows: the highest unit value in today's money (``unit_values`` × today's units ÷ the starting cash),
+    so a deposit does not raise the peak and a withdrawal does not open a drawdown. ``also`` is in today's money."""
+    if not cfg.cash_flows:
+        if base is None:
+            return max([cfg.initial_cash, *also] + [e for _, e in book.equity])
+        return max([base[1], *also] + [e for d, e in book.equity if d > base[0]])
+    k = book.units / cfg.initial_cash
+    navs = unit_values(book, cfg)
     if base is None:
-        return max([cfg.initial_cash, *also] + [e for _, e in book.equity])
-    return max([base[1], *also] + [e for d, e in book.equity if d > base[0]])
+        return max([cfg.initial_cash * k, *also] + [n * k for _, n in navs])
+    start = base[1] * cfg.initial_cash / _unit_at(book, cfg, base[0])
+    return max([start * k, *also] + [n * k for d, n in navs if d > base[0]])
 
 
 def _marks(book: Book, cfg: PaperConfig, date: str,
@@ -403,7 +507,8 @@ def _marks(book: Book, cfg: PaperConfig, date: str,
     if not book.equity or book.equity[-1][0] != date:
         return equity, peak, None, None
     prev = book.equity[-2][1] if len(book.equity) > 1 else cfg.initial_cash
-    return equity, peak, prev, equity / prev - 1
+    # the day's own flow is not a return (time-weighted); with no flow this is equity / prev − 1
+    return equity, peak, prev, (equity - book.flows.get(date, 0.0)) / prev - 1
 
 
 def position_state(h: Holding, prices: Prices, calendar: list[str], as_of: str, risk: RiskConfig) -> dict:
@@ -644,10 +749,15 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
 
     # equal weight across every buy-rated name, held or not, as simulate.run_simulation sizes a rebalance
     buys = [d.ticker for d in decisions if d.rating in BUY_RATINGS]
+    pending_buys = {o.ticker for o in current.values() if o.side == "Buy" and _unsettled(o, date)}
+    # 소액 1종목 모드 (D5): one holding — the day's first buy-rated name while nothing is held or bought, all of it
+    small = cfg.capital_on(date) < SMALL_ACCOUNT.get(cfg.market, 0.0)
+    if small:
+        buys = buys[:1] if not book.holdings and not pending_buys else []
+        risk = replace(risk, max_position_pct=1.0, max_sector_pct=1.0)
     # at scale 0 every buy is already locked above; size at full scale so the text names only the caps
     weights, overrides = size_targets(buys, risk, scale=scale if scale > 0 else 1.0, sector_of=sector_of)
     shared = [o for o in overrides if not o.startswith(OWN_CAPS)]
-    pending_buys = {o.ticker for o in current.values() if o.side == "Buy" and _unsettled(o, date)}
     pending_sells = {o.ticker for o in current.values() if o.side == "Sell" and _unsettled(o, date)}
     # the daily cap counts every buy filling at the same session, whatever its decision date
     session, day_amount, _ = session_amounts(current.values(), prices, calendar, date)
@@ -694,6 +804,15 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
         if d.ticker in book.holdings or d.ticker in pending_buys:
             out.append(OrderRecord(**base, side="Buy", quantity=0, status="blocked", rules_applied=["already_held"],
                                    reason="이미 보유 중 — 추가 매수 없음"))
+            continue
+        # a retry (retry_next) is held to the one name too: blocked while another is held, bought or the day's buy
+        if small and (d.ticker not in buys if retry is None
+                      else bool(book.holdings or pending_buys or [t for t in buys if t != d.ticker])):
+            held = next(iter(book.holdings), None) or next(iter(sorted(pending_buys)), None)
+            out.append(OrderRecord(**base, side="Buy", quantity=0, status="blocked", rules_applied=["small_account"],
+                                   reason=f"소액 1종목 모드: 자본 {money(cfg.capital_on(date))} < "
+                                          f"{money(SMALL_ACCOUNT[cfg.market])} — "
+                                          + (f"이미 {held} 1종목" if held else f"그날 첫 매수 등급 {buys[0]}만")))
             continue
         if ref is None:
             out.append(OrderRecord(**base, side="Buy", quantity=0, status="exception", exception_kind="vendor_unavailable",
@@ -842,6 +961,7 @@ def execute_date(audit: AuditLog, date: str, prices: Prices, *, risk: RiskConfig
     if audit.market is not None and audit.market != cfg.market:
         raise ValueError(f"{audit.market} 기록에 {cfg.market} 설정으로 실행할 수 없습니다")
     with execution_lock(audit.directory):
+        cfg = with_capital(cfg, audit.operations())      # the capital the admin set (docs/10 D5), under the lock
         current = latest_orders(audit.orders())          # a broken line raises here, before anything is appended
         decisions = [d for d in audit.decisions() if d.trade_date == date]
         later = sorted({o.trade_date for o in current.values() if o.trade_date > date})
@@ -950,8 +1070,9 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
     """Holdings with their stop line, trailing high and expiry, the book's equity and drawdown, the guards'
     state, as of ``as_of`` (default: the last trading day in the data). ``exit_signal`` is the same verdict the
     executor turns into a rule-exit order at that day's close (``exit_signals``). ``operations``: the market's
-    operations log, for the peak reset (``peak_base``); without it the peak counts from the start."""
-    risk, cfg = risk or RiskConfig(), cfg or PaperConfig()
+    operations log, for the peak reset (``peak_base``) and the capital (``with_capital``); without it the peak counts
+    from the start and the capital is ``cfg``'s."""
+    risk, cfg = risk or RiskConfig(), with_capital(cfg or PaperConfig(), operations or [])
     calendar = prices.calendar(cfg.index)
     as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else datetime.now().strftime("%Y-%m-%d"))
     book = replay(orders, prices, cfg, until=as_of)
@@ -1027,7 +1148,10 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
     top = max(rows, key=lambda r: r["weight"] or 0.0, default=None)
     return {
         "market": cfg.market, "currency": MARKETS[cfg.market]["currency"],
-        "as_of": as_of, "initial_cash": cfg.initial_cash, "cash": book.cash, "holdings_value": value, "equity": equity,
+        "as_of": as_of, "initial_cash": cfg.initial_cash, "capital": cfg.capital_on(as_of),
+        "cash_flows": [{"date": d, "amount": a} for d, a in cfg.cash_flows if d <= as_of],
+        "small_account": cfg.capital_on(as_of) < SMALL_ACCOUNT.get(cfg.market, 0.0),
+        "cash": book.cash, "holdings_value": value, "equity": equity,
         "peak": peak, "drawdown": equity / peak - 1 if peak > 0 else 0.0,
         "peak_reset": {"at": base[0], "to": base[1]} if base else None,
         "day_return": _marks(book, cfg, as_of, base)[3],         # vs the previous close; None off a trading day or before a fill
@@ -1074,7 +1198,7 @@ def book_events(orders: list[OrderRecord], operations: list[OperationRecord], pr
     ``protections`` a lock a close newly set (Cooldown on every close, StoplossGuard / LowProfit when they fire);
     ``intervention`` a buy whose size a cap or the dd_halve scale cut; ``peak_reset`` an admin resume that reset the
     drawdown peak. Read from the records only, nothing stored."""
-    risk, cfg = risk or RiskConfig(), cfg or PaperConfig()
+    risk, cfg = risk or RiskConfig(), with_capital(cfg or PaperConfig(), operations)
     calendar = prices.calendar(cfg.index)
     book = replay(orders, prices, cfg, until=calendar[-1] if calendar else "9999-12-31")
     out: list[dict] = []
@@ -1089,11 +1213,13 @@ def book_events(orders: list[OrderRecord], operations: list[OperationRecord], pr
             add(op.after.get("peak_reset_at") or op.at[:10], "peak_reset",
                 f"피크 {fmt_money(op.after.get('peak_before') or 0.0, cfg.market)} → "
                 f"{fmt_money(op.after['peak_reset_to'], cfg.market)} · {op.operator}: {op.reason}")
-    # the peak as _peak keeps it, walked day by day: a reset starts it again from its own value
+    # the peak as _peak keeps it, walked day by day: a reset starts it again from its own value (time-weighted:
+    # the unit value, a cash flow is no gain or loss)
     base, peak, halved = None, cfg.initial_cash, False
-    for d, e in book.equity:
+    for d, e in unit_values(book, cfg):
         if (b := peak_base(operations, d)) != base:
-            base, peak = b, b[1] if b else cfg.initial_cash
+            base, peak = b, (b[1] * cfg.initial_cash / _unit_at(book, cfg, b[0]) if cfg.cash_flows else b[1]) \
+                if b else cfg.initial_cash
         if base is None or d > base[0]:
             peak = max(peak, e)
         scale, why = drawdown_scale(e, peak, risk)
@@ -1157,14 +1283,20 @@ def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], o
 
     ``eligible`` only when all six are met. ``violations`` lists what breaks a criterion, ``notes`` what a person
     looked at that breaks none (order exceptions, stop-loss exits). ``series`` is the equity and drawdown each
-    trading day; ``paper`` the period's figures the reference table compares (``paper_expected``)."""
+    trading day; ``paper`` the period's figures the reference table compares (``paper_expected``).
+
+    With cash flows (``capital_set`` while running, ``with_capital``) the drawdown, the day returns and the period
+    return are time-weighted (``unit_values``): a deposit or withdrawal is never a gain, a loss or a breach."""
     criteria = criteria or PAPER_TRADING
+    cfg = with_capital(cfg, operations)
     calendar = prices.calendar(cfg.index)
     latest = latest_orders(orders)
     start = paper_start(list(latest.values()), operations, cfg.market)
     as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else None)
     limit = AUTO_EXECUTION["auto_daily_loss_limit"]
     out: dict = {"market": cfg.market, "started": False, "start": start, "as_of": as_of, "initial_cash": cfg.initial_cash,
+                 "capital": cfg.capital_on(as_of) if as_of else cfg.initial_cash,
+                 "cash_flows": [{"date": d, "amount": a} for d, a in cfg.cash_flows if not as_of or d <= as_of],
                  "min_weeks": criteria["min_weeks"], "days": None, "weeks": None, "judge_date": None,
                  "eligible": False, "counts": {"met": 0, "unmet": 0, "in_progress": 0}, "criteria": [],
                  "violations": [], "notes": [], "series": [], "drawdown": None, "paper": None}
@@ -1176,12 +1308,13 @@ def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], o
         return out
 
     book = replay(list(latest.values()), prices, cfg, until=as_of)
-    eq_by_day, ex_by_day = dict(book.equity), dict(book.exposure)
+    eq_by_day, ex_by_day, nav_by_day = dict(book.equity), dict(book.exposure), dict(unit_values(book, cfg))
     series, peak, prev, breaches = [], cfg.initial_cash, cfg.initial_cash, []
     for d in (d for d in calendar if start <= d <= as_of):
         eq = eq_by_day.get(d, cfg.initial_cash)              # before the first fill the book is its cash
-        ret, peak = eq / prev - 1, max(peak, eq)
-        series.append({"date": d, "equity": eq, "drawdown": eq / peak - 1, "day_return": ret,
+        nav = nav_by_day.get(d, cfg.initial_cash)
+        ret, peak = (eq - book.flows.get(d, 0.0)) / prev - 1, max(peak, nav)
+        series.append({"date": d, "equity": eq, "drawdown": nav / peak - 1, "day_return": ret,
                        "exposure": ex_by_day.get(d, 0.0)})
         if ret <= limit + EPS:
             breaches.append((d, ret))
@@ -1266,7 +1399,8 @@ def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], o
                "new_buys": sum(o.status in ("filled", "partial") for o in buys),
                "new_buys_open": sum(o.status == "open" for o in buys),
                "exits_by_reason": dict(Counter(t.reason for t in book.closed if start <= t.exit_date <= as_of)),
-               "period_return": series[-1]["equity"] / cfg.initial_cash - 1 if series else None,
+               "period_return": nav_by_day.get(series[-1]["date"], series[-1]["equity"]) / cfg.initial_cash - 1
+               if series else None,
                "max_drawdown": dd_min, "daily_loss_dates": [d for d, _ in breaches],
                "index_return": float(inside.iloc[-1]) / float(base) - 1 if base is not None and len(inside) else None})
     return out

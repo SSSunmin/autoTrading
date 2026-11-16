@@ -26,7 +26,9 @@ Environment:
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 from collections import Counter
 from contextlib import ExitStack
 from dataclasses import asdict
@@ -46,6 +48,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from agent_trading_core import __version__ as core_version
 from agent_trading_core import kis, scheduler
 from agent_trading_core.audit import (
+    BASELINE_DECIDER,
     AuditLog,
     DecisionRecord,
     EvidenceItem,
@@ -60,16 +63,20 @@ from agent_trading_core.audit import (
     pending_rerun_marker,
     stage_counts,
 )
-from agent_trading_core.config import AUTO_EXECUTION, MARKETS, PAPER_TRADING, auto_execution
+from agent_trading_core.config import AUTO_EXECUTION, LLM, MARKETS, PAPER_TRADING, auto_execution
 from agent_trading_core.execution import (
+    CAPITAL_MAX,
     EXIT_SUFFIX,
+    SMALL_ACCOUNT,
     Prices,
     book_events,
     cancel_orders,
+    capital_state,
     check_date,
     dd_stop_standing,
     effective_state,
     execution_lock,
+    fmt_money,
     next_trading_day,
     open_orders,
     paper_config,
@@ -83,6 +90,9 @@ from agent_trading_core.krx_names import (
     ACCOUNT_MODE_KO,
     AUTO_RULE_KO,
     BOOK_EVENT_KO,
+    CAPITAL_ACCOUNT_KO,
+    CAPITAL_CHANGE_KO,
+    DECIDER_KO,
     DECISION_SOURCE_KO,
     EXCEPTION_ACTION_KO,
     EXCEPTION_KIND_KO,
@@ -110,9 +120,9 @@ from agent_trading_core.krx_names import (
 )
 from agent_trading_core.memory import TradingMemoryLog
 from agent_trading_core.rating import RATING_REVIEW, RATINGS_5_TIER
-from agent_trading_core.risk import RiskConfig, drawdown_scale
-from agent_trading_core.screening import ScreenConfig
-from agent_trading_core.universe import sector_of
+from agent_trading_core.risk import EPS, RiskConfig, drawdown_scale
+from agent_trading_core.screening import ScreenConfig, us_preset
+from agent_trading_core.universe import SECTORS, load_history, members_on, sector_of
 
 VARIANT_KO = {"rules_off": "하드 룰 끔", "rules_on": "하드 룰 켬", "rules_on_regime": "하드 룰 + 국면 필터"}
 KST = ZoneInfo("Asia/Seoul")
@@ -399,11 +409,12 @@ def _state_out(market: str, st: dict | None = None) -> dict:
     target_ko = HALT_TARGET_KO.get(st.get("halt_target") or "", None)
     # a system halt names what stopped it (일일 손실 / 드로다운); a person's names the person
     who = target_ko if st["halted_by"] == "system" and target_ko else by_ko
-    label = f"{market_ko} 정지됨 · {st['halted_at'][:16].replace('T', ' ')} UTC · {who}" if not st["running"] else (
-        f"{market_ko} 자동 매매 실행 중" if st["mode"] == "auto" else f"{market_ko} {mode_ko} 모드")
-    # two axes on the stored mode (docs/10 D4): account paper | live, execution auto | manual approval
+    # two axes on the stored mode (docs/10 D4): account paper | live, execution auto | manual approval — the status
+    # label names both ("국내 모의투자 · 자동 실행 중"), the stored mode stays the one value
     account = "paper" if st["mode"] == "paper" else "live"
     execution = "manual" if st["mode"] == "manual" else "auto"
+    label = f"{market_ko} 정지됨 · {st['halted_at'][:16].replace('T', ' ')} UTC · {who}" if not st["running"] else (
+        f"{market_ko} {ACCOUNT_MODE_KO[account]} · {EXECUTION_MODE_KO[execution]} 중")
     scope = st.get("halt_scope")
     # a daily-loss halt ends at 00:00 market time; trading starts at that day's session open, shown in KST
     opens = session_window(market, date.fromisoformat(st["auto_resume_at"][:10]))[0] if st.get("auto_resume_at") else None
@@ -689,11 +700,11 @@ def markets() -> list[dict]:
         try:
             st = _store(m)
             book = positions_view(st.order_rows, PRICES, cfg=paper_config(m), operations=st.operations)
-            card |= _price_out(m) | {"as_of": book["as_of"], "equity": book["equity"], "initial_cash": book["initial_cash"],
+            card |= _price_out(m) | {"as_of": book["as_of"], "equity": book["equity"], "initial_cash": book["initial_cash"], "capital": book["capital"],
                      "day_return": book["day_return"], "drawdown": book["drawdown"], "positions": len(book["positions"]),
                      "state": _state_out(m), "flow": _flow(st, book), "error": None}
         except ValueError as exc:                    # a cut-short line, or another market's record, in that book
-            card |= dict.fromkeys(("as_of", "equity", "initial_cash", "day_return", "drawdown", "positions", "state",
+            card |= dict.fromkeys(("as_of", "equity", "initial_cash", "capital", "day_return", "drawdown", "positions", "state",
                                    "flow")) | {
                 "error": f"{MARKET_KO[m]} 기록을 읽지 못함: {type(exc).__name__}"}
         out.append(card)
@@ -903,12 +914,15 @@ def _progress(st: _Store, expected: bool = True) -> dict:
           "limits": {"max_drawdown": PAPER_TRADING["max_drawdown"], "dd_halve": RiskConfig().dd_halve,
                      "dd_stop": RiskConfig().dd_stop}}
     caps = auto_execution(m)
-    # the live-switch modal's "rules at this capital" (docs/10 D5: the live capital input is stage 5; until then the
-    # paper capital and the configured caps)
-    p["go_live"] = {"capital": p["initial_cash"], "capital_source_ko": "모의 자본(실거래 자본 입력은 단계 5)",
+    # the live-switch modal's "rules at this capital": the live capital the admin set (docs/10 D5, POST /api/capital),
+    # else the paper capital until one is set
+    live = capital_state(st.operations, m)["live"]["amount"]
+    capital = live if live is not None else p["capital"]
+    p["go_live"] = {"capital": capital, "capital_source": "live" if live is not None else "paper",
+                    "capital_source_ko": "실거래 자본(설정)" if live is not None else "모의 자본(실거래 자본 미설정 — 설정에서 입력)",
                     "auto_order_max": caps["auto_order_max"], "auto_daily_order_cap": caps["auto_daily_order_cap"],
                     "daily_loss_limit": caps["auto_daily_loss_limit"],
-                    "daily_loss_amount": p["initial_cash"] * caps["auto_daily_loss_limit"],
+                    "daily_loss_amount": capital * caps["auto_daily_loss_limit"],
                     "other_markets_ko": [MARKET_KO[x] for x in MARKETS if x != m],
                     "note_ko": "실주문 경로는 아직 없습니다: 전환해도 실행기는 모의투자 모드에서만 주문하므로 이 시장은 주문을 내지 "
                                "않습니다(ExecutionRefused). 증권사 연동은 이후 단계입니다."}
@@ -968,7 +982,11 @@ def rules(market: str | None = MarketQuery) -> dict:
             history_errors.append(f"{MARKET_KO[m]} 운영 기록을 읽지 못함: {type(exc).__name__}")
     history = [op.model_dump() | {"kind_ko": OPERATION_KO.get(op.kind, op.kind), "market_ko": MARKET_KO.get(op.market, op.market)}
                for _, _, op in sorted(ops, key=lambda x: (x[0], x[1]), reverse=True)]
+    by_market = {"KRX": cfg, "US": us_preset(cfg)}       # the US screen differs by its preset only (screening.us_preset)
     return {"screen_rules": screen_rules, "screen_params": {k: v for k, v in vars(cfg).items() if k != "rules"},
+            "screen_params_by_market": {m: {k: v for k, v in vars(c).items() if k != "rules"} for m, c in by_market.items()},
+            "regime_index": {m: {"benchmark": MARKETS[m]["benchmark"], "name_ko": MARKETS[m]["benchmark_name_ko"]}
+                             for m in MARKETS},
             "risk_rules": risk_rules, "auto_rules": auto_rules,
             "auto_by_market": {m: auto_execution(m) for m in MARKETS}, "paper_criteria": criteria,
             "market": MARKETS[st.market], "market_code": st.market, "markets": MARKETS,
@@ -1389,6 +1407,266 @@ def set_mode(body: ModeRequest, x_admin_token: str | None = Header(default=None)
     note = (f"{MARKET_KO[m]} 실거래 모드로 바뀌었지만 실주문 경로는 아직 없습니다: 실행기는 모의투자 모드에서만 주문하므로 "
             "이 시장은 주문을 내지 않습니다(ExecutionRefused)") if target != "paper" else None
     return {"state": _state_out(m), "note": note}
+
+
+# --- capital (docs/10 D5, 단계 5): replayed from capital_set operations, never stored as state ----------------------
+
+CAPITAL_UNIT = {"KRX": 1.0, "US": 0.01}                   # whole won, cents
+TICKER_RE = re.compile(r"^[0-9A-Z^][0-9A-Z.\-^]{0,14}$")
+UNIVERSE_KO = {"loop": "지금 루프 유니버스", "index": "지수 구성(오늘)", "custom": "직접 지정"}
+INDEX_HISTORY = {"KRX": "kospi200_history.csv", "US": "sp500_history.csv"}
+
+
+def _capital_amount(m: str, amount: float) -> float:
+    """``amount`` in the market's unit, or 422: positive, whole won / cents, under the typo guard ``CAPITAL_MAX``."""
+    if not math.isfinite(amount) or amount <= 0:
+        raise HTTPException(422, f"자본은 0보다 커야 합니다: {amount}")
+    unit = CAPITAL_UNIT[m]
+    units = round(amount / unit)
+    if abs(units * unit - amount) > unit * 1e-6:
+        raise HTTPException(422, f"{MARKET_KO[m]} 자본 단위는 {'1원' if m == 'KRX' else '$0.01'}입니다: {amount}")
+    if amount > CAPITAL_MAX[m]:
+        raise HTTPException(422, f"{MARKET_KO[m]} 자본 상한 {fmt_money(CAPITAL_MAX[m], m)}을 넘습니다(입력 오타 방지): "
+                                 f"{fmt_money(amount, m)}")
+    return float(units) if m == "KRX" else round(units * unit, 2)
+
+
+def _set_by(op: OperationRecord | None) -> dict | None:
+    return {"at": op.at, "operator": op.operator, "role": op.role, "reason": op.reason} if op is not None else None
+
+
+def _capital_out(st: _Store) -> dict:
+    m = st.market
+    c = capital_state(st.operations, m)
+    paper, live, small = c["paper"], c["live"], SMALL_ACCOUNT[m]
+    running = st.order_facts["total"] > 0
+    calendar = PRICES.calendar(MARKETS[m]["benchmark"])
+    last = calendar[-1] if calendar else None
+    return {
+        "market": m, "market_ko": MARKET_KO[m], "currency": MARKETS[m]["currency"],
+        "paper": {"account": "paper", "label_ko": CAPITAL_ACCOUNT_KO["paper"], "amount": paper["amount"],
+                  "start": paper["start"], "source": "record" if paper["record"] else "default",
+                  "set": _set_by(paper["record"]), "small_account": paper["amount"] < small},
+        "live": {"account": "live", "label_ko": CAPITAL_ACCOUNT_KO["live"], "amount": live["amount"],
+                 "source": "record" if live["record"] else "unset", "set": _set_by(live["record"]),
+                 "small_account": live["amount"] < small if live["amount"] is not None else None},
+        # pending: dated after the last close in the price data — in the book from that day's close on
+        "cash_flows": [{"date": d, "amount": a, "pending": last is None or d > last} | (_set_by(op) or {})
+                       for d, a, op in c["flows"]],
+        "next_paper_change": "flow" if running else "start",
+        "next_paper_change_ko": CAPITAL_CHANGE_KO["flow" if running else "start"],
+        "small_threshold": small, "max_amount": CAPITAL_MAX[m], "unit": CAPITAL_UNIT[m],
+        "account_mode": "paper" if st.state()["mode"] == "paper" else "live",
+        "admin_token_required": ADMIN_TOKEN is not None,
+        "note_ko": "모의 자본은 장부에 주문이 없으면 시작 자본을 바꾸고, 주문이 있으면 그날 종가에 입출금으로 들어갑니다(수익률 · "
+                   "드로다운 · 모의 판정에서 빠짐). 실거래 자본은 저장 · 표시 · 미리보기만 합니다 — 실주문 경로는 아직 없습니다.",
+    }
+
+
+@app.get("/api/capital", tags=["settings"])
+def get_capital(market: str | None = MarketQuery) -> dict:
+    """그 시장의 모의투자 · 실거래 자본(운영 기록 capital_set 재생값, 없으면 기본값), 입출금 목록, 소액 1종목 모드 여부."""
+    return _capital_out(_store(market))
+
+
+class CapitalRequest(BaseModel):
+    account: Literal["paper", "live"]
+    amount: float = Field(description="그 시장 통화. 국내 1원 · 미국 $0.01 단위, 0보다 크고 상한 이하")
+    operator: str = Field(min_length=1)
+    reason: str = Field(min_length=1, description="필수 · 감사 로그에 남는다")
+
+
+@app.post("/api/capital", tags=["settings"])
+def set_capital(body: CapitalRequest, market: str | None = MarketQuery,
+                x_admin_token: str | None = Header(default=None)) -> dict:
+    """자본 설정(관리자). 운영 기록 `capital_set`(target = paper | live, before · after, effective_from = 그 시장의 오늘)을
+    append한다. 모의 자본: 장부에 주문이 없으면 시작 자본 교체, 있으면 그날 종가 기준 입출금(새 금액 − 지금 금액) — 출금이
+    현금보다 크면 409. 실거래 자본: 저장만(실주문 없음). 마지막 설정과 금액 · 운영자 · 사유가 같으면 아무것도 쓰지 않는다
+    (replayed). 금액만 같으면 409."""
+    role = _require_admin(x_admin_token)
+    m = _market(market)
+    amount = _capital_amount(m, body.amount)
+    with _locks([m]):                                # the executor reads the capital under the same lock
+        st = STORES[m].refresh()
+        state = capital_state(st.operations, m)
+        cur = state[body.account]
+        last = cur["record"]
+        if (last is not None and float(last.after["amount"]) == amount
+                and (last.operator, last.reason) == (body.operator, body.reason)):
+            return {"replayed": True, "change": last.after.get("change"), "flow": last.after.get("flow"),
+                    "effective_from": last.effective_from, "capital": _capital_out(st),
+                    "result_ko": "같은 설정이 이미 기록돼 있습니다 — 새로 쓰지 않았습니다"}
+        if cur["amount"] == amount:
+            raise HTTPException(409, f"{MARKET_KO[m]} {CAPITAL_ACCOUNT_KO[body.account]}이 이미 {fmt_money(amount, m)}입니다")
+        today = _clock().astimezone(ZoneInfo(MARKETS[m]["timezone"])).date().isoformat()
+        after: dict = {"account": body.account, "amount": amount}
+        if body.account == "live":
+            after["change"] = "live"
+        elif st.order_facts["total"] > 0:
+            flow = amount - cur["amount"]
+            if flow < 0:
+                cfg = paper_config(m)
+                book = positions_view(st.order_rows, PRICES, cfg=cfg, operations=st.operations)
+                # the cash at the last close, and the flows dated after it (they go in at a close not in the data yet),
+                # less the buys not in the book yet (open, or filling after it — they fill before the flow's close),
+                # at the decision-day close plus costs as the daily cap counts them
+                pending = sum(a for d, a, _ in state["flows"] if d > book["as_of"])
+                reserved = sum((o.amount if o.amount is not None
+                                else o.quantity * (PRICES.close_asof(o.ticker, o.placed_on) or 0.0))
+                               * (1 + cfg.commission + cfg.slippage)
+                               for o in latest_orders(st.order_rows).values()
+                               if o.side == "Buy" and (o.status == "open" or (
+                                   o.status in ("filled", "partial") and (o.fill_date or "") > book["as_of"])))
+                cash = book["cash"] + pending - reserved
+                if cash + flow < -EPS:
+                    raise HTTPException(409, f"출금 {fmt_money(-flow, m)}이 장부 현금 {fmt_money(cash, m)}"
+                                             + (f"(체결 대기 매수 {fmt_money(reserved, m)} 제외)" if reserved else "")
+                                             + "보다 큽니다 — 보유를 줄인 뒤 다시 하세요")
+                if book["equity"] + pending + flow <= EPS:
+                    raise HTTPException(409, f"출금 {fmt_money(-flow, m)} 뒤 평가액이 0 이하입니다 — 장부 전액은 출금할 수 "
+                                             "없습니다(수익률 · 드로다운을 이어 셀 수 없음)")
+            after |= {"change": "flow", "flow": flow}
+        else:
+            after["change"] = "start"
+        st.audit.record_operation(OperationRecord(
+            kind="capital_set", operator=body.operator, role=role, reason=body.reason, market=m, target=body.account,
+            before={"amount": cur["amount"]}, after=after, effective_from=today))
+    change = after["change"]
+    result = {"start": f"모의 시작 자본을 {fmt_money(amount, m)}으로 바꿨습니다 — 장부에 주문이 없어 처음부터 이 금액입니다",
+              "flow": f"{today} 종가에 {'입금' if after.get('flow', 0) > 0 else '출금'} "
+                      f"{fmt_money(abs(after.get('flow', 0.0)), m)} — 모의 자본 {fmt_money(amount, m)}. 수익률 · 드로다운 · "
+                      "모의 판정은 이 입출금을 빼고 셉니다(시간 가중)",
+              "live": f"실거래 자본을 {fmt_money(amount, m)}으로 저장했습니다 — 실주문 경로는 아직 없어 미리보기 · 전환 모달에만 "
+                      "쓰입니다"}[change]
+    return {"replayed": False, "change": change, "change_ko": CAPITAL_CHANGE_KO[change], "flow": after.get("flow"),
+            "effective_from": today, "capital": _capital_out(STORES[m].refresh()), "result_ko": result}
+
+
+def _universe(m: str, kind: str, tickers: str | None, as_of: str) -> tuple[list[str], str]:
+    if kind == "loop":
+        setup = _daily_loop().SETUPS[m]
+        return list(setup["universe"]), setup["label"]
+    if kind == "index":
+        history = load_history(SECTORS.parent / INDEX_HISTORY[m])
+        return sorted(members_on(history, as_of)), f"{MARKETS[m]['benchmark_name_ko'] if m == 'US' else 'KOSPI200'} 구성 {as_of}"
+    names = [t for t in re.split(r"[\s,]+", (tickers or "").upper()) if t]
+    if not names:
+        raise HTTPException(422, "직접 지정은 tickers(쉼표 · 공백 구분)가 필요합니다")
+    if len(names) > 600:
+        raise HTTPException(422, f"직접 지정은 600종목까지입니다: {len(names)}")
+    if bad := [t for t in names if not TICKER_RE.match(t)]:
+        raise HTTPException(422, f"종목 코드 형식이 아닙니다: {', '.join(bad[:5])}")
+    return list(dict.fromkeys(names)), f"직접 지정 {len(set(names))}종목"
+
+
+@app.get("/api/capital/preview", tags=["settings"])
+def capital_preview(market: str | None = MarketQuery, account: Literal["paper", "live"] = "paper",
+                    amount: float | None = None, universe: Literal["loop", "index", "custom"] = "loop",
+                    tickers: str | None = None) -> dict:
+    """이 자본에서 걸리는 규칙과 금액, 유니버스에서 살 수 있는 종목 수(1주 종가 ≤ 종목당 · 주문당 상한) · 1주가 주문당 상한을
+    넘는 종목. 서버 계산(가격 캐시 · 섹터 파일 · 유니버스 파일만 읽음, 네트워크 없음). amount 없으면 그 계좌의 지금 자본."""
+    st = _store(market)
+    m = st.market
+    if amount is None:
+        amount = capital_state(st.operations, m)[account]["amount"]
+        if amount is None:
+            raise HTTPException(422, "실거래 자본이 아직 없습니다 — amount를 보내세요")
+    amount = _capital_amount(m, amount)
+    calendar = PRICES.calendar(MARKETS[m]["benchmark"])
+    if not calendar:
+        raise HTTPException(503, f"{MARKETS[m]['benchmark']} 가격 캐시가 없어 미리보기를 계산할 수 없습니다")
+    as_of = calendar[-1]
+    names, label = _universe(m, universe, tickers, as_of)
+    risk, caps, small_at = RiskConfig(), auto_execution(m), SMALL_ACCOUNT[m]
+    small = amount < small_at
+    per_name = amount if small else amount * risk.max_position_pct
+    order_cap, day_cap = min(caps["auto_order_max"], amount), min(caps["auto_daily_order_cap"], amount)
+    buy_limit = min(per_name, order_cap)
+    priced = [(t, px) for t in names if (px := PRICES.close_asof(t, as_of)) is not None]
+    missing = [t for t in names if t not in dict(priced)]
+    can = [(t, px) for t, px in priced if px <= buy_limit + EPS]
+    over = sorted(((t, px) for t, px in priced if px > caps["auto_order_max"] + EPS), key=lambda x: -x[1])
+    max_hold = min(1, len(can)) if small else min(round(1 / risk.max_position_pct), len(can))
+    money = (lambda v: fmt_money(v, m))
+
+    def row(rid: str, label_ko: str, setting_ko: str, value: float | str | None, note_ko: str, warn: bool = False) -> dict:
+        return {"id": rid, "label_ko": label_ko, "setting_ko": setting_ko, "amount": value if not isinstance(value, str) else None,
+                "value_ko": value if isinstance(value, str) else (money(value) if value is not None else "–"),
+                "note_ko": note_ko, "warn": warn}
+
+    rules = [
+        row("max_position_pct", "종목당 비중 상한",
+            f"소액 1종목 모드 ({money(small_at)} 미만)" if small else f"{risk.max_position_pct:.0%} · max_position_pct",
+            per_name, "1종목에 자본 전체" if small else "한 종목에 이 금액까지"),
+        row("max_sector_pct", "섹터당 비중 상한", f"{risk.max_sector_pct:.0%} · max_sector_pct",
+            None if small else amount * risk.max_sector_pct, "1종목이라 해당 없음" if small else "같은 섹터 합계"),
+        row("buyable", "살 수 있는 종목", "1주 종가 ≤ 종목당 · 주문당 상한", f"{len(can)} / {len(priced)}",
+            (f"1주 {money(buy_limit)} 이하" if can else "1주도 살 수 없음") + (f" · 가격 없는 {len(missing)}종목 제외" if missing else ""),
+            warn=not can),
+        row("max_holdings", "최대 보유 종목 수", "종목당 상한에서 나옴", f"{max_hold}종목",
+            "소액 1종목 모드" if small else f"{risk.max_position_pct:.0%} × {round(1 / risk.max_position_pct)}종목이 최대",
+            warn=max_hold == 0),
+        row("auto_order_max", "주문당 금액 상한", f"{money(caps['auto_order_max'])} · auto_order_max", order_cap,
+            "설정값과 자본 중 작은 쪽" + (" — 자본이 더 작음" if amount < caps["auto_order_max"] else "")),
+        row("auto_daily_order_cap", "일일 주문 금액 상한", f"{money(caps['auto_daily_order_cap'])} · auto_daily_order_cap",
+            day_cap, "설정값과 자본 중 작은 쪽" + (" — 자본이 더 작음" if amount < caps["auto_daily_order_cap"] else "")),
+        row("auto_daily_loss_limit", "일일 손실 한도", f"{caps['auto_daily_loss_limit']:+.0%} · auto_daily_loss_limit",
+            amount * -caps["auto_daily_loss_limit"], "하루에 이만큼 잃으면 자동 정지(그날 세션까지)"),
+        row("dd_halve", "드로다운 → 신규 비중 절반", f"{risk.dd_halve:+.0%} · dd_halve", amount * (1 + risk.dd_halve),
+            "평가액이 이 아래면(피크 = 이 자본일 때)"),
+        row("dd_stop", "드로다운 → 전량 청산 · 정지", f"{risk.dd_stop:+.0%} · dd_stop", amount * (1 + risk.dd_stop),
+            "평가액이 이 아래면 관리자 재가동까지 정지"),
+        row("stop_loss_pct", "손절 (진입가 대비)", f"{risk.stop_loss_pct:+.0%} · stop_loss_pct", per_name * -risk.stop_loss_pct,
+            "종목당 상한까지 샀을 때 손절 1건의 손실"),
+    ]
+
+    def named(t: str, px: float) -> dict:
+        return {"ticker": t, "name": st.name(t), "price": px}
+
+    cheapest = min(priced, key=lambda x: x[1], default=None)
+    return {"market": m, "currency": MARKETS[m]["currency"], "account": account, "account_ko": CAPITAL_ACCOUNT_KO[account],
+            "amount": amount, "small_account": small, "small_threshold": small_at, "as_of": as_of,
+            "universe": {"id": universe, "label_ko": UNIVERSE_KO[universe], "label": label, "size": len(names),
+                         "priced": len(priced), "missing": missing[:20], "missing_count": len(missing),
+                         "sector_ready": sum(sector_of(t) is not None for t in names),
+                         "name_ready": sum(korean_name(t) is not None for t in names)},
+            "buyable": len(can), "none_buyable": not can, "cheapest": named(*cheapest) if cheapest else None,
+            "over_order_cap": [named(t, px) for t, px in over[:20]], "over_order_cap_count": len(over),
+            "rules": rules,
+            "note_ko": f"가격은 {as_of} 종가(가격 캐시 — KIS 우선, 없으면 Yahoo). 주문당 · 일일 상한은 설정값과 자본 중 작은 쪽이 "
+                       "실제로 걸립니다. 1종목만 살 수 있는 금액에서는 분산이 안 되므로 수익률보다 주문 · 체결이 맞는지를 먼저 보세요."
+                       + (" 유니버스 선택은 미리보기만 — 선별 유니버스는 아직 스크립트 고정 목록입니다." if universe != "loop" else "")}
+
+
+# --- model settings (config.LLM, read only) ------------------------------------------------------------------------
+
+@app.get("/api/model", tags=["settings"])
+def model_settings(market: str | None = MarketQuery) -> dict:
+    """그 시장 일일 루프의 결정자와 모델 설정(config.LLM 읽기만 — 바꾸는 곳은 코드 설정). 결정자 · 시험 모드는
+    scripts/daily_loop의 `default_decider` · `trial_on`을 그대로 부른다(LLM 시험: TRADING_LLM_TRIAL=1 또는 LLM.trial,
+    시장별 모델 decide `trial_sessions`회 뒤 규칙 — 기록 재생). 키는 있는지만."""
+    from dotenv import dotenv_values
+
+    st = _store(market)
+    loop = _daily_loop()
+    env_path = Path(os.environ.get("TRADING_ENV_FILE") or ROOT / ".env")
+    env_file = dotenv_values(env_path) if env_path.exists() else {}
+    decider = loop.default_decider(st.audit, st.market)
+    trial = loop.trial_on()
+    days = loop.llm_trial_days(st.audit, st.market) if trial else []
+    sessions = LLM.get("trial_sessions")
+    return {"market": st.market, "decider": decider, "decider_ko": DECIDER_KO[decider],
+            "decider_id": LLM["model"] if decider == "llm" else BASELINE_DECIDER,
+            "model": LLM.get("model"), "effort": LLM.get("effort"), "max_tokens": LLM.get("max_tokens"),
+            "timeout": LLM.get("timeout"), "max_calls_per_run": LLM.get("max_calls_per_run"),
+            "enabled": bool(LLM.get("enabled")), "trial_mode": trial,
+            "trial": {"sessions": sessions, "days": days,
+                      "remaining": max(sessions - len(days), 0) if sessions is not None else None} if trial else None,
+            "config": dict(LLM), "keys": {"ANTHROPIC_API_KEY": _key_set("ANTHROPIC_API_KEY", env_file)},
+            "output_language": "ko",
+            "note_ko": "config.LLM의 값을 읽어 보여 줍니다(바꾸려면 코드 설정 — 컨트롤 타워). 시험 모드는 시장마다 모델 결정 "
+                       f"{sessions}거래일 뒤 규칙 베이스라인으로 돌아갑니다. 결정자가 llm이어도 키가 없으면 그날 결정은 "
+                       "규칙 베이스라인으로 남습니다."}
 
 
 class ApproveRequest(BaseModel):

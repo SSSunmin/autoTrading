@@ -316,3 +316,11 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
   border: 1px solid var(--app-fail); background: var(--app-fail-bg); font-size: var(--bv-font-size-body-3-normal); }
 .fail-line { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; align-items: baseline; }
 .fail-line a { margin-left: auto; }
+
+/* capital panel (mockup v0.7.2 Config 실거래 자본 · 유니버스) and the two-axis mode panel */
+.cap-small { color: var(--app-warn); font-weight: 600; }
+.cap-warn td { background: var(--app-warn-bg); color: var(--app-warn); }
+.cap-next, .cap-problem, .cap-ready { font-size: var(--bv-font-size-caption-1); }
+.cap-problem { color: var(--app-warn); }
+.mode-axes { align-items: center; gap: 0.8rem; }
+.mode-locked { font-size: var(--bv-font-size-body-3-normal); }
