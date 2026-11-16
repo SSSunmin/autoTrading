@@ -51,7 +51,7 @@ function CapitalForm({ info, onDone }: { info: CapitalInfo; onDone: (msg: string
           options={[{ value: 'paper', label: '모의투자 자본' }, { value: 'live', label: '실거래 자본' }]} />
         <AgentTextField label={`${account === 'paper' ? '모의투자' : '실거래'} 자본 (${m === 'KRX' ? '원' : '달러'})`} size="sm"
           inputMode="decimal" value={text[account]} onChange={(e) => setText((t) => ({ ...t, [account]: e.target.value }))} />
-        <AgentButton size="sm" variant="primary" disabled={problem != null} onClick={() => setOpen(true)}>변경…</AgentButton>
+        <AgentButton variant="primary" disabled={problem != null} onClick={() => setOpen(true)}>변경…</AgentButton>
         <span className="muted cap-next">{account === 'paper' ? `지금 바꾸면: ${info.next_paper_change_ko}` : '저장 · 미리보기만 (실주문 없음)'}</span>
       </div>
       {problem && <div className="muted cap-problem">{problem}</div>}

@@ -106,7 +106,7 @@ export function Loaded<T>({ state, empty, emptyDescription, children }: {
     )
   }
   if (state.data == null || (Array.isArray(state.data) && state.data.length === 0)) {
-    return <AgentEmptyState title={empty ?? '데이터가 없습니다'} description={emptyDescription ?? 'scripts/baseline_krx.py 를 실행하면 선별·결정·정산 기록이 생성됩니다.'} />
+    return <AgentEmptyState title={empty ?? '데이터가 없습니다'} description={emptyDescription ?? '선별·결정이 기록되면 여기에 나타납니다.'} />
   }
   return <>{children(state.data)}</>
 }

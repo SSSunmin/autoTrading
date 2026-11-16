@@ -37,10 +37,12 @@ export interface DrawdownChart {
   ticks: { x: number; label: string }[]
 }
 
-/** Drawdown series (≤ 0) → the mockup's 1000×200 viewBox: 0% at the top, the deeper of the stop line and the low at
- *  `CHART.bottom`. x spreads the trading days evenly; a tick about every week (5 trading days). */
-export function drawdownChart(series: { date: string; drawdown: number }[], limits: { max_drawdown: number; dd_halve: number; dd_stop: number }): DrawdownChart {
-  const { width, top, bottom } = CHART
+/** Drawdown series (≤ 0) → the mockup's 200-high box, `width` px wide (the chart's rendered width; the mockup's 1000
+ *  by default): 0% at the top, the deeper of the stop line and the low at `CHART.bottom`. x spreads the trading days
+ *  evenly; a tick about every week (5 trading days), every 10, 15, … days where a week is under 48px (12px labels). */
+export function drawdownChart(series: { date: string; drawdown: number }[], limits: { max_drawdown: number; dd_halve: number; dd_stop: number },
+  width = CHART.width): DrawdownChart {
+  const { top, bottom } = CHART
   const lows = series.map((r) => r.drawdown)
   const floor = Math.min(limits.dd_stop, ...lows)
   const y = (v: number) => +(top + (v / floor) * (bottom - top)).toFixed(1)
@@ -60,7 +62,9 @@ export function drawdownChart(series: { date: string; drawdown: number }[], limi
   }
   let low: DrawdownChart['low'] = null
   series.forEach((r, i) => { if (r.drawdown < 0 && (!low || r.drawdown < low.drawdown)) low = { x: x(i), y: y(r.drawdown), date: r.date, drawdown: r.drawdown } })
-  const ticks = series.flatMap((r, i) => (i % 5 === 0 ? [{ x: x(i), label: r.date.slice(5) }] : []))
+  const day = width / Math.max(series.length - 1, 1)
+  const every = 5 * Math.max(1, Math.ceil(48 / (5 * day)))
+  const ticks = series.flatMap((r, i) => (i % every === 0 ? [{ x: x(i), label: r.date.slice(5) }] : []))
   return { points, rules, low, ticks }
 }
 

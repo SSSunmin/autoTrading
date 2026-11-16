@@ -507,7 +507,8 @@ def test_us_performance_is_404_without_its_summary_and_reads_its_own_summary_and
     data = tmp_path / "data"
     krx_before = client.get("/api/performance").content
     r = client.get("/api/performance", params={"market": "US"})
-    assert r.status_code == 404 and "baseline_krx.py --market US" in r.json()["detail"]
+    assert r.status_code == 404 and r.json()["detail"].startswith("미국 결정 성과 요약이 아직 없습니다")
+    assert ".py" not in r.json()["detail"]                                # no script path on the user's screen
 
     log_path = data / "us_memory.md"
     log = TradingMemoryLog({"memory_log_path": str(log_path)})

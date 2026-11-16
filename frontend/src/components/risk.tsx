@@ -40,7 +40,7 @@ export function ResumeButton({ state, market, label }: { state: TradingState; ma
   const [opened, setOpened] = useState(0)
   return (
     <>
-      <AgentButton size="sm" variant={label ? 'ghost' : 'secondary'} onClick={() => { setOpened((n) => n + 1); setOpen(true) }}>{label ?? '재가동 (관리자) →'}</AgentButton>
+      <AgentButton variant={label ? 'ghost' : 'secondary'} onClick={() => { setOpened((n) => n + 1); setOpen(true) }}>{label ?? '재가동 (관리자) →'}</AgentButton>
       <ResumeModal key={opened} state={state} market={market} open={open} onClose={() => setOpen(false)} />
     </>
   )

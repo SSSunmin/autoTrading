@@ -48,7 +48,7 @@ export default function Settings() {
                       {MARKETS.map((m) => <td key={m} className="r num">{paramsFor(x.id, r.screen_params_by_market[m])}</td>)}<td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
                   ))}
                   {r.risk_rules.map((x) => (
-                    <tr key={x.id}><td><b>{x.label_ko}</b> <span className="muted num">{x.id}</span></td><td className="wrap muted">risk.py · 청산은 손절 → 트레일링 → 기간 만료 순, 가드는 포트폴리오 드로다운 기준</td>
+                    <tr key={x.id}><td><b>{x.label_ko}</b> <span className="muted num">{x.id}</span></td><td className="wrap muted">하드룰 · 청산은 손절 → 트레일링 → 기간 만료 순, 가드는 포트폴리오 드로다운 기준</td>
                       <td className="r num" colSpan={2}>{fmtRule(x.id, x.value)} <span className="muted">· 두 시장 같음</span></td><td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
                   ))}
                   {r.auto_rules.map((x) => (
@@ -202,7 +202,7 @@ function ModePanel({ market, state, onChanged }: { market: Market; state: Tradin
           <AgentTextField label="관리자" size="sm" placeholder="이름 또는 ID" value={operator} onChange={(e) => setOperator(e.target.value)} />
           <AgentTextField label="사유" size="sm" placeholder="변경 이력에 남습니다" value={reason} onChange={(e) => setReason(e.target.value)} style={{ minWidth: '28rem' }} />
           {state.admin_token_required && <AgentTextField label="관리자 토큰" size="sm" type="password" value={token} onChange={(e) => setToken(e.target.value)} />}
-          <AgentButton size="sm" variant="primary" disabled={!ready || mode === state.mode}
+          <AgentButton variant="primary" disabled={!ready || mode === state.mode}
             onClick={() => run(async () => { await api.setMode({ operator: operator.trim(), mode, reason: reason.trim(), market }, token || undefined) })}>
             {mode === state.mode ? '현재 모드' : `${axesLabel(mode)}으로 전환`}
           </AgentButton>

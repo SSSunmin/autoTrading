@@ -72,12 +72,12 @@ function PaperScreen({ market }: { market: Market }) {
             </section>
             <section className="cross-card">
               <div><b>실거래 자본 · 유니버스</b>
-                <span className="muted">실거래 자본과 종목 목록은 설정에서 정합니다(단계 5에서 연결). 지금 주문 한도는 1건 {money(p.go_live.auto_order_max, market)} · 일일 {money(p.go_live.auto_daily_order_cap, market)}.</span></div>
+                <span className="muted">실거래 자본과 종목 목록은 설정에서 정합니다. 지금 주문 한도는 1건 {money(p.go_live.auto_order_max, market)} · 일일 {money(p.go_live.auto_daily_order_cap, market)}.</span></div>
               <Link to={to('/settings')}>설정에서 보기 →</Link>
             </section>
             <section className="cross-card">
               <div><b>실거래 전환{market === 'US' ? ' · 미국' : ''}</b>
-                <span className="muted">관리자 · {p.market_ko} 모의 기준 6개를 전부 충족해야 켜집니다. {p.go_live.other_markets_ko.join(' · ')}에는 영향이 없습니다. 누르면 확인 모달 → POST /api/trading/mode {'{'}market: {market}, account_mode: live{'}'}</span></div>
+                <span className="muted">관리자 · {p.market_ko} 모의 기준 6개를 전부 충족해야 켜집니다. {p.go_live.other_markets_ko.join(' · ')}에는 영향이 없습니다. 누르면 확인 창에서 한 번 더 확인합니다.</span></div>
               <span className="cross-act">
                 {!sw.enabled && <span className="muted" id="go-why">{sw.why}</span>}
                 <AgentButton variant="primary" disabled={!sw.enabled} aria-describedby={sw.enabled ? undefined : 'go-why'} onClick={() => { setOpened((n) => n + 1); setOpen(true) }}>실거래 전환</AgentButton>

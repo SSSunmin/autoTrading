@@ -1,7 +1,8 @@
 import type { DataStatus, Market, SeriesRow } from '../api/types'
 
-/** Performance 6-A charts (docs/10 §3 stage 6): the server's daily rows on a 1000-wide viewBox, as the screen-8
- *  drawdown chart draws. Every value comes from /api/performance/series; these only place them. */
+/** Performance 6-A charts (docs/10 §3 stage 6): the server's daily rows in px — `width` is the chart's rendered width
+ *  (1000 until it is measured), the rest stays fixed so the text keeps its size. Every value comes from
+ *  /api/performance/series; these only place them. */
 export const PC = { width: 1000, height: 210, left: 56, right: 10, top: 10, bottom: 180 }
 
 /** Round steps (1 · 2 · 2.5 · 5 × 10^k) covering [lo, hi], about `count` of them, always through 0 when it is in range. */
@@ -24,13 +25,13 @@ export interface Scale {
 }
 
 /** The y range covers every value given (nulls skipped) and `include` (0 for a return), widened to round ticks. */
-export function scale(rows: { date: string }[], values: (number | null)[], include: number[] = [0]): Scale {
+export function scale(rows: { date: string }[], values: (number | null)[], include: number[] = [0], width = PC.width): Scale {
   const vs = [...values.filter((v): v is number => v != null && Number.isFinite(v)), ...include]
   let lo = Math.min(...vs), hi = Math.max(...vs)
   if (hi - lo < 1e-6) { lo -= 0.01; hi += 0.01 }
   const ticks = niceTicks(lo, hi)
   const [tlo, thi] = [Math.min(ticks[0], lo), Math.max(ticks[ticks.length - 1], hi)]
-  const { width, left, right, top, bottom } = PC
+  const { left, right, top, bottom } = PC
   const n = rows.length
   const x = (i: number) => +(n > 1 ? left + (i / (n - 1)) * (width - left - right) : left + (width - left - right) / 2).toFixed(1)
   const y = (v: number) => +(top + ((thi - v) / (thi - tlo)) * (bottom - top)).toFixed(1)
@@ -59,10 +60,10 @@ export function areaPath(values: number[], s: Pick<Scale, 'x' | 'y'>): string {
   return `M${s.x(0)},${zero}${values.map((v, i) => `L${s.x(i)},${s.y(v)}`).join('')}L${s.x(values.length - 1)},${zero}Z`
 }
 
-/** The day under a pointer at viewBox x `px` (the nearest of n evenly spread days). */
-export function nearestIndex(px: number, n: number): number {
+/** The day under a pointer at x `px` of a `width`-wide chart (the nearest of n evenly spread days). */
+export function nearestIndex(px: number, n: number, width = PC.width): number {
   if (n <= 1) return 0
-  const { width, left, right } = PC
+  const { left, right } = PC
   const i = Math.round(((px - left) / (width - left - right)) * (n - 1))
   return Math.max(0, Math.min(n - 1, i))
 }

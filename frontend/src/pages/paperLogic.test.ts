@@ -62,6 +62,19 @@ describe('drawdownChart', () => {
     expect(c.rules.find((r) => r.kind === 'stop')?.y).toBe(131.6)                         // 8 + 0.2/0.25 × 154.5
     expect(c.rules.at(-1)).toEqual({ value: -0.25, y: 162.5, kind: 'grid', label: '−25%' })
   })
+  it('spreads the days across the rendered width and keeps every height (the rules, the low) in px', () => {
+    const c = drawdownChart(series, LIMITS, 530)
+    expect(c.points).toEqual([[0, 8], [265, 46.6], [530, 38.9]])
+    expect(c.rules.map((r) => r.y)).toEqual([8, 46.6, 85.3, 123.9, 162.5])
+    expect(c.low).toEqual({ x: 265, y: 46.6, date: '2026-06-02', drawdown: -0.05 })
+  })
+  it('spaces the date ticks at 48px or more on a narrow chart over a long book (12px labels would overlap)', () => {
+    const long = Array.from({ length: 80 }, (_, i) => ({ date: `2026-${String(6 + Math.floor(i / 28)).padStart(2, '0')}-${String(1 + (i % 28)).padStart(2, '0')}`, drawdown: 0 }))
+    const gaps = (w: number) => { const t = drawdownChart(long, LIMITS, w).ticks; return t.slice(1).map((x, i) => x.x - t[i].x) }
+    expect(Math.min(...gaps(434))).toBeGreaterThanOrEqual(48)               // 1024 screen: every 10 days, not 5
+    expect(drawdownChart(long, LIMITS, 434).ticks.length).toBe(8)
+    expect(drawdownChart(long, LIMITS, 1000).ticks.length).toBe(16)        // a wide chart keeps the weekly ticks
+  })
   it('names the pass line and the halving line apart when they differ, and marks no low on a flat book', () => {
     const c = drawdownChart([{ date: '2026-06-01', drawdown: 0 }], { max_drawdown: -0.05, dd_halve: -0.10, dd_stop: -0.20 })
     expect(c.rules.filter((r) => r.kind === 'limit').map((r) => r.label)).toEqual(['−5% 기준', '−10% 반감'])

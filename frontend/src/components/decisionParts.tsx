@@ -60,12 +60,12 @@ export function ExceptionButtons({ item, tokenRequired }: { item: ExceptionItem;
     <>
       {item.pending_action_ko && <AgentChip variant="new">{item.pending_action_ko}</AgentChip>}
       {item.kind === 'review' ? item.actions.length > 0 ? item.actions.map((a) => (
-        <AgentButton key={a.action} size="sm" variant={a.action === 'dismiss' ? 'ghost' : 'secondary'} disabled={!a.available}
+        <AgentButton key={a.action} variant={a.action === 'dismiss' ? 'ghost' : 'secondary'} disabled={!a.available}
           title={a.available ? undefined : `상한 ${a.limit}회 도달`} onClick={() => show(modalVariant(item, a.action))}>
           {a.label_ko}{a.used != null && a.used > 0 ? ` ${a.used}/${a.limit}` : ''}
         </AgentButton>
-      )) : <AgentButton size="sm" variant="secondary" disabled title={title}>재실행 · 보유로 처리 · 무시</AgentButton>
-        : <AgentButton size="sm" variant="secondary" disabled={off} title={title} onClick={() => show('order')}>처리 (다음 세션 재시도 · 무시)</AgentButton>}
+      )) : <AgentButton variant="secondary" disabled title={title}>재실행 · 보유로 처리 · 무시</AgentButton>
+        : <AgentButton variant="secondary" disabled={off} title={title} onClick={() => show('order')}>처리 (다음 세션 재시도 · 무시)</AgentButton>}
       {open && <ExceptionModal key={opened} item={item} variant={open} tokenRequired={tokenRequired} onClose={() => setOpen(null)} />}
     </>
   )

@@ -849,9 +849,9 @@ def performance(market: str | None = MarketQuery, source: str = Query("all", pat
     lo, hi = _date_range(date_from, date_to)
     s = st.summary
     if not s:
-        raise HTTPException(404, "백테스트 요약 없음: scripts/baseline_krx.py를 먼저 실행" if st.market == "KRX" else
-                            f"{MARKET_KO.get(st.market, st.market)} 결정 성과 요약 없음: "
-                            f"scripts/baseline_krx.py --market {st.market}를 먼저 실행")
+        raise HTTPException(404, "백테스트 요약이 아직 없습니다 — 베이스라인 백테스트를 돌리면 채워집니다" if st.market == "KRX" else
+                            f"{MARKET_KO.get(st.market, st.market)} 결정 성과 요약이 아직 없습니다 — "
+                            f"{MARKET_KO.get(st.market, st.market)} 베이스라인 백테스트를 돌리면 채워집니다")
     try:
         loop = _loop_scoring(st, source, lo, hi)
     except Exception as exc:  # the loop's own failure stays in its key; the baseline's scoring still answers
@@ -1144,7 +1144,7 @@ def _loop_scoring(st: _Store, source: str, lo: str | None, hi: str | None) -> di
             "human_excluded": sum(d.source == "human" for d in every),
             "rule_exits_excluded": sum(d.source == "rule" and not (d.screen_run_id or "").startswith(prefix) for d in every),
             "note_ko": "5일 정산 = 결정 다음 첫 종가에 진입해 종목 자신의 5거래일 뒤 종가(휴장일은 봉이 없어 건너뜀), "
-                       "벤치마크 대비 알파, 가격은 KIS 캐시만(scripts/llm_trial_report.py와 같은 정의). 평균 수익 · "
+                       "벤치마크 대비 알파, 가격은 KIS 캐시만(LLM 시험 보고서와 같은 정의). 평균 수익 · "
                        "알파는 매수 쪽(매수 · 비중확대)만, 방향 수익 · 적중률은 매도 쪽 부호를 뒤집어 함께, 보유는 참고, "
                        "REVIEW는 미채점. 규칙 열은 모델과 같은 날 · 같은 종목을 그날 선별로 규칙이 판단한 결과(재계산)이고, "
                        "규칙이 직접 기록한 결정 · 모델 대신 규칙이 정한 결정 · 사람 처리 · 규칙 청산은 수만 셉니다. "
@@ -1193,8 +1193,7 @@ def paper(market: str | None = MarketQuery) -> dict:
     m = _market(market)
     path = DATA_DIR / PAPER_SUMMARY[m]
     if not path.exists():
-        hint = "" if m == "KRX" else " --market US"
-        raise HTTPException(404, f"{MARKET_KO.get(m, m)} 포트폴리오 실측 결과 없음: scripts/paper_backtest.py{hint}를 먼저 실행")
+        raise HTTPException(404, f"{MARKET_KO.get(m, m)} 포트폴리오 실측 결과가 아직 없습니다 — 포트폴리오 백테스트를 돌리면 채워집니다")
     s = json.loads(path.read_text(encoding="utf-8"))
     for key, v in s["variants"].items():
         events = v.pop("events", [])
@@ -1269,8 +1268,7 @@ def _expected(m: str, p: dict) -> dict | None:
                                      MARKETS[m]["benchmark_name_ko"])
     except (OSError, KeyError, ValueError, TypeError, StopIteration) as exc:   # a malformed result is the table's error
         return head | {"start": p["start"], "end": p["as_of"], "rows": [], "covered_until": None,
-                       "error": f"{PAPER_MEASUREMENT_KO[m]} 결과를 읽지 못함({type(exc).__name__}): "
-                                f"scripts/paper_backtest.py{'' if m == 'KRX' else ' --market US'}"}
+                       "error": f"{PAPER_MEASUREMENT_KO[m]} 결과를 읽지 못함({type(exc).__name__}) — 포트폴리오 백테스트를 다시 돌려야 합니다"}
 
 
 @app.get("/api/paper/progress", tags=["performance"])

@@ -52,7 +52,7 @@ export default function Performance() {
           </AgentSectionPanel>
         )}</Loaded>}
         {tab === 'loop' && <Loaded state={loop}>{(l) => (
-          <AgentSectionPanel title="모의 루프 채점" description={`일일 루프가 기록한 결정을 결정 다음 첫 종가에서 ${l.holding_days}거래일 뒤 종가로 정산합니다(scripts/llm_trial_report.py와 같은 숫자). 베이스라인 채점(결정 채점 탭)과 섞지 않습니다`}
+          <AgentSectionPanel title="모의 루프 채점" description={`일일 루프가 기록한 결정을 결정 다음 첫 종가에서 ${l.holding_days}거래일 뒤 종가로 정산합니다(LLM 시험 보고서와 같은 숫자). 베이스라인 채점(결정 채점 탭)과 섞지 않습니다`}
             action={<TrialBadge trial={l.trial} />}>
             <LoopPanel l={l} />
           </AgentSectionPanel>
