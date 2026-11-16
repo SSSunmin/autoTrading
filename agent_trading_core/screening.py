@@ -8,6 +8,9 @@ Every ticker gets a ``CandidateRecord`` with one ``FilterResult`` per rule it wa
 evaluated against. A relative rule (top-N, quota) is evaluated only on the
 tickers still alive, so a ticker that failed earlier simply has no entry for it;
 the dashboard shows that as "not evaluated".
+
+An optional rebound-speed measure (``ScreenConfig.rebound``, off by default — docs/11, measured, not in use) either
+joins the ranking score or drops its bottom share before the sector quota. Off, the screen is the one above.
 """
 
 from __future__ import annotations
@@ -47,6 +50,29 @@ TRADING_DAYS = 252
 MONTH = 21
 
 
+@dataclass(frozen=True)
+class Rebound:
+    """A rebound-speed measure against the market's benchmark (docs/11 §2, fixed before the measurement).
+
+    ``metric``: ``A`` excess return since the benchmark's lowest close of the last ``low_window`` bars (``rebound_from_low``),
+    ``B`` up-capture minus down-capture over the last ``capture_window`` bars (``capture_spread``), ``C`` up-day beta minus
+    down-day beta over the same bars (``rebound_beta``). ``mode``: ``score`` ranks by (1 − weight)·momentum +
+    weight·z(measure); ``filter`` adds the rule ``rebound_filter`` (put it in ``rules``), which drops the bottom
+    ``filter_pct`` of the measure. ``benchmark``: the symbol the screen's ``load`` reads it from."""
+
+    metric: str
+    benchmark: str
+    mode: str = "score"
+    weight: float = 0.25
+    filter_pct: float = 0.30
+    low_window: int = 60
+    capture_window: int = 120
+
+    def __post_init__(self) -> None:
+        if self.metric not in ("A", "B", "C") or self.mode not in ("score", "filter"):
+            raise ValueError(f"rebound: metric A|B|C, mode score|filter — {self.metric}/{self.mode}")
+
+
 @dataclass
 class ScreenConfig:
     """Rule parameters. Defaults are the docs/01 §2-4 draft for KRX large caps."""
@@ -64,6 +90,7 @@ class ScreenConfig:
     performance_min_alpha: float = -0.03
     performance_n: int = 10
     top_k: int = 15
+    rebound: Rebound | None = None      # off: the screen as it runs (docs/11 measured it)
 
     rules: tuple[str, ...] = field(default=(
         "price_min", "listed_days_min", "dollar_volume_top_n", "volatility_band",
@@ -92,6 +119,68 @@ class _Features:
     vol_3y: float | None
     sector: str | None = None
     score: float | None = None
+    rebound: float | None = None
+
+
+def _closes(frame: pd.DataFrame) -> pd.Series:
+    return pd.Series(frame["Close"].astype(float).to_numpy(), index=pd.to_datetime(frame["Date"])).dropna()
+
+
+def rebound_from_low(stock: pd.Series, bench: pd.Series, window: int = 60) -> float | None:
+    """A: the stock's return minus the benchmark's from the benchmark's lowest close of its last ``window`` bars to
+    its last bar. Closes indexed by date, up to the decision day. None without the stock's close on the low day."""
+    if len(bench) < window or stock.empty:
+        return None
+    low = bench.tail(window).idxmin()
+    if low not in stock.index:
+        return None
+    return float(stock.iloc[-1] / stock.loc[low] - 1) - float(bench.iloc[-1] / bench.loc[low] - 1)
+
+
+def _paired_returns(stock: pd.Series, bench: pd.Series, window: int) -> pd.DataFrame | None:
+    """Daily returns of both on the benchmark's last ``window`` days the stock also traded: None with fewer than half
+    of them, or fewer than 10 up or 10 down benchmark days."""
+    if len(bench) <= window:
+        return None
+    both = pd.concat({"s": stock.pct_change(), "b": bench.pct_change()}, axis=1, join="inner").dropna()
+    both = both[both.index.isin(bench.index[-window:])]
+    if len(both) < window // 2 or (both["b"] > 0).sum() < 10 or (both["b"] < 0).sum() < 10:
+        return None
+    return both
+
+
+def capture_spread(stock: pd.Series, bench: pd.Series, window: int = 120) -> float | None:
+    """B: up-capture − down-capture. Up-capture = the stock's mean return on the benchmark's up days ÷ the benchmark's
+    mean on them; down-capture the same on its down days."""
+    both = _paired_returns(stock, bench, window)
+    if both is None:
+        return None
+    up, down = both[both["b"] > 0], both[both["b"] < 0]
+    return float(up["s"].mean() / up["b"].mean() - down["s"].mean() / down["b"].mean())
+
+
+def rebound_beta(stock: pd.Series, bench: pd.Series, window: int = 120) -> float | None:
+    """C: the stock's beta on the benchmark's up days − its beta on the down days (each cov/var within those days)."""
+    both = _paired_returns(stock, bench, window)
+    if both is None:
+        return None
+
+    def beta(d: pd.DataFrame) -> float | None:
+        var = float(((d["b"] - d["b"].mean()) ** 2).sum())
+        return float(((d["s"] - d["s"].mean()) * (d["b"] - d["b"].mean())).sum()) / var if var > 0 else None
+
+    up, down = beta(both[both["b"] > 0]), beta(both[both["b"] < 0])
+    return None if up is None or down is None else up - down
+
+
+def rebound_value(frame: pd.DataFrame, bench: pd.Series | None, rb: Rebound) -> float | None:
+    """The configured measure of one stock's frame (up to the decision day); None without the benchmark."""
+    if bench is None:
+        return None
+    stock = _closes(frame)
+    if rb.metric == "A":
+        return rebound_from_low(stock, bench, rb.low_window)
+    return (capture_spread if rb.metric == "B" else rebound_beta)(stock, bench, rb.capture_window)
 
 
 def _features(frame: pd.DataFrame, as_of: str, cfg: ScreenConfig, sector: str | None) -> _Features:
@@ -150,6 +239,17 @@ def momentum_scores(feats: dict[str, _Features]) -> dict[str, float | None]:
     return scores
 
 
+def ranking_scores(feats: dict[str, _Features], cfg: ScreenConfig) -> dict[str, float | None]:
+    """The ranking score: ``momentum_scores``; with ``rebound`` in ``score`` mode (1 − weight)·momentum +
+    weight·z(measure), the measure z-scored across the same tickers. A ticker without the measure keeps its momentum."""
+    scores = momentum_scores(feats)
+    rb = cfg.rebound
+    if rb is None or rb.mode != "score":
+        return scores
+    z = _zscore({t: f.rebound for t, f in feats.items() if f.rebound is not None})
+    return {t: s if s is None or t not in z else (1 - rb.weight) * s + rb.weight * z[t] for t, s in scores.items()}
+
+
 def _recent_alpha(memory_log, ticker: str, n: int) -> float | None:
     """Mean settled alpha of the ticker's last ``n`` decisions, None without any."""
     if memory_log is None:
@@ -187,12 +287,24 @@ def screen(
     universe = list(dict.fromkeys(universe))
     records: dict[str, CandidateRecord] = {}
     feats: dict[str, _Features] = {}
+    if cfg.rebound is not None and (cfg.rebound.mode == "filter") != ("rebound_filter" in cfg.rules):
+        raise ValueError("rebound: mode filter goes with the rule rebound_filter in rules, mode score without it")
+    if cfg.rebound is None and "rebound_filter" in cfg.rules:
+        raise ValueError("rebound_filter needs ScreenConfig.rebound")
+    bench = None
+    if cfg.rebound is not None:
+        try:
+            bench = _closes(load(cfg.rebound.benchmark, as_of, cache_dir=cache_dir))
+        except (VendorError, ValueError, KeyError, IndexError) as exc:
+            logger.warning("%s: no benchmark for the rebound measure as of %s: %s", cfg.rebound.benchmark, as_of, exc)
 
     for ticker in universe:
         try:
             frame = load(ticker, as_of, cache_dir=cache_dir)
             sector = sector_of(ticker) if sector_of else None
             feats[ticker] = _features(frame, as_of, cfg, sector)
+            if cfg.rebound is not None:
+                feats[ticker].rebound = rebound_value(frame, bench, cfg.rebound)
             records[ticker] = CandidateRecord(ticker=ticker, selected=False)
         except (VendorError, ValueError, KeyError, IndexError) as exc:
             logger.warning("%s: no usable data as of %s: %s", ticker, as_of, exc)
@@ -236,8 +348,16 @@ def screen(
             apply(rule, {t: FilterResult(rule=rule, value=round(feats[t].range_change, 4),
                                          threshold=cfg.range_stability_min,
                                          passed=feats[t].range_change >= cfg.range_stability_min) for t in alive})
+        elif rule == "rebound_filter":
+            measured = sorted((t for t in alive if feats[t].rebound is not None), key=lambda t: feats[t].rebound)
+            cut = set(measured[:int(len(measured) * cfg.rebound.filter_pct)])
+            apply(rule, {t: FilterResult(
+                rule=rule, value=None if feats[t].rebound is None else round(feats[t].rebound, 4),
+                threshold=f"하위 {cfg.rebound.filter_pct:.0%}", passed=t not in cut,
+                note=f"반등 지표 {cfg.rebound.metric}" if feats[t].rebound is not None else "반등 지표 없음: 제외 안 함")
+                for t in alive})
         elif rule == "sector_quota":
-            scores = momentum_scores({t: feats[t] for t in alive})
+            scores = ranking_scores({t: feats[t] for t in alive}, cfg)
             for t in alive:
                 feats[t].score = scores[t]
             by_sector: dict[str, list[str]] = {}
@@ -261,7 +381,7 @@ def screen(
                 )
             apply(rule, verdicts)
         elif rule == "momentum_top_k":
-            scores = {t: feats[t].score if feats[t].score is not None else momentum_scores({t: feats[t]})[t]
+            scores = {t: feats[t].score if feats[t].score is not None else ranking_scores({t: feats[t]}, cfg)[t]
                       for t in alive}
             ranked = sorted(alive, key=lambda t: (scores[t] is None, -(scores[t] or 0)))
             verdicts = {}
