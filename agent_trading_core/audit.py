@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from agent_trading_core.rating import RATING_REVIEW, RATINGS_5_TIER
 from agent_trading_core.schemas import SellReason
 from agent_trading_core.store import DB_NAME, JsonlStore, SqliteStore, store_kind
+from agent_trading_core.store.sqlite import TABLES, connect
 
 
 def _now() -> str:
@@ -296,6 +297,17 @@ def trading_state(operations: list[OperationRecord], default_mode: str = "paper"
 
 
 RECORD_NAMES = ("screens", "decisions", "orders", "operations", "runs")
+# the indexed columns a range read may filter on (store/schema.sql), by record name — also the records' field names
+QUERY_COLUMNS = {"screens": {"run_id", "as_of"}, "decisions": {"trade_date", "ticker", "rating", "source"},
+                 "orders": {"order_id", "ticker", "trade_date", "status"}, "operations": {"kind", "target"},
+                 "runs": {"stage", "trade_date", "status"}}
+
+
+def _matches(got, want) -> bool:
+    if isinstance(want, tuple):
+        lo, hi = want
+        return got is not None and (lo is None or got >= lo) and (hi is None or got <= hi)
+    return got == want
 
 
 def _unloaded(root: Path) -> bool:
@@ -344,10 +356,6 @@ class AuditLog:
     def _append(self, name: str, record: BaseModel) -> None:
         self._check(record, f"{name}.jsonl 쓰기")
         self.store.append(name, record, getattr(record, "market", None) or self.market or "KRX")
-        if self.store.kind == "sqlite":
-            # ponytail: the backend reloads when a JSONL file's mtime changes (backend/main.py _Store._paths); touch
-            # the book's file, contents untouched, until it watches the database (api feature/db-store-api)
-            (self.directory / f"{name}.jsonl").touch()
 
     def _read(self, name: str, model):
         rows = [model.model_validate(json.loads(line)) for line in self.store.read(name, self.market)]
@@ -385,6 +393,126 @@ class AuditLog:
 
     def runs(self) -> list[RunRecord]:
         return self._read("runs", RunRecord)
+
+    # --- range reads (the backend): the rows the full reads above give, filtered on the indexed query columns of
+    # store/schema.sql — one SQL query on sqlite, the full read filtered alike on jsonl. Read only, nothing cached.
+
+    def _where(self, name: str, model, filters: dict, *, last: int | None = None, latest: bool = False) -> list:
+        """``filters``: query column -> a value (equal) or ``(lo, hi)`` (inclusive, either end None); a None value is
+        no filter. ``last``: the last n rows only (insert order kept). ``latest`` (orders): the last row of each
+        ``order_id``, then filtered — what ``latest_orders`` keeps, in its order."""
+        filters = {c: v for c, v in filters.items() if v is not None}
+        if unknown := set(filters) - QUERY_COLUMNS[name]:
+            raise ValueError(f"{name}: 조회 열이 아닙니다: {sorted(unknown)}")
+        if self.store.kind == "jsonl":
+            rows = self._read(name, model)
+            if latest:
+                rows = list(latest_orders(rows).values())
+            rows = [r for r in rows if all(_matches(getattr(r, c), v) for c, v in filters.items())]
+            return rows[-last:] if last else rows
+        table, sql, args = TABLES[name], [], []
+        if self.market is not None:
+            sql.append("market = ?")
+            args.append(self.market)
+        if latest:
+            inner = f"SELECT max(id) FROM {table}" + (" WHERE market = ?" if self.market is not None else "")
+            sql.append(f"id IN ({inner} GROUP BY order_id)")
+            args += [self.market] if self.market is not None else []
+        for c, v in filters.items():
+            if isinstance(v, tuple):
+                lo, hi = v
+                if lo is not None:
+                    sql.append(f"{c} >= ?")
+                    args.append(lo)
+                if hi is not None:
+                    sql.append(f"{c} <= ?")
+                    args.append(hi)
+            else:
+                sql.append(f"{c} = ?")
+                args.append(v)
+        query = f"SELECT id, payload FROM {table}" + (f" WHERE {' AND '.join(sql)}" if sql else "")
+        query += f" ORDER BY id DESC LIMIT {int(last)}" if last else " ORDER BY id"
+        con = connect(self.store.path)
+        try:
+            payloads = [p for _, p in con.execute(query, args)]
+        finally:
+            con.close()
+        rows = [model.model_validate(json.loads(p)) for p in (reversed(payloads) if last else payloads)]
+        for r in rows:
+            self._check(r, f"{name} 읽기")
+        return rows
+
+    def decisions_where(self, *, trade_date: str | tuple | None = None, ticker: str | None = None,
+                        source: str | None = None, rating: str | None = None) -> list[DecisionRecord]:
+        """Decisions of one day or a ``(from, to)`` range, a ticker, a stored ``source``, a rating — in record order."""
+        return self._where("decisions", DecisionRecord,
+                           {"trade_date": trade_date, "ticker": ticker, "source": source, "rating": rating})
+
+    def decision_facts(self) -> dict:
+        """What the screens count without reading the decisions: ``dates`` (distinct trade dates, newest first),
+        ``tickers`` (sorted), ``by_source`` (stored source -> count), ``total``."""
+        if self.store.kind == "jsonl":
+            facts = [(d.trade_date, d.ticker, d.source) for d in self._read("decisions", DecisionRecord)]
+        else:
+            con = connect(self.store.path)
+            try:
+                where, args = ("WHERE market = ?", [self.market]) if self.market is not None else ("", [])
+                facts = con.execute(f"SELECT trade_date, ticker, source FROM decisions {where}", args).fetchall()
+            finally:
+                con.close()
+        by_source: dict[str, int] = {}
+        for _, _, src in facts:
+            by_source[src] = by_source.get(src, 0) + 1
+        return {"dates": sorted({d for d, _, _ in facts}, reverse=True), "tickers": sorted({t for _, t, _ in facts}),
+                "by_source": by_source, "total": len(facts)}
+
+    def latest_orders_where(self, *, status: str | None = None, trade_date: str | tuple | None = None,
+                            ticker: str | None = None, order_id: str | None = None) -> dict[str, OrderRecord]:
+        """``latest_orders(self.orders())`` filtered on each order's latest row: a status, a day or range, a ticker,
+        an id."""
+        rows = self._where("orders", OrderRecord, {"status": status, "trade_date": trade_date, "ticker": ticker,
+                                                   "order_id": order_id}, latest=True)
+        return {o.order_id: o for o in rows}
+
+    def order_facts(self) -> dict:
+        """``total`` (distinct order ids) and ``last_date`` (the latest decision date of any order), without reading
+        the orders."""
+        if self.store.kind == "jsonl":
+            rows = self._read("orders", OrderRecord)
+            ids, last = {o.order_id for o in rows}, max((o.trade_date for o in rows), default=None)
+            return {"total": len(ids), "last_date": last}
+        con = connect(self.store.path)
+        try:
+            where, args = ("WHERE market = ?", [self.market]) if self.market is not None else ("", [])
+            total, last = con.execute(f"SELECT count(DISTINCT order_id), max(trade_date) FROM orders {where}", args).fetchone()
+        finally:
+            con.close()
+        return {"total": total, "last_date": last}
+
+    def operations_where(self, *, kind: str | None = None, target: str | None = None,
+                         last: int | None = None) -> list[OperationRecord]:
+        """Operations of a kind (and target), the last n if given, in record order."""
+        return self._where("operations", OperationRecord, {"kind": kind, "target": target}, last=last)
+
+    def runs_where(self, *, stage: str | None = None, trade_date: str | tuple | None = None,
+                   last: int | None = None) -> list[RunRecord]:
+        """Daily-loop stage records of a stage and day (or range), the last n if given, in record order."""
+        return self._where("runs", RunRecord, {"stage": stage, "trade_date": trade_date}, last=last)
+
+    def stamp(self) -> dict:
+        """Per record name, a value that changes whenever a record of that kind is appended: the table's largest id
+        (sqlite — append-only, so it only grows; any market's append counts), the size and mtime of the book's files
+        (jsonl). For a reader that caches what it read, kind by kind."""
+        if self.store.kind == "jsonl":
+            dirs = ([self.legacy] if self.legacy else []) + [self.directory]
+            return {n: tuple((p.stat().st_size, p.stat().st_mtime_ns) if (p := d / f"{n}.jsonl").exists() else None
+                             for d in dirs) for n in RECORD_NAMES}
+        con = connect(self.store.path)
+        try:
+            row = con.execute("SELECT " + ", ".join(f"(SELECT max(id) FROM {TABLES[n]})" for n in RECORD_NAMES)).fetchone()
+        finally:
+            con.close()
+        return dict(zip(RECORD_NAMES, row, strict=True))
 
 
 def market_audit(root: str | Path, market: str) -> AuditLog:

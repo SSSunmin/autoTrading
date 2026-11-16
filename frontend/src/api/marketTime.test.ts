@@ -23,15 +23,16 @@ describe('sessionOn: the local session in KST', () => {
   })
 })
 
-describe('marketClock: open or closed, and the next run (close + 5 min, weekdays) in KST', () => {
+describe('marketClock: open or closed, and the session in KST (the next run comes from the server)', () => {
   it.each([
-    ['KRX Friday 16:00 KST: closed, next Monday', KRX, '2026-11-13T07:00:00Z', false, '11-16 15:35', '09:00-15:30'],
-    ['US Friday 16:00 KST: closed, Friday New York close', US, '2026-11-13T07:00:00Z', false, '11-14 06:05', '23:30-06:00'],
-    ['US Thursday 23:45 KST: open (winter)', US, '2026-11-12T14:45:00Z', true, '11-13 06:05', '23:30-06:00'],
-    ['US summer 09:00 KST: closed', US, '2026-07-01T00:00:00Z', false, '07-02 05:05', '22:30-05:00'],
-    ['KRX Wednesday 10:00 KST: open', KRX, '2026-11-11T01:00:00Z', true, '11-11 15:35', '09:00-15:30'],
-  ] as const)('%s', (_, info, now, open, next, sessionKst) => {
+    ['KRX Friday 16:00 KST: closed', KRX, '2026-11-13T07:00:00Z', false, '09:00-15:30'],
+    ['US Friday 16:00 KST: closed', US, '2026-11-13T07:00:00Z', false, '23:30-06:00'],
+    ['US Thursday 23:45 KST: open (winter)', US, '2026-11-12T14:45:00Z', true, '23:30-06:00'],
+    ['US summer 09:00 KST: closed', US, '2026-07-01T00:00:00Z', false, '22:30-05:00'],
+    ['KRX Wednesday 10:00 KST: open', KRX, '2026-11-11T01:00:00Z', true, '09:00-15:30'],
+  ] as const)('%s', (_, info, now, open, sessionKst) => {
     const c = marketClock(info, new Date(now))
-    expect([c.open, kst(c.nextRun), c.sessionKst]).toEqual([open, next, sessionKst])
+    expect([c.open, c.sessionKst]).toEqual([open, sessionKst])
+    expect(c).not.toHaveProperty('nextRun')
   })
 })

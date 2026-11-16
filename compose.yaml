@@ -1,0 +1,43 @@
+# The desk on one machine: the API (+ dashboard) on :8000 and the daily-loop scheduler, both on ./data.
+#   docker compose build && docker compose up -d
+#   docker compose run --rm scheduler python -m agent_trading_core.scheduler --plan 4   # the next 4 stage times
+# Keys stay in .env (see .env.example), passed as environment — never copied into the image (.dockerignore).
+
+x-app: &app
+  build:
+    context: .
+    secrets: [npmrc]
+  image: trading-core:local
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    TZ: Asia/Seoul
+    TRADING_DATA_DIR: /app/data
+    TRADING_STORE: sqlite
+  volumes:
+    - ./data:/app/data
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *app
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+
+  scheduler:
+    <<: *app
+    # after the API's start: on the first start its migrate --verify has loaded the records into trading.db
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["python", "-m", "agent_trading_core.scheduler"]
+
+secrets:
+  npmrc:
+    file: ${NPMRC:-~/.npmrc}

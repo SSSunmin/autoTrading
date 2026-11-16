@@ -27,7 +27,10 @@ export default function Decisions() {
   const dates = useApi(() => api.decisionDates(market), [market])
   // a date picked on one market's list is that market's trading day; it does not carry over to the other market
   const [picked, setPicked] = useState<{ market: string; date: string } | null>(null)
-  const day = (picked?.market === market ? picked.date : null) ?? dates.data?.[0] ?? null
+  // ?date= (a link from another card, e.g. a rerun's answer) when that day is on this market's list
+  const linked = params.get('date')
+  const day = (picked?.market === market ? picked.date : null) ?? (linked && dates.data?.includes(linked) ? linked : null)
+    ?? dates.data?.[0] ?? null
   const tick = useStateTick()                              // an exception action announces itself: reload both
   const all = useApi(() => (day ? api.decisions(market, { date: day }) : Promise.resolve([])), [market, day, tick])
   const exceptions = useApi(() => (day ? api.exceptions(market, { date: day }) : Promise.resolve([])), [market, day, tick])

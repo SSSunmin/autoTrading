@@ -56,9 +56,9 @@ export function actionPreview(item: ExceptionItem, variant: ModalVariant): strin
   }
   switch (variant) {
     case 'rerun':
-      return [`같은 입력(${item.trade_date} 스냅샷 · 같은 모델 설정)으로 한 번 더 실행합니다 · 재실행 ${next('rerun')} (상한 2회)`,
-        '재실행 경로가 아직 결정 루프에 연결되지 않아 지금은 예약만 합니다 — 연결되면 그때 처리합니다',
-        '다시 등급을 읽지 못하면 예외 큐로 돌아옵니다']
+      return [`다음 일일 루프 decide에서 그날 결정자가 ${item.trade_date} 선별을 바탕으로 다시 판단합니다 · 재실행 ${next('rerun')} (상한 2회)`,
+        '답이 정상 등급이면 그날 결정으로 주문되고 이 예외는 닫힙니다 — 닫힌 카드에서 답한 결정으로 이동할 수 있습니다',
+        '다시 등급을 읽지 못하면 그날 예외로 큐에 돌아옵니다']
     case 'hold':
       return ['등급을 보유(Hold)로 기록하고 주문하지 않습니다', '수동 등급은 보유(Hold)만 지정할 수 있습니다 — 매수·매도는 지정할 수 없음',
         "채점에서 제외 — 감사 기록에만 남고, 채점 표에는 '사람 처리 n건'으로 따로 표시"]

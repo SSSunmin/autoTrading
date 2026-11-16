@@ -8,7 +8,7 @@ import { useTradingState } from './hooks/useTradingState'
 import { api, utc } from './api/client'
 import { MarketToggle, ModeBadge, SessionChip } from './components/common'
 import { KillSwitch } from './components/KillSwitch'
-import { ProtectionsChip } from './components/parts'
+import { FailureBand, ProtectionsChip } from './components/parts'
 import Home from './pages/Home'
 import Screens from './pages/Screens'
 import ScreenDetail from './pages/ScreenDetail'
@@ -71,7 +71,7 @@ export default function App() {
       <main className="main">
         <div className="statusbar">
           <MarketToggle />
-          <SessionChip info={info} />
+          <SessionChip info={info} loop={health.data?.loop ?? undefined} />
           <span>기준일 <b className="num">{latest?.as_of ?? '–'}</b></span>
           <span>마지막 선별 <b className="num">{utc(latest?.recorded_at)}</b></span>
           <span>마지막 결정 <b className="num">{dates.data?.[0] ?? '–'}</b></span>
@@ -82,6 +82,7 @@ export default function App() {
           </span>
           {health.error && <AgentChip variant="hot">API 연결 실패: {health.error}</AgentChip>}
         </div>
+        <FailureBand health={health.data ?? undefined} to={to('/settings')} />
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/screens" element={<Screens />} />

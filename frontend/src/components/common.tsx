@@ -5,9 +5,9 @@ import { pct } from '../api/client'
 import { kst, marketClock } from '../api/marketTime'
 import type { ApiState } from '../hooks/useApi'
 import { MARKETS, useMarket } from '../hooks/useMarket'
-import { tickerCellParts } from './partsLogic'
+import { runChipText, tickerCellParts } from './partsLogic'
 import { modeBadge } from './riskLogic'
-import type { FilterResult, Market, MarketInfo, OrderStatus, Rating, TradingState } from '../api/types'
+import type { FilterResult, LoopStatus, Market, MarketInfo, OrderStatus, Rating, TradingState } from '../api/types'
 
 const MARKET_LABEL: Record<Market, string> = { KRX: '국내', US: '미국' }
 
@@ -20,8 +20,9 @@ export function MarketToggle() {
   )
 }
 
-/** "장 중 / 장 마감 · 다음 실행 hh:mm KST" for the market, from its own time zone (marketTime.ts), refreshed each minute. */
-export function SessionChip({ info }: { info: MarketInfo | undefined }) {
+/** "장 중 / 장 마감 · 다음 실행 MM-DD hh:mm KST · 단계": the session from the market's own time zone (marketTime.ts),
+ *  refreshed each minute; the next run from the server (``loop``: the scheduler's plan), or its retry when a stage failed. */
+export function SessionChip({ info, loop }: { info: MarketInfo | undefined; loop?: LoopStatus }) {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 60_000)
@@ -29,10 +30,11 @@ export function SessionChip({ info }: { info: MarketInfo | undefined }) {
   }, [])
   if (!info) return <AgentChip variant="neutral">장 시간 확인 중</AgentChip>
   const c = marketClock(info, now)
+  const run = runChipText(loop, (iso) => kst(new Date(iso)))
   return (
-    <AgentChip variant={c.open ? 'live' : 'neutral'}
-      title={`${info.label_ko} 정규장 ${info.session} 현지(${info.timezone}) = ${c.sessionKst} KST · 실행은 장 마감 5분 뒤`}>
-      {c.open ? '장 중' : '장 마감'} · 다음 실행 {kst(c.nextRun)} KST
+    <AgentChip variant={run.failed ? 'hot' : c.open ? 'live' : 'neutral'}
+      title={`${info.label_ko} 정규장 ${info.session} 현지(${info.timezone}) = ${c.sessionKst} KST · 체결은 개장 5분 뒤, 결정은 장 마감 5분 뒤`}>
+      {c.open ? '장 중' : '장 마감'} · {run.text}
     </AgentChip>
   )
 }

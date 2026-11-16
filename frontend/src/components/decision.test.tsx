@@ -114,6 +114,7 @@ describe('exception-action modal', () => {
   })
   it('dismiss and rerun describe what they do', () => {
     expect(body(item({}), 'dismiss')).toContain('결정 없이 예외를 닫습니다')
-    expect(body(item({}), 'rerun')).toContain('예약만 합니다')
+    expect(body(item({}), 'rerun')).toContain('다음 일일 루프 decide에서 그날 결정자가')
+    expect(body(item({}), 'rerun')).not.toContain('연결되지 않아')
   })
 })

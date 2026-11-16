@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { AgentAlert, AgentButton, AgentSectionPanel, AgentSegmentedControl, AgentTextField } from '@bv-ds/ui'
 
 import { announceStateChange, api, money, utc } from '../api/client'
-import type { Market, Mode, OperationRow, RuleRow, RulesSettings, TradingState } from '../api/types'
+import type { DataStatus, Market, Mode, OperationRow, RuleRow, RulesSettings, TradingState } from '../api/types'
 import { useApi } from '../hooks/useApi'
 import { MARKETS, useMarket } from '../hooks/useMarket'
 import { ModeBadge, Loaded } from '../components/common'
@@ -81,6 +81,8 @@ export default function Settings() {
               ))}
             </div>
 
+            <DataPanel />
+
             <AgentSectionPanel title="변경 이력" description="append-only. 두 시장의 긴급 정지·재가동·모드 변경·규칙 변경 전부(시장마다 따로 기록, 여기서 시각순으로 합침). 화면 2·3의 '마지막 변경일'이 여기를 참조합니다">
               {r.history_errors.map((e) => <AgentAlert key={e} tone="error" title="기록 파손">{e}</AgentAlert>)}
               {r.change_history.length === 0 ? <p className="muted">아직 변경 기록이 없습니다.</p> : (
@@ -97,6 +99,58 @@ export default function Settings() {
         )}
       </Loaded>
     </>
+  )
+}
+
+/** 데이터 · 캐시 상태 (mockup v0.7.2 Config · States ⑤): the cache by source, each market's last refresh, and each
+ *  vendor's state and whether its keys are set — never a key's value (the server sends booleans only). */
+function DataPanel() {
+  const status = useApi(() => api.dataStatus(), [])
+  return (
+    <AgentSectionPanel title="데이터 · 캐시 상태" description="시세 캐시(data/cache)는 KIS 파일이 기본, KIS 파일이 없는 종목만 Yahoo 파일. 벤더 도달은 마지막 갱신 기록으로 판단합니다(네트워크 확인 없음)">
+      <Loaded state={status}>{(d) => <DataTables d={d} />}</Loaded>
+    </AgentSectionPanel>
+  )
+}
+
+function DataTables({ d }: { d: DataStatus }) {
+  return (
+    <div className="stack-gap" style={{ gap: '1rem' }}>
+      <div className="matrix"><table>
+        <thead><tr><th>캐시</th><th className="r">파일</th><th className="r">크기</th></tr></thead>
+        <tbody>
+          <tr><td>KIS <span className="muted num">*-KIS-data.csv</span></td><td className="r num">{d.cache.kis.files}</td><td className="r num">{d.cache.kis.kb.toLocaleString()} KB</td></tr>
+          <tr><td>Yahoo <span className="muted num">*-YFin-data.csv</span></td><td className="r num">{d.cache.yahoo.files}</td><td className="r num">{d.cache.yahoo.kb.toLocaleString()} KB</td></tr>
+        </tbody>
+      </table></div>
+      <div className="matrix"><table>
+        <thead><tr><th>시장</th><th>가격 출처</th><th>가격 기준일</th><th>마지막 갱신</th><th className="r">심볼</th><th className="r">실패</th><th>마지막 성공</th></tr></thead>
+        <tbody>
+          {MARKETS.map((m) => {
+            const r = d.refresh[m], p = d.price_source[m]
+            return (
+              <tr key={m}><td>{MARKET_KO[m]}</td><td className="num">{p.price_source ?? '없음'}</td>
+                <td className="num">{p.price_as_of ?? '–'}{p.price_provisional ? ' · 잠정' : ''}</td>
+                <td className="num">{r ? utc(r.at) : '기록 없음'}</td><td className="r num">{r?.symbols ?? '–'}</td>
+                <td className={`r num ${r && r.failed_count > 0 ? 'alert-t' : ''}`} title={r?.failed_symbols.join(' · ')}>{r?.failed_count ?? '–'}</td>
+                <td className="num">{r?.last_success_at ? utc(r.last_success_at) : '–'}</td></tr>
+            )
+          })}
+        </tbody>
+      </table></div>
+      <div className="matrix"><table>
+        <thead><tr><th>데이터 소스</th><th>쓰는 곳</th><th>상태</th><th>키</th></tr></thead>
+        <tbody>
+          {d.vendors.map((v) => (
+            <tr key={v.id}><td><b>{v.label_ko}</b></td><td className="wrap">{v.use_ko}</td>
+              {/* not the price colours (red = up): a failure or a missing key in the alert text, no record muted */}
+              <td className={v.state === 'reachable' ? '' : v.state === 'unknown' ? 'muted' : 'alert-t'}>{v.state === 'reachable' ? '●' : '○'} {v.state_ko}</td>
+              <td className="num">{v.key_required ? Object.entries(v.keys).map(([k, set]) => `${k} ${set ? '있음' : '없음'}`).join(' · ') : '필요 없음'}</td></tr>
+          ))}
+        </tbody>
+      </table></div>
+      <p className="muted">{d.note}</p>
+    </div>
   )
 }
 

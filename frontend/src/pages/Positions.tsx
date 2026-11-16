@@ -56,7 +56,6 @@ export default function Positions() {
               <AgentSectionPanel title="리스크 게이지" description={`피크 ${amt(b.peak)} · 실현 손익 ${amt(b.realized_pnl)}(시작 자본 ${amt(b.initial_cash)})`}
                 action={<AsOfStamp asOf={b.as_of} />}>
                 <RiskGauges p={b} amt={amt} />
-                {b.sector_exposure == null && <p className="sector-off"><span>섹터 노출</span><span className="muted">미연결 · 섹터 정보가 아직 없습니다</span></p>}
               </AgentSectionPanel>
               <AgentSectionPanel title="Protections" description="StoplossGuard · MaxDrawdown · Cooldown · LowProfit 상태와 해제일"
                 action={<RegimeBadge on={b.regime_on} gap={b.regime_gap} index={info?.benchmark_name_ko ?? '지수'} days={b.limits.regime_ma_days} />}>

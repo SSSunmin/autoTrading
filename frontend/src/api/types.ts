@@ -118,6 +118,18 @@ export interface Order {
   reruns: number
   retries: number
   retry_on: string | null
+  /** a REVIEW exception the daily loop closed by its rerun: the decision that answered it (null otherwise) */
+  rerun_answer: RerunAnswer | null
+}
+
+export interface RerunAnswer {
+  ticker: string
+  trade_date: string
+  rating: Rating
+  rating_ko: string
+  attempt: number
+  /** the day's own decision on the ticker was the answer (no second decision written) */
+  same_day: boolean
 }
 
 export interface Decision {
@@ -342,6 +354,81 @@ export interface Health {
   orders: number
   memory_entries: number
   server_time: string
+  /** the daily loop as the scheduler sees it (scheduler.plan · next_wake, computed by the server) */
+  loop: LoopStatus
+  /** the market's latest cache refresh (scripts/refresh_cache.py log); null: never refreshed */
+  refresh: RefreshInfo | null
+  price_source: PriceSource | null
+  price_as_of: string | null
+  price_provisional: boolean
+}
+
+/** kis: the KIS cache (default), yahoo: the Yahoo file (KIS has none for it), frames: test data */
+export type PriceSource = 'kis' | 'yahoo' | 'frames'
+
+export interface RunRow {
+  market: Market
+  stage: 'decide' | 'fill'
+  stage_ko: string
+  trade_date: string
+  started_at: string
+  ended_at: string
+  status: 'ok' | 'skipped' | 'failed'
+  status_ko: string
+  reason: string | null
+  error: string | null
+  counts: Record<string, number>
+  notes: string[]
+}
+
+export interface LoopStatus {
+  /** never: no stage record yet; failed: a scheduled stage's latest record failed */
+  status: 'ok' | 'failed' | 'never'
+  status_ko: string
+  last: Record<string, RunRow | null>
+  failed: RunRow[]
+  next: { at_kst: string; stage: 'decide' | 'fill'; stage_ko: string; label_ko: string }
+  /** a due stage failed: the scheduler tries it again at this time (before the next planned stage) */
+  retry_at_kst: string | null
+}
+
+export interface RefreshInfo {
+  at: string | null
+  source: string | null
+  symbols: number | null
+  last_final_day: string | null
+  failed_count: number
+  failed_symbols: string[]
+  failed_error: string | null
+  /** the latest refresh of the market with no symbol failed; null: none */
+  last_success_at: string | null
+}
+
+export interface VendorStatus {
+  id: string
+  label_ko: string
+  use_ko: string
+  key_required: boolean
+  /** environment name → is it set. Never a value */
+  keys: Record<string, boolean>
+  state: 'reachable' | 'unreachable' | 'no_key' | 'unknown'
+  state_ko: string
+  last_refresh_at: string | null
+}
+
+export interface DataStatus {
+  cache: Record<'kis' | 'yahoo', { files: number; kb: number }>
+  refresh: Record<Market, RefreshInfo | null>
+  vendors: VendorStatus[]
+  price_source: Record<Market, { price_source: PriceSource | null; price_as_of: string | null; price_provisional: boolean }>
+  note: string
+}
+
+export interface SectorRow {
+  /** the sector file's name, or 미분류 (the sum of holdings it gives none) */
+  sector: string
+  pct: number
+  classified: boolean
 }
 
 export interface Labels {
@@ -392,6 +479,7 @@ export interface MarketSummary extends MarketInfo {
   flow: MarketFlow | null
   error: string | null
   next_run_kst: string
+  next_run_stage: 'decide' | 'fill'
   next_run_label_ko: string
 }
 
@@ -596,11 +684,17 @@ export interface Positions {
   exits_by_reason_ko: Record<string, number>
   closed: (ClosedTrade & { reason: string })[]
   limits: { stop_loss_pct: number; dd_halve: number; dd_stop: number; max_position_pct: number; max_gross_pct: number;
-            daily_loss_limit: number; auto_daily_order_cap: number; near_stop_pct: number; regime_ma_days: number }
+            daily_loss_limit: number; auto_daily_order_cap: number; near_stop_pct: number; regime_ma_days: number;
+            max_sector_pct: number }
   note: string
   mode: TradingState
-  /** no sector data is connected yet: always null */
-  sector_exposure: null
+  /** held weight by sector: the three largest, then 미분류 (empty with no holdings) */
+  sector_exposure: SectorRow[]
+  price_source: PriceSource | null
+  price_as_of: string | null
+  price_provisional: boolean
+  /** holdings priced from another file than the market's (Yahoo where KIS has none) */
+  price_fallback: string[]
 }
 
 /** GET /api/paper/progress — screen 8, judged by the server (docs/05 §4). */

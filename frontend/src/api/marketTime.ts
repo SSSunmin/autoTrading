@@ -1,6 +1,7 @@
 /** Market hours in KST from the market's own time zone (docs/08 §1 장 상태 · 다음 실행 칩).
  *  The browser's zone database (Intl.DateTimeFormat with timeZone) applies daylight saving; nothing here adds
- *  or subtracts an hour by hand. Mirrors backend/main.py session_window / next_run (weekdays only, no holidays). */
+ *  or subtracts an hour by hand. Mirrors backend/main.py session_window (weekdays only, no holidays); the next run
+ *  is the server's (scheduler.plan), not computed here. */
 
 export interface SessionInfo {
   timezone: string          // e.g. America/New_York
@@ -8,7 +9,6 @@ export interface SessionInfo {
 }
 
 const KST = 'Asia/Seoul'
-const RUN_AFTER_CLOSE_MIN = 5   // the executor runs after the close (backend RUN_AFTER_CLOSE)
 
 interface Wall { y: number; m: number; d: number; hh: number; mm: number; weekday: number }
 
@@ -57,21 +57,14 @@ export function sessionOn(info: SessionInfo, y: number, m: number, d: number): {
   return { open: zonedInstant(y, m, d, start[0], start[1], info.timezone), close: zonedInstant(y, m, d, end[0], end[1], info.timezone) }
 }
 
-/** Is the market in its regular session at `now`, and when does the executor next run (close + 5 min)? */
-export function marketClock(info: SessionInfo, now: Date): { open: boolean; nextRun: Date; sessionKst: string } {
+/** Is the market in its regular session at `now`? The next run is the server's (/api/health loop.next — the
+ *  scheduler's own plan), never computed here. */
+export function marketClock(info: SessionInfo, now: Date): { open: boolean; sessionKst: string } {
   const w = wallClock(now, info.timezone)
   const today = sessionOn(info, w.y, w.m, w.d)
   const weekday = w.weekday >= 1 && w.weekday <= 5
   const open = weekday && now >= today.open && now < today.close
-  let nextRun: Date | null = null
-  for (let i = 0; i < 8 && nextRun == null; i++) {
-    // step whole local days from today's wall date (noon avoids landing on a DST gap)
-    const day = wallClock(new Date(zonedInstant(w.y, w.m, w.d, 12, 0, info.timezone).getTime() + i * 86_400_000), info.timezone)
-    if (day.weekday < 1 || day.weekday > 5) continue
-    const run = new Date(sessionOn(info, day.y, day.m, day.d).close.getTime() + RUN_AFTER_CLOSE_MIN * 60_000)
-    if (run > now) nextRun = run
-  }
-  return { open, nextRun: nextRun ?? now, sessionKst: `${kst(today.open, 'time')}-${kst(today.close, 'time')}` }
+  return { open, sessionKst: `${kst(today.open, 'time')}-${kst(today.close, 'time')}` }
 }
 
 /** An instant in KST: 'time' → "23:30", 'datetime' → "11-14 06:05". */

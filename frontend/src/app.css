@@ -310,3 +310,9 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .xa-sec ul { margin: 0; padding-left: 1.8rem; }
 .xa-log { display: block; padding: 0.6rem 0.8rem; background: var(--app-surface-2); border-radius: var(--bv-radius-100); font-size: var(--bv-font-size-caption-1); white-space: pre-wrap; word-break: break-all; }
 .xa-need { font-size: var(--bv-font-size-caption-1); }
+
+/* failure band under the status bar (mockup v0.7.2 States ④) */
+.fail-band { display: flex; flex-direction: column; gap: 0.6rem; margin: -0.8rem 0 1.8rem; padding: 1rem 1.4rem; border-radius: 10px;
+  border: 1px solid var(--app-fail); background: var(--app-fail-bg); font-size: var(--bv-font-size-body-3-normal); }
+.fail-line { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; align-items: baseline; }
+.fail-line a { margin-left: auto; }
