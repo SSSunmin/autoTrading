@@ -7,6 +7,7 @@ import { useLabels } from '../hooks/useLabels'
 import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded, Pct, TickerCell } from '../components/common'
 import { AsOfStamp, ExitReasonBadge, PageHeader, RegimeBadge, RiskGauges } from '../components/parts'
+import { ReviewBadges } from '../components/ticker'
 import { EventList, ExitBar, ProtectionCards } from '../components/risk'
 
 /** 5: the paper book replayed from the orders log — holdings with their stop line, trailing high and expiry,
@@ -35,7 +36,7 @@ export default function Positions() {
                 {b.positions.length === 0 ? <p className="muted">보유 종목이 없습니다.</p> : (
                   <div className="matrix"><table>
                     <thead><tr><th>종목</th><th className="r">수량</th><th className="r">평단</th><th className="r">현재가</th><th className="r">미실현</th><th className="r">비중</th>
-                      <th className="r">손절선</th><th className="r">손절까지</th><th className="r">트레일링 고점</th><th className="r">보유일</th><th>만료일</th><th>룰 판정</th></tr></thead>
+                      <th className="r">손절선</th><th className="r">손절까지</th><th className="r">트레일링 고점</th><th className="r">보유일</th><th>만료일</th><th>룰 판정</th><th>에이전트 매도 검토</th></tr></thead>
                     <tbody>{b.positions.map((r) => (
                       <tr key={r.ticker} className="click" onClick={() => navigate(to(`/tickers/${encodeURIComponent(r.ticker)}`))}>
                         <td><TickerCell ticker={r.ticker} name={r.name} /></td>
@@ -46,6 +47,8 @@ export default function Positions() {
                         <td className="r num">{amt(r.trailing_high)}{r.trailing_active ? ` → ${amt(r.trailing_stop_price)}` : ''}</td>
                         <td className="r num">{r.holding_days}</td><td className="num">{r.expiry_date ?? '–'}</td>
                         <td className="wrap">{r.exit_signal ? <><ExitReasonBadge reason={r.exit_signal.reason} labels={exitKo} /> <span className="muted">{r.exit_signal.note}</span></> : <span className="muted">없음</span>}</td>
+                        <td className="wrap">{r.last_review ? <><span className="muted num">{r.last_review.trade_date}</span> <ReviewBadges r={r.last_review} source={false} /></>
+                          : <span className="muted">검토 없음</span>}</td>
                       </tr>
                     ))}</tbody>
                   </table></div>

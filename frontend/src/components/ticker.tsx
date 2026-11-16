@@ -1,7 +1,7 @@
 import { AgentEmptyState, AgentSectionPanel } from '@bv-ds/ui'
 
 import { money } from '../api/client'
-import type { Market, ThesisCheck, TickerDetail, TickerHolding } from '../api/types'
+import type { Market, SellReviewInfo, ThesisCheck, TickerDetail, TickerHolding } from '../api/types'
 import { Pct, RatingBadge } from './common'
 import { earningsLine, latestReview, metLine, verdictBadge } from './tickerLogic'
 
@@ -14,8 +14,25 @@ export function TickerFacts({ d }: { d: TickerDetail }) {
       <span>업종 <b>{d.sector ?? '미분류'}</b></span>
       <span>거래소 <b>{d.exchange ?? '미확인'}</b></span>
       <span>보유 <b>{h ? `${h.quantity}주 · ${h.entry_date} 진입` : '없음'}</b></span>
-      <span title={e.sub}>실적 발표 <span className="tag">참고</span> <b>{e.date ?? '–'}</b> <span className="muted">{e.sub}</span></span>
+      <span title={e.sub}>실적 발표 <span className="tag">참고</span> {e.failed && !e.date ? <span className="tag fail-tag">조회 실패</span>
+        : <b>{e.date ?? '–'}</b>}{e.failed && e.date && <span className="tag fail-tag">갱신 실패 · 이전 값</span>} <span className="muted">{e.sub}</span></span>
     </div>
+  )
+}
+
+/** A sell review's badges: the verdict (the 논지 점검 mapping) and every reason the agent gave. ``source`` adds the
+ *  "에이전트 매도 검토" tag so a card or a positions row never reads it as a rule exit's reason (ExitReasonBadge). */
+export function ReviewBadges({ r, source = true }: {
+  r: Pick<SellReviewInfo, 'action' | 'verdict' | 'verdict_ko' | 'reasons' | 'reasons_ko' | 'trim_to_pct'>; source?: boolean
+}) {
+  const b = verdictBadge(r)
+  return (
+    <span className="review-badges">
+      {source && <span className="tag review-src">에이전트 매도 검토</span>}
+      <RatingBadge rating={b.rating} label={b.label} />
+      {r.reasons.map((x, i) => <span key={x} className={`tag sell-reason ${x}`}>{r.reasons_ko[i] ?? x}</span>)}
+      {r.action === 'Trim' && r.trim_to_pct != null && <span className="muted">목표 비중 {r.trim_to_pct}%</span>}
+    </span>
   )
 }
 
@@ -29,10 +46,11 @@ function CheckRow({ c, market }: { c: ThesisCheck; market: Market }) {
     <li className="thesis-row">
       <div className="thesis-hd">
         <span className="num">{c.trade_date}</span>
-        <RatingBadge rating={b.rating} label={b.label} />
+        {c.kind === 'review' && c.action && c.verdict !== 'memo'
+          ? <ReviewBadges source={false} r={{ action: c.action, verdict: c.verdict, verdict_ko: c.verdict_ko, reasons: c.reasons ?? [],
+            reasons_ko: c.reasons_ko ?? [], trim_to_pct: c.trim_to_pct ?? null }} />
+          : <RatingBadge rating={b.rating} label={b.label} />}
         <span className="muted">{metLine(c)}</span>
-        {c.action === 'Trim' && c.trim_to_pct != null && <span className="muted">목표 비중 {c.trim_to_pct}%</span>}
-        {c.reasons_ko && c.reasons_ko.length > 0 && <span className="muted">사유 {c.reasons_ko.join(' · ')}</span>}
       </div>
       {c.kind === 'memo' ? (
         <div className="thesis-body">

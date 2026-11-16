@@ -3,8 +3,10 @@ no executor and no LLM input reads this file.
 
 One yfinance ``Ticker.calendar`` call per symbol, written to ``data/cache/_earnings_us.json`` as
 ``{symbol: {date, date_to, source, fetched}}`` (``date_to``: the last day of a range Yahoo gives as two dates, else
-None). A symbol whose calendar has no earnings date gets ``date: None`` — nothing is made up. A failed symbol keeps
-its previous date and records ``error`` and ``failed`` (the day it failed), so the screen can say the value is old.
+None). A symbol whose calendar has no earnings date gets ``date: None`` — nothing is made up. A failed call (an HTTP
+error such as 404 for an unknown symbol — yfinance would swallow it into an empty calendar, ``yahoo_calendar`` turns
+that off) keeps the previous date and records ``error`` and ``failed`` (the day it failed): "조회 실패" and "예정일
+없음" stay two different states on the screen.
 The screen request never fetches; this command is the only network path. KRX has no source (DART gives no scheduled
 dates), so the command takes US symbols only.
 
@@ -31,8 +33,18 @@ SOURCE = "yfinance calendar"
 
 
 def yahoo_calendar(symbol: str) -> dict:
+    """The symbol's calendar. yfinance logs an HTTP error (404 for an unknown symbol, 429, …) and answers an empty
+    calendar unless ``hide_exceptions`` is off — then a failed call would read as "no date". Off for this call, so the
+    error reaches ``refresh`` and is kept as a failure."""
     import yfinance as yf
-    return yf.Ticker(symbol).calendar or {}
+    from yfinance.config import YfConfig
+
+    hide = YfConfig.debug.hide_exceptions
+    YfConfig.debug.hide_exceptions = False
+    try:
+        return yf.Ticker(symbol).calendar or {}
+    finally:
+        YfConfig.debug.hide_exceptions = hide
 
 
 def _iso(v) -> str | None:

@@ -391,3 +391,10 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
    height so their edges line up. ponytail: 4.4rem is the DS field's measured height, not a DS token — re-measure if
    the DS changes the field (REPORT-ticker-detail computed table). */
 .form-row > button { min-height: 4.4rem; }
+/* the agent's sell review on a card, the queue and positions: its own tag, apart from the rule exit's badge */
+.review-badges { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.review-line { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin: 0.6rem 0; font-size: var(--app-fs-body); }
+.tag.review-src { color: var(--app-fg); background: var(--app-surface); border-style: dashed; }
+.tag.sell-reason { color: var(--app-fg); }
+.tag.sell-reason.thesis_broken, .tag.sell-reason.hard_rule { color: var(--app-fail); background: var(--app-fail-bg); border-color: var(--app-fail-line); }
+.tag.fail-tag { color: var(--app-fail); background: var(--app-fail-bg); border-color: var(--app-fail-line); }

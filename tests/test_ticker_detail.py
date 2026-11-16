@@ -162,7 +162,8 @@ def test_sector_exchange_and_earnings_come_from_files_and_markets_stay_apart(wor
     assert nosector["sector"] is None
     aapl = world.get("/api/tickers/AAPL", params={"market": "US"}).json()
     assert (aapl["market"], aapl["sector"], aapl["exchange"]) == ("US", "Technology", "나스닥")
-    assert aapl["earnings"] == {"date": "2026-07-30", "date_to": None, "source": "yfinance calendar", "fetched": "2026-06-03"}
+    assert aapl["earnings"] == {"date": "2026-07-30", "date_to": None, "source": "yfinance calendar", "fetched": "2026-06-03",
+                                "error": None, "failed": None}
     assert aapl["earnings_note_ko"] == "참고 · 결정 · 주문에 쓰지 않음" and aapl["holding"] is None
     past = json.loads(earnings.read_text(encoding="utf-8")) | {"AAPL": {"date": "2026-06-02", "date_to": None,
                                                                        "source": "yfinance calendar", "fetched": "2026-06-03"}}

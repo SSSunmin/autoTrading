@@ -9,6 +9,8 @@ import { ExecStatus, Pct, RatingBadge, TickerCell } from './common'
 import { orderWords } from './decisionLogic'
 import { ExceptionButtons, Interventions, PlanGrid, SourceBadge } from './decisionParts'
 import { FillTime } from './risk'
+import { ReviewBadges } from './ticker'
+import { reviewOrderLine } from './tickerLogic'
 
 /** One decision as the plan's card (docs/02 v0.3 화면 3): its source, rating, action, confidence, the thesis as the
  *  manager wrote it, evidence with source and as-of, the execution strip (filled / blocked / exception) joined from the
@@ -31,6 +33,12 @@ export function DecisionCard({ d, exception, tokenRequired = false }: { d: Decis
         </div>
       </div>
 
+      {d.review && (
+        <div className="review-line">
+          <ReviewBadges r={d.review} />
+          <span className="muted">{reviewOrderLine(d.review, d.orders)}</span>
+        </div>
+      )}
       {d.rating === 'REVIEW' && (
         <div className="exec exception">등급을 읽을 수 없어 거래 대상에서 빠졌습니다. 에이전트 원문 전체는 아래에 있습니다.</div>
       )}

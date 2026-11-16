@@ -162,6 +162,20 @@ export interface Decision {
   market: Market
   outcome: Outcome | null
   orders: Order[]
+  /** a sell review read back from its text: the agent's action and reasons (a rule exit's reason is on its order) */
+  review: SellReviewInfo | null
+}
+
+/** The agent's sell review as a badge: action as the verdict (Hold 논지 유지 · Trim 축소 · Exit 청산), every reason. */
+export interface SellReviewInfo {
+  action: 'Hold' | 'Trim' | 'Exit'
+  verdict: 'keep' | 'trim' | 'exit'
+  verdict_ko: string
+  reasons: string[]
+  reasons_ko: string[]
+  trim_to_pct: number | null
+  met: number
+  total: number
 }
 
 /** Exception queue item: a REVIEW decision or a refused order a human must look at. */
@@ -182,6 +196,8 @@ export interface ExceptionItem {
   pending_action_ko: string | null
   reruns: number
   retries: number
+  /** an order exception of a sell review: that review (null for REVIEW items and rule exits) */
+  review: SellReviewInfo | null
 }
 
 export interface ExceptionActionResult {
@@ -314,7 +330,9 @@ export interface TickerDetail {
   /** memos and sell reviews read back from the recorded text, oldest first (no model call) */
   thesis_checks: ThesisCheck[]
   /** US only, from the cache scripts/refresh_earnings.py writes; reference only (never a decision input) */
-  earnings: { date: string | null; date_to: string | null; source: string | null; fetched: string | null } | null
+  earnings: { date: string | null; date_to: string | null; source: string | null; fetched: string | null
+    /** the last refresh failed (e.g. HTTP 404) — not the same as no date at the source */
+    error: string | null; failed: string | null } | null
   earnings_note_ko: string
 }
 
@@ -771,6 +789,8 @@ export interface PositionRow {
   holding_days: number
   expiry_date: string | null
   exit_signal: { reason: string; note: string } | null
+  /** /api/positions only: the agent's latest sell review of it (exit_signal is the rules') */
+  last_review?: (SellReviewInfo & { trade_date: string }) | null
 }
 
 export interface ProtectionState {
