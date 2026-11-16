@@ -43,6 +43,11 @@ export function DecisionCard({ d, exception, tokenRequired = false }: { d: Decis
             <span>{o.side_ko} {o.filled_quantity || o.quantity}주{o.filled_price != null ? ` · ${amt(o.filled_price)} · ${amt(o.amount)}` : ''}</span>
             {o.reason && <span className="muted">{o.reason}</span>}
             {o.exception_resolved && o.exception_action && <AgentChip variant="secondary">처리됨 · {actionKo[o.exception_action] ?? o.exception_action}</AgentChip>}
+            {o.rerun_answer && (
+              <Link to={to(`/decisions?date=${o.rerun_answer.trade_date}`)} title={o.rerun_answer.same_day ? '그날 결정이 이 종목을 이미 판단해 그 결정이 답입니다' : undefined}>
+                <AgentChip variant="new">재실행 {o.rerun_answer.attempt}회째 답 · {o.rerun_answer.trade_date} {o.rerun_answer.rating_ko} →</AgentChip>
+              </Link>
+            )}
             <span className="muted num" style={{ marginLeft: 'auto' }} title={`주문 기록 ${utc(o.placed_at)}`}><FillTime o={o} market={o.market} /></span>
           </div>
           {o.plan && o.plan.interventions.length > 0 && (

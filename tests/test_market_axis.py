@@ -230,7 +230,7 @@ def test_markets_summarises_each_book_in_its_own_currency_without_a_total(api):
     krx, us = rows
     assert (krx["currency"], krx["equity"], krx["positions"]) == ("KRW", 100_000_000.0, 0)
     assert (us["currency"], us["currency_symbol"], us["positions"], us["benchmark_name_ko"]) == ("USD", "$", 1, "S&P 500")
-    assert us["state"]["running"] is True and us["next_run_label_ko"].endswith(" KST")
+    assert us["state"]["running"] is True and us["next_run_label_ko"].endswith(" KST · 결정") and us["next_run_stage"] == "decide"
     assert set(us) >= {"as_of", "day_return", "drawdown", "session_kst", "next_run_kst"}
     assert not any(k.startswith("total") for r in rows for k in r)
 
@@ -279,7 +279,12 @@ def test_a_broken_us_book_leaves_the_krx_card_and_krx_settings_readable(jsonl_st
     assert cards["KRX"]["error"] is None and cards["KRX"]["equity"] == 100_000_000
     assert cards["US"]["equity"] is None and "기록을 읽지 못함" in cards["US"]["error"]
     r = api.get("/api/settings/rules", params={"market": "KRX"})
-    assert r.status_code == 200 and len(r.json()["history_errors"]) == 1
+    # the change history reads operations only: a broken US orders file leaves it whole, a broken operations file not
+    assert r.status_code == 200 and r.json()["history_errors"] == []
+    with open(tmp_path / "data" / "audit" / "US" / "operations.jsonl", "a", encoding="utf-8") as f:
+        f.write("{not json\n")
+    r = api.get("/api/settings/rules", params={"market": "KRX"})
+    assert r.status_code == 200 and [e[:2] for e in r.json()["history_errors"]] == ["미국"]
 
 
 @pytest.mark.unit
@@ -317,15 +322,21 @@ def test_the_us_session_in_kst_follows_daylight_saving(day, expected):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("now, market, expected", [
-    # Friday 16:00 KST: the KRX run (15:35) has passed → Monday; the US Friday session closes 06:00 KST Saturday
-    (datetime(2026, 11, 13, 7, 0, tzinfo=UTC), "KRX", "2026-11-16 15:35"),
-    (datetime(2026, 11, 13, 7, 0, tzinfo=UTC), "US", "2026-11-14 06:05"),
+    # Friday 16:00 KST: the KRX decide (15:35) has passed → Monday's fill 09:05; the US Friday session closes 06:00 KST
+    # Saturday (US runs decide only: scheduler SCHEDULED)
+    (datetime(2026, 11, 13, 7, 0, tzinfo=UTC), "KRX", "2026-11-16 09:05 fill"),
+    (datetime(2026, 11, 16, 1, 0, tzinfo=UTC), "KRX", "2026-11-16 15:35 decide"),        # Monday 10:00 KST
+    (datetime(2026, 11, 13, 7, 0, tzinfo=UTC), "US", "2026-11-14 06:05 decide"),
     # Tuesday 20:00 ET in summer: after that day's run → Wednesday 16:05 ET = Thursday 05:05 KST
-    (datetime(2026, 7, 1, 0, 0, tzinfo=UTC), "US", "2026-07-02 05:05"),
+    (datetime(2026, 7, 1, 0, 0, tzinfo=UTC), "US", "2026-07-02 05:05 decide"),
 ])
-def test_the_next_run_is_five_minutes_after_the_next_close_in_kst(now, market, expected):
-    from backend.main import next_run
-    assert f"{next_run(market, now):%Y-%m-%d %H:%M}" == expected
+def test_the_next_run_is_the_schedulers_next_stage_in_kst(now, market, expected):
+    from agent_trading_core import scheduler
+    from backend.main import _daily_loop, next_run
+    at, stage = next_run(market, now)
+    assert f"{at:%Y-%m-%d %H:%M} {stage}" == expected
+    assert at.utcoffset().total_seconds() == 9 * 3600                                   # served in KST
+    assert (at, stage) == (scheduler.plan(_daily_loop(), [market], now, 1)[0][0], scheduler.plan(_daily_loop(), [market], now, 1)[0][2])
 
 
 @pytest.mark.unit

@@ -4,8 +4,9 @@ actions (docs/10 D7) — each appended to the operations log. Korean labels are 
 rule ids, rating values or order statuses.
 
 Markets (docs/08): KRX and US are separate books. Every read takes ``market`` (default KRX, anything else
-outside config.MARKETS is 400) and serves that market's log only (data/audit/<market>/; KRX also reads the
-files under data/audit/ from before the market axis). Halt and resume take a ``scope`` ("all" by default, or
+outside config.MARKETS is 400) and serves that market's records only — rows of the SQLite database
+(``TRADING_DATA_DIR/trading.db``, docs/04 "기록 저장소") read through ``agent_trading_core.audit``, or its JSON-lines
+files with ``TRADING_STORE=jsonl``. Halt and resume take a ``scope`` ("all" by default, or
 one market); a mode change names its market.
 
 Run:  .venv/Scripts/python -m uvicorn backend.main:app --reload --port 8000
@@ -17,6 +18,9 @@ Environment:
   TRADING_CORS          comma-separated origins allowed (default: localhost dev ports)
   TRADING_ADMIN_TOKEN   when set, resume, mode change and exception actions require header X-Admin-Token with this value.
                         Unset = development: anyone may, and the record says so (role "admin(dev, no token)").
+  TRADING_STORE         sqlite (default: TRADING_DATA_DIR/trading.db) | jsonl — the store agent_trading_core.audit reads
+  TRADING_STATIC_DIR    the built dashboard (frontend/dist) to serve at / on the API's own origin (the Docker image)
+  TRADING_ENV_FILE      the .env /api/data/status checks for key presence (default: <repo>/.env); values never served
 """
 
 from __future__ import annotations
@@ -26,7 +30,8 @@ import os
 from collections import Counter
 from contextlib import ExitStack
 from dataclasses import asdict
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
+from functools import cache
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -34,20 +39,25 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_trading_core import __version__ as core_version
+from agent_trading_core import kis, scheduler
 from agent_trading_core.audit import (
     AuditLog,
     DecisionRecord,
     EvidenceItem,
     OperationRecord,
     OrderRecord,
+    RunRecord,
     ScreenRun,
     baseline_summary_path,
     decision_source,
     latest_orders,
     market_audit,
+    pending_rerun_marker,
     stage_counts,
 )
 from agent_trading_core.config import AUTO_EXECUTION, MARKETS, PAPER_TRADING, auto_execution
@@ -65,6 +75,7 @@ from agent_trading_core.execution import (
     paper_config,
     paper_expected,
     paper_progress,
+    paper_start,
     positions_view,
     standing_halts,
 )
@@ -101,12 +112,26 @@ from agent_trading_core.memory import TradingMemoryLog
 from agent_trading_core.rating import RATING_REVIEW, RATINGS_5_TIER
 from agent_trading_core.risk import RiskConfig, drawdown_scale
 from agent_trading_core.screening import ScreenConfig
+from agent_trading_core.universe import sector_of
 
 VARIANT_KO = {"rules_off": "하드 룰 끔", "rules_on": "하드 룰 켬", "rules_on_regime": "하드 룰 + 국면 필터"}
 KST = ZoneInfo("Asia/Seoul")
 WEEKDAY_KO = "월화수목금토일"
-# the executor runs after the close: the decision is made on the close, the fill at the next open
-RUN_AFTER_CLOSE = timedelta(minutes=5)
+STAGE_KO = {"decide": "결정", "fill": "체결"}
+RUN_STATUS_KO = {"ok": "완료", "skipped": "건너뜀", "failed": "실패"}
+# the vendors the settings page lists (mockup v0.7.2 States ⑤): the environment names a key is read from — only
+# whether one is set is ever served, never its value
+VENDORS = [
+    {"id": "kis", "label_ko": "KIS Open API", "use_ko": "시세 · 종가 · 지수(기본) · 실거래 주문", "cache": "kis",
+     "keys": list(kis.REQUIRED)},
+    {"id": "yfinance", "label_ko": "yfinance", "use_ko": "시세 대체(KIS 파일 없는 종목) · 백테스트", "cache": "yahoo",
+     "keys": []},
+    {"id": "dart", "label_ko": "DART OpenAPI", "use_ko": "국내 재무 · 공시 · 실적 발표", "cache": None,
+     "keys": ["DART_API_KEY"]},
+    {"id": "anthropic", "label_ko": "Anthropic API", "use_ko": "에이전트 결정(llm 결정자)", "cache": None,
+     "keys": ["ANTHROPIC_API_KEY"]},
+]
+REFRESH_LOG = "_refresh_log.jsonl"          # scripts/refresh_cache.py LOG: one line per refresh run
 # where scripts/paper_backtest.py --market M writes its summary
 PAPER_SUMMARY = {"KRX": Path("results") / "paper" / "summary.json", "US": Path("results") / "paper_us" / "summary.json"}
 # the measurement each summary is, and the variant screen 8 compares with the paper run (the executor's own rules:
@@ -129,32 +154,24 @@ app.add_middleware(
 )
 
 
-# --- data access, one store per market, reloaded when the append-only files change -------
+# --- data access: one store per market over the audit's read API (agent_trading_core/audit.py) ------------
+# No record file is read or watched here: the audit picks the store (SQLite by default, TRADING_STORE=jsonl). What
+# is cached is kept per record kind and dropped when that kind's ``AuditLog.stamp()`` moves (a row appended by any
+# writer — the scheduler, the executor, another worker); the baseline summary and the memory log are files and keep
+# their mtime. Decisions are never cached whole: each call reads its range (``AuditLog.decisions_where``).
 
 class _Store:
     def __init__(self, market: str) -> None:
         self.market = market
-        self._stamp: tuple = ()
-        self.screens: list[ScreenRun] = []
-        self.decisions: list[DecisionRecord] = []
-        self.orders: list[OrderRecord] = []
-        self.operations: list[OperationRecord] = []
-        self.memory: list[dict] = []
-        self.summary: dict = {}
+        self._audit: AuditLog | None = None
+        self._stamp: dict = {}
+        self._cache: dict[str, tuple] = {}
 
     @property
     def audit(self) -> AuditLog:
-        return market_audit(DATA_DIR / "audit", self.market)
-
-    def _paths(self) -> list[Path]:
-        audit = self.audit
-        dirs = ([audit.legacy] if audit.legacy else []) + [audit.directory]
-        paths = [d / n for d in dirs for n in ("screens.jsonl", "decisions.jsonl", "orders.jsonl", "operations.jsonl")]
-        paths.append(self.summary_path())
-        log = self.memory_log_path()
-        if log:
-            paths.append(log)
-        return paths
+        if self._audit is None:
+            self._audit = market_audit(DATA_DIR / "audit", self.market)
+        return self._audit
 
     def summary_path(self) -> Path:
         """The market's rule-only decision baseline summary (scripts/baseline_krx.py --market): KRX at the data root
@@ -176,21 +193,74 @@ class _Store:
         return None
 
     def refresh(self) -> _Store:
-        stamp = tuple(p.stat().st_mtime_ns if p.exists() else None for p in self._paths())
-        if stamp == self._stamp:
-            return self
-        audit = self.audit
-        self.screens = sorted(audit.screens(), key=lambda s: s.as_of, reverse=True)
-        self.decisions = sorted(audit.decisions(), key=lambda d: (d.trade_date, d.ticker), reverse=True)
-        # an order that filled or was cancelled after it was placed has later lines; serve its current state
-        self.orders = sorted(latest_orders(audit.orders()).values(), key=lambda o: (o.placed_at, o.order_id), reverse=True)
-        self.operations = audit.operations()
-        log = self.memory_log_path()
-        self.memory = TradingMemoryLog({"memory_log_path": str(log)}).load_entries() if log else []
-        summary = self.summary_path()
-        self.summary = json.loads(summary.read_text(encoding="utf-8")) if summary.exists() else {}
-        self._stamp = stamp
+        files = {"summary": self.summary_path(), "memory": self.memory_log_path()}
+        self._stamp = self.audit.stamp() | {k: p.stat().st_mtime_ns if p and p.exists() else None for k, p in files.items()}
         return self
+
+    def _get(self, key: str, kinds: tuple[str, ...], load):
+        """``load()`` once until one of ``kinds`` (record names, or summary / memory) changes."""
+        stamp = tuple(self._stamp.get(k) for k in kinds)
+        hit = self._cache.get(key)
+        if hit is None or hit[0] != stamp:
+            hit = self._cache[key] = (stamp, load())
+        return hit[1]
+
+    @property
+    def screens(self) -> list[ScreenRun]:
+        return self._get("screens", ("screens",), lambda: sorted(self.audit.screens(), key=lambda s: s.as_of, reverse=True))
+
+    def name(self, ticker: str) -> str | None:
+        """Korean name, else the name a screen recorded for the ticker."""
+        names = self._get("names", ("screens",), lambda: {c.ticker: c.name for s in reversed(self.screens)
+                                                           for c in s.candidates if c.name})
+        return korean_name(ticker) or names.get(ticker)
+
+    @property
+    def orders(self) -> list[OrderRecord]:
+        """Each order's current state (its latest row), newest first."""
+        # an order that filled or was cancelled after it was placed has later rows; serve its current state
+        return self._get("orders", ("orders",), lambda: sorted(self.audit.latest_orders_where().values(),
+                                                                key=lambda o: (o.placed_at, o.order_id), reverse=True))
+
+    def orders_where(self, **where) -> list[OrderRecord]:
+        """``AuditLog.latest_orders_where(**where)``, newest first like ``orders`` — read for the call, not cached."""
+        if not any(v is not None for v in where.values()):
+            return self.orders
+        return sorted(self.audit.latest_orders_where(**where).values(), key=lambda o: (o.placed_at, o.order_id), reverse=True)
+
+    @property
+    def order_facts(self) -> dict:
+        return self._get("order_facts", ("orders",), self.audit.order_facts)
+
+    @property
+    def order_rows(self) -> list[OrderRecord]:
+        """Every order row in record order: what the book replays (positions_view, book_events)."""
+        return self._get("order_rows", ("orders",), self.audit.orders)
+
+    @property
+    def operations(self) -> list[OperationRecord]:
+        return self._get("operations", ("operations",), self.audit.operations)
+
+    @property
+    def facts(self) -> dict:
+        """Decision dates, tickers and counts by stored source, without reading the decisions."""
+        return self._get("facts", ("decisions",), self.audit.decision_facts)
+
+    def decisions(self, **where) -> list[DecisionRecord]:
+        """``AuditLog.decisions_where(**where)``, newest day first, then ticker (as the screens list them)."""
+        return sorted(self.audit.decisions_where(**where), key=lambda d: (d.trade_date, d.ticker), reverse=True)
+
+    @property
+    def memory(self) -> list[dict]:
+        def load() -> list[dict]:
+            log = self.memory_log_path()
+            return TradingMemoryLog({"memory_log_path": str(log)}).load_entries() if log else []
+        return self._get("memory", ("summary", "memory"), load)
+
+    @property
+    def summary(self) -> dict:
+        path = self.summary_path()
+        return self._get("summary", ("summary",), lambda: json.loads(path.read_text(encoding="utf-8")) if path.exists() else {})
 
     def state(self) -> dict:
         return _effective(self.market, self.operations)
@@ -244,17 +314,6 @@ def _outcome(entry: dict | None) -> dict | None:
             "holding": entry.get("holding"), "resolved": entry.get("resolved"), "reflection": entry.get("reflection") or ""}
 
 
-def _name(ticker: str, screens: list[ScreenRun]) -> str | None:
-    ko = korean_name(ticker)
-    if ko:
-        return ko
-    for s in screens:
-        for c in s.candidates:
-            if c.ticker == ticker and c.name:
-                return c.name
-    return None
-
-
 def _fill_at(o: OrderRecord) -> dict:
     """When the order filled (its fill day) or will (open: the trading day after its decision): that session's open in
     market time and in KST, as ISO — the zone database applies daylight saving, the screen only formats. None for an
@@ -270,16 +329,36 @@ def _fill_at(o: OrderRecord) -> dict:
             "fill_at_kst": at.isoformat(), "fill_planned": planned}
 
 
+def _rerun_answer(o: OrderRecord, st: _Store) -> dict | None:
+    """The decision that answered ``o``'s rerun (scripts/daily_loop.py ``answer_reruns``), for the closed exception's
+    card to link to: the decide stage's marker names it (``pending_rerun_marker`` — also when the day's own decision
+    was the answer, ``same_day``); without one, a decision whose ``settings.rerun_of`` is this order. None: not a
+    rerun the loop closed."""
+    if o.exception_action != "rerun" or not o.exception_resolved:
+        return None
+    if (m := pending_rerun_marker(st.operations, o)) is not None and (d := m.after.get("decision")):
+        day, rating, same_day = d.get("trade_date"), d.get("rating"), bool(d.get("same_day"))
+    else:
+        answer = next((d for d in st.audit.decisions_where(ticker=o.ticker, trade_date=(o.trade_date, None))
+                       if d.settings.get("rerun_of") == o.order_id), None)
+        if answer is None:
+            return None
+        day, rating, same_day = answer.trade_date, answer.rating, False
+    return {"ticker": o.ticker, "trade_date": day, "rating": rating, "rating_ko": RATING_KO.get(rating, rating),
+            "attempt": o.reruns, "same_day": same_day}
+
+
 def _order_out(o: OrderRecord, st: _Store) -> dict:
     out = o.model_dump()
-    out.update(name=_name(o.ticker, st.screens), side_ko=SIDE_KO.get(o.side, o.side),
-               status_ko=ORDER_STATUS_KO.get(o.status, o.status), amount=o.amount, **_fill_at(o))
+    out.update(name=st.name(o.ticker), side_ko=SIDE_KO.get(o.side, o.side),
+               status_ko=ORDER_STATUS_KO.get(o.status, o.status), amount=o.amount, rerun_answer=_rerun_answer(o, st),
+               **_fill_at(o))
     return out
 
 
 def _decision_out(d: DecisionRecord, st: _Store, memory_by_key: dict, orders_by_key: dict) -> dict:
     out = d.model_dump()
-    out["name"] = _name(d.ticker, st.screens)
+    out["name"] = st.name(d.ticker)
     out["rating_ko"] = RATING_KO.get(d.rating, d.rating)
     out["tradeable"] = d.tradeable
     out["source_ko"] = DECISION_SOURCE_KO.get(d.source, d.source)
@@ -305,9 +384,9 @@ def _screen_summary(s: ScreenRun) -> dict:
             "rules": s.rules, "rule_count": len(s.rules), "rules_ko": [RULE_KO.get(r, r) for r in s.rules], "stage_counts": counts}
 
 
-def _orders_by_key(st: _Store) -> dict:
+def _orders_by_key(st: _Store, **where) -> dict:
     by: dict = {}
-    for o in st.orders:
+    for o in st.orders_where(**where):
         by.setdefault((o.ticker, o.trade_date), []).append(o)
     return by
 
@@ -388,23 +467,22 @@ def _exceptions(st: _Store, date: str | None) -> list[dict]:
     """REVIEW decisions and orders that were refused: what a human must look at (docs/02 화면 3, 예외 큐). An exception
     a person closed (hold / dismiss — ``exception_resolved``) is off the queue; a pending rerun or retry stays on it."""
     items = []
-    by_id = {o.order_id: o for o in st.orders}
-    for d in st.decisions:
-        if d.source == "agent" and d.rating == RATING_REVIEW and (date is None or d.trade_date == date):
-            o = by_id.get(f"paper-{d.trade_date}-{d.ticker}")
-            if o is not None and o.exception_resolved:
-                continue
-            items.append({"kind": "review", "kind_ko": EXCEPTION_KIND_KO["review"], "ticker": d.ticker,
-                          "name": _name(d.ticker, st.screens), "trade_date": d.trade_date, "market": st.market,
-                          "summary": "등급을 읽을 수 없어 주문하지 않았습니다", "detail": d.thesis, "ref": d.screen_run_id}
-                         | _queue_state(o if o is not None and o.exception_kind == "review" else None, "review"))
-    for o in st.orders:
+    by_id = {o.order_id: o for o in st.orders_where(trade_date=date)}
+    for d in st.decisions(source="agent", rating=RATING_REVIEW, trade_date=date):
+        o = by_id.get(f"paper-{d.trade_date}-{d.ticker}")
+        if o is not None and o.exception_resolved:
+            continue
+        items.append({"kind": "review", "kind_ko": EXCEPTION_KIND_KO["review"], "ticker": d.ticker,
+                      "name": st.name(d.ticker), "trade_date": d.trade_date, "market": st.market,
+                      "summary": "등급을 읽을 수 없어 주문하지 않았습니다", "detail": d.thesis, "ref": d.screen_run_id}
+                     | _queue_state(o if o is not None and o.exception_kind == "review" else None, "review"))
+    for o in st.orders_where(status="exception", trade_date=date) + st.orders_where(status="rejected", trade_date=date):
         # a REVIEW decision is listed above already; its exception order is the same item
         if (o.status in ("rejected", "exception") and o.exception_kind != "review" and not o.exception_resolved
                 and (date is None or o.trade_date == date)):
             kind = _exception_kind(o)
             items.append({"kind": kind, "kind_ko": EXCEPTION_KIND_KO[kind], "ticker": o.ticker,
-                          "name": _name(o.ticker, st.screens), "trade_date": o.trade_date, "market": st.market,
+                          "name": st.name(o.ticker), "trade_date": o.trade_date, "market": st.market,
                           "summary": o.reason or ORDER_STATUS_KO[o.status], "detail": ", ".join(o.rules_applied), "ref": o.order_id}
                          | _queue_state(o, kind))
     return sorted(items, key=lambda x: (x["trade_date"], x["ticker"]), reverse=True)
@@ -414,10 +492,11 @@ def _flow(st: _Store, book: dict) -> dict:
     """Home flow cards (screen 1): the latest screen, the latest decision day by rating, that day's exception queue
     by kind, the holdings. Counted here so the screen shows numbers it does not add up itself (docs/02 §0)."""
     latest = st.screens[0] if st.screens else None
-    day = max((d.trade_date for d in st.decisions), default=None)
+    day = st.facts["dates"][0] if st.facts["dates"] else None
+    today = st.decisions(trade_date=day) if day else []
     # rule exits (stop-loss, trailing, …) are not agent judgments (docs/04 /api/decisions): counted apart
-    by_rating = Counter(d.rating for d in st.decisions if d.trade_date == day and d.source == "agent")
-    rule = sum(d.trade_date == day and d.source == "rule" for d in st.decisions)
+    by_rating = Counter(d.rating for d in today if d.source == "agent")
+    rule = sum(d.source == "rule" for d in today)
     ratings = [r for r in [*RATINGS_5_TIER, RATING_REVIEW] if by_rating[r]]
     exc_day = _latest_date(st)
     by_kind = Counter(x["kind"] for x in _exceptions(st, exc_day))
@@ -435,7 +514,7 @@ def _flow(st: _Store, book: dict) -> dict:
 
 
 def _latest_date(st: _Store) -> str | None:
-    dates = [d.trade_date for d in st.decisions] + [o.trade_date for o in st.orders]
+    dates = [d for d in (st.facts["dates"][0] if st.facts["dates"] else None, st.order_facts["last_date"]) if d]
     return max(dates) if dates else None
 
 
@@ -467,18 +546,93 @@ def session_window(market: str, day: date) -> tuple[datetime, datetime]:
     return (datetime.combine(day, start, tz).astimezone(KST), datetime.combine(day, end, tz).astimezone(KST))
 
 
-def next_run(market: str, now: datetime) -> datetime:
-    """When the executor next runs for ``market``: ``RUN_AFTER_CLOSE`` after the next session close after ``now``,
-    in KST. ponytail: weekdays only — exchange holidays ahead are not in the price cache, so a holiday shows the
-    run that will not happen; upgrade with an exchange calendar."""
-    tz = ZoneInfo(MARKETS[market]["timezone"])
-    day = now.astimezone(tz).date()
-    while True:
-        if day.weekday() < 5:
-            run = session_window(market, day)[1] + RUN_AFTER_CLOSE
-            if run > now:
-                return run
-        day += timedelta(days=1)
+@cache
+def _daily_loop():
+    """scripts/daily_loop.py, loaded once: its schedule (``SCHEDULED`` · ``stage_time``) is what the scheduler runs."""
+    return scheduler.daily_loop()
+
+
+def next_run(market: str, now: datetime) -> tuple[datetime, str]:
+    """The next stage the scheduler will start for ``market`` after ``now`` and its name (``scheduler.plan``: fill
+    after the open, decide after the close, weekdays), in KST. ponytail: weekdays only, as the scheduler — an exchange
+    holiday shows a run that will skip ("holiday"); upgrade both with an exchange calendar."""
+    at, _, stage = scheduler.plan(_daily_loop(), [market], now, 1)[0]
+    return at.astimezone(KST), stage
+
+
+def _run_out(r: RunRecord) -> dict:
+    return r.model_dump() | {"stage_ko": STAGE_KO.get(r.stage, r.stage), "status_ko": RUN_STATUS_KO.get(r.status, r.status)}
+
+
+def _loop_status(market: str, now: datetime) -> dict:
+    """The daily loop of ``market`` as the scheduler sees it: each scheduled stage's latest record, the next planned
+    stage, and — a due stage whose last record failed — the retry the scheduler takes (``scheduler.next_wake``)."""
+    dl = _daily_loop()
+    runs = _store(market).audit.runs_where(last=200)
+    last = {s: next((r for r in reversed(runs) if r.stage == s), None) for s in dl.SCHEDULED[market]}
+    at, stage = next_run(market, now)
+    wake = scheduler.next_wake(dl, [market], now, DATA_DIR).astimezone(KST)
+    failed = [r for r in last.values() if r is not None and r.status == "failed"]
+    status = "never" if not runs else "failed" if failed else "ok"
+    return {"status": status, "status_ko": {"never": "실행 기록 없음", "failed": "실패", "ok": "정상"}[status],
+            "last": {s: _run_out(r) if r else None for s, r in last.items()},
+            "failed": [_run_out(r) for r in failed],
+            "next": {"at_kst": at.isoformat(), "stage": stage, "stage_ko": STAGE_KO.get(stage, stage),
+                     "label_ko": f"{at:%m-%d %H:%M} KST · {STAGE_KO.get(stage, stage)}"},
+            "retry_at_kst": wake.isoformat() if wake < at else None}
+
+
+def _refresh_lines() -> list[dict]:
+    """scripts/refresh_cache.py's log (data/cache/_refresh_log.jsonl), oldest first; a cut-short line is skipped."""
+    path = DATA_DIR / "cache" / REFRESH_LOG
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def _refresh_out(lines: list[dict], market: str) -> dict | None:
+    """The market's latest cache refresh: when, how many symbols, which failed, and the last refresh with none failed."""
+    mine = [x for x in lines if x.get("market") == market]
+    if not mine:
+        return None
+    last = mine[-1]
+    failed = last.get("failed") or []
+    ok = next((x for x in reversed(mine) if not x.get("failed")), None)
+    return {"at": last.get("at"), "source": last.get("source"), "symbols": last.get("symbols"),
+            "last_final_day": last.get("last_final_day"), "failed_count": len(failed),
+            "failed_symbols": [f.get("symbol") for f in failed][:10], "failed_error": failed[0].get("error") if failed else None,
+            "last_success_at": ok.get("at") if ok else None}
+
+
+def _price_out(market: str) -> dict:
+    """Where the market's prices come from: the benchmark index's file (``Prices.info``) — the calendar every replay
+    and the executor follow."""
+    info = PRICES.info(MARKETS[market]["benchmark"])
+    return {"price_source": info["source"], "price_as_of": info["as_of"], "price_provisional": info["provisional"]}
+
+
+def _key_set(name: str, env_file: dict) -> bool:
+    return bool(os.environ.get(name) or env_file.get(name))
+
+
+def sector_exposure(rows: list[dict], *, top: int = 3) -> list[dict]:
+    """Held weight per sector (``universe.sector_of``, the sector file): the ``top`` largest, then one 미분류 row
+    summing every holding the file gives no sector. Weights are of equity, as the position rows."""
+    by: dict[str | None, float] = {}
+    for r in rows:
+        k = sector_of(r["ticker"])
+        by[k] = by.get(k, 0.0) + (r.get("weight") or 0.0)
+    known = sorted(((k, v) for k, v in by.items() if k is not None), key=lambda x: (-x[1], x[0]))[:top]
+    out = [{"sector": k, "pct": v, "classified": True} for k, v in known]
+    if by.get(None):
+        out.append({"sector": "미분류", "pct": by[None], "classified": False})
+    return out
 
 
 def _market_labels(market: str, now: datetime) -> dict:
@@ -495,13 +649,16 @@ def _market_labels(market: str, now: datetime) -> dict:
 
 @app.get("/api/health", tags=["meta"])
 def health(market: str | None = MarketQuery) -> dict:
+    """서버 · 장부 요약 + 일일 루프 상태(마지막 decide · fill, 다음 예정 — scheduler 계산 그대로) · 마지막 캐시 갱신 · 가격 출처."""
     st = _store(market)
+    now = datetime.now(UTC)
     return {"ok": True, "core_version": core_version, "data_dir": str(DATA_DIR), "market": st.market,
             "market_ko": MARKET_KO.get(st.market, st.market), "markets": list(MARKETS), "screens": len(st.screens),
-            "decisions": len(st.decisions),
-            "decisions_by_source": {s: sum(d.source == s for d in st.decisions) for s in ("agent", "rule", "human")},
-            "orders": len(st.orders), "memory_entries": len(st.memory),
-            "memory_log": str(st.memory_log_path() or ""), "server_time": datetime.now(UTC).isoformat()}
+            "decisions": st.facts["total"],
+            "decisions_by_source": {s: st.facts["by_source"].get(s, 0) for s in ("agent", "rule", "human")},
+            "orders": st.order_facts["total"], "memory_entries": len(st.memory),
+            "memory_log": str(st.memory_log_path() or ""), "server_time": now.isoformat(),
+            "loop": _loop_status(st.market, now), "refresh": _refresh_out(_refresh_lines(), st.market)} | _price_out(st.market)
 
 
 @app.get("/api/labels", tags=["meta"])
@@ -526,12 +683,13 @@ def markets() -> list[dict]:
     now = datetime.now(UTC)
     out = []
     for m in MARKETS:
-        run = next_run(m, now)
-        card = _market_labels(m, now) | {"next_run_kst": run.isoformat(), "next_run_label_ko": f"{run:%m-%d %H:%M} KST"}
+        run, stage = next_run(m, now)
+        card = _market_labels(m, now) | {"next_run_kst": run.isoformat(), "next_run_stage": stage,
+                                         "next_run_label_ko": f"{run:%m-%d %H:%M} KST · {STAGE_KO.get(stage, stage)}"}
         try:
             st = _store(m)
-            book = positions_view(st.audit.orders(), PRICES, cfg=paper_config(m), operations=st.operations)
-            card |= {"as_of": book["as_of"], "equity": book["equity"], "initial_cash": book["initial_cash"],
+            book = positions_view(st.order_rows, PRICES, cfg=paper_config(m), operations=st.operations)
+            card |= _price_out(m) | {"as_of": book["as_of"], "equity": book["equity"], "initial_cash": book["initial_cash"],
                      "day_return": book["day_return"], "drawdown": book["drawdown"], "positions": len(book["positions"]),
                      "state": _state_out(m), "flow": _flow(st, book), "error": None}
         except ValueError as exc:                    # a cut-short line, or another market's record, in that book
@@ -565,7 +723,7 @@ def get_screen(run_id: str, market: str | None = MarketQuery) -> dict:
     out = s.model_dump()
     out.update(_screen_summary(s))
     for c in out["candidates"]:
-        c["name"] = c.get("name") or _name(c["ticker"], st.screens)
+        c["name"] = c.get("name") or st.name(c["ticker"])
         c["failed_rules"] = [f["rule"] for f in c["filters"] if not f["passed"]]
         c["failed_rules_ko"] = [RULE_KO.get(r, r) for r in c["failed_rules"]]
     return out
@@ -574,7 +732,7 @@ def get_screen(run_id: str, market: str | None = MarketQuery) -> dict:
 @app.get("/api/decisions/dates", tags=["decisions"])
 def decision_dates(market: str | None = MarketQuery) -> list[str]:
     """결정일 목록(그 시장의 거래일, 내림차순). 미국 결정일은 미국 날짜다."""
-    return sorted({d.trade_date for d in _store(market).decisions}, reverse=True)
+    return _store(market).facts["dates"]
 
 
 @app.get("/api/decisions", tags=["decisions"])
@@ -583,19 +741,18 @@ def list_decisions(date: str | None = None, rating: str | None = None, review_on
                    source: Literal["agent", "rule", "baseline", "human"] | None = None, market: str | None = MarketQuery) -> list[dict]:
     """overrides_only: 하드룰 개입 탭 — 룰이 주문을 줄이거나 막은 결정(주문의 plan.interventions)과 에이전트가 적은 개입만."""
     st = _store(market)
-    rows = st.decisions
+    if review_only:
+        if rating not in (None, RATING_REVIEW):
+            return []
+        rating = RATING_REVIEW
+    # the baseline's records are stored as agent (audit.decision_source): read the stored value, then tell them apart
+    stored = {"baseline": "agent"}.get(source, source)
+    t = ticker.upper() if ticker else None
+    rows = st.decisions(trade_date=date, ticker=t, source=stored, rating=rating)
     if source:
         rows = [d for d in rows if decision_source(d) == source]
-    if date:
-        rows = [d for d in rows if d.trade_date == date]
-    if rating:
-        rows = [d for d in rows if d.rating == rating]
-    if review_only:
-        rows = [d for d in rows if d.rating == RATING_REVIEW]
-    if ticker:
-        rows = [d for d in rows if d.ticker == ticker.upper()]
     memory_by_key = {(e["ticker"], e["date"]): e for e in st.memory}
-    orders_by_key = _orders_by_key(st)
+    orders_by_key = _orders_by_key(st, trade_date=date, ticker=t)
     out = [_decision_out(d, st, memory_by_key, orders_by_key) for d in rows]
     return [d for d in out if d["has_intervention"]] if overrides_only else out
 
@@ -608,13 +765,7 @@ def list_orders(date: str | None = None, status: str | None = None, ticker: str 
     if status is not None and status not in ORDER_STATUS_KO:
         raise HTTPException(400, f"status는 {', '.join(ORDER_STATUS_KO)} 중 하나여야 합니다: {status!r}")
     st = _store(market)
-    rows = st.orders
-    if date:
-        rows = [o for o in rows if o.trade_date == date]
-    if status:
-        rows = [o for o in rows if o.status == status]
-    if ticker:
-        rows = [o for o in rows if o.ticker == ticker.upper()]
+    rows = st.orders_where(trade_date=date, status=status, ticker=ticker.upper() if ticker else None)
     return [_order_out(o, st) for o in rows]
 
 
@@ -629,12 +780,12 @@ def list_exceptions(date: str | None = None, all_dates: bool = False, market: st
 @app.get("/api/tickers", tags=["tickers"])
 def list_tickers(market: str | None = MarketQuery) -> list[dict]:
     st = _store(market)
-    tickers = sorted({c.ticker for s in st.screens for c in s.candidates} | {d.ticker for d in st.decisions})
+    tickers = sorted({c.ticker for s in st.screens for c in s.candidates} | set(st.facts["tickers"]))
     latest = st.screens[0] if st.screens else None
     out = []
     for t in tickers:
         cand = next((c for c in latest.candidates if c.ticker == t), None) if latest else None
-        out.append({"ticker": t, "name": _name(t, st.screens),
+        out.append({"ticker": t, "name": st.name(t),
                     "latest_selected": cand.selected if cand else None, "latest_rank": cand.rank if cand else None})
     return out
 
@@ -644,7 +795,7 @@ def get_ticker(ticker: str, market: str | None = MarketQuery) -> dict:
     st = _store(market)
     t = ticker.upper()
     memory_by_key = {(e["ticker"], e["date"]): e for e in st.memory}
-    orders_by_key = _orders_by_key(st)
+    orders_by_key = _orders_by_key(st, ticker=t)
     screening = []
     for s in st.screens:
         c = next((c for c in s.candidates if c.ticker == t), None)
@@ -655,13 +806,13 @@ def get_ticker(ticker: str, market: str | None = MarketQuery) -> dict:
                           "filters": [f.model_dump() | {"rule_ko": RULE_KO.get(f.rule, f.rule)} for f in c.filters],
                           "first_failed_rule": first_fail.rule if first_fail else None,
                           "first_failed_rule_ko": RULE_KO.get(first_fail.rule, first_fail.rule) if first_fail else None})
-    decisions = [_decision_out(d, st, memory_by_key, orders_by_key) for d in st.decisions if d.ticker == t]
+    decisions = [_decision_out(d, st, memory_by_key, orders_by_key) for d in st.decisions(ticker=t)]
     outcomes = [{"trade_date": e["date"], "rating": e["rating"], "rating_ko": RATING_KO.get(e["rating"], e["rating"]),
                  **_outcome(e)} for e in sorted(st.memory, key=lambda e: e["date"], reverse=True) if e["ticker"] == t]
     if not screening and not decisions and not outcomes:
         raise HTTPException(404, f"종목 {t!r} 기록 없음 ({st.market})")
-    return {"ticker": t, "name": _name(t, st.screens), "market": st.market, "screening": screening, "decisions": decisions,
-            "outcomes": outcomes, "orders": [_order_out(o, st) for o in st.orders if o.ticker == t],
+    return {"ticker": t, "name": st.name(t), "market": st.market, "screening": screening, "decisions": decisions,
+            "outcomes": outcomes, "orders": [_order_out(o, st) for o in st.orders_where(ticker=t)],
             "timeline": [{"date": o["trade_date"], "rating": o["rating"]} for o in reversed(outcomes)]}
 
 
@@ -685,8 +836,8 @@ def performance(market: str | None = MarketQuery) -> dict:
                          "short_mean_alpha": sum(shorts) / len(shorts) if shorts else None})
     # a person's "보유로 처리" (source human, docs/10 D7) is not the agent's call: the memory log never has it, so it is
     # in no aggregate here; the scoring table shows it as its own count
-    human = sum(d.source == "human" for d in st.decisions)
-    reflections = [{"date": e["date"], "ticker": e["ticker"], "name": _name(e["ticker"], st.screens),
+    human = st.facts["by_source"].get("human", 0)
+    reflections = [{"date": e["date"], "ticker": e["ticker"], "name": st.name(e["ticker"]),
                     "rating": e["rating"], "rating_ko": RATING_KO.get(e["rating"], e["rating"]),
                     "raw_return": _pct(e.get("raw")), "alpha": _pct(e.get("alpha")), "resolved": e.get("resolved"),
                     "reflection": e.get("reflection") or ""}
@@ -731,14 +882,16 @@ def _progress(st: _Store, expected: bool = True) -> dict:
     """The market's paper-trading gate (execution.paper_progress) with its labels, and the reference table
     (``expected=False`` for the mode gate: the reference never reaches the verdict, not even by failing)."""
     m = st.market
-    p = paper_progress(st.orders, st.decisions, st.operations, PRICES, paper_config(m))
+    start = paper_start(st.orders, st.operations, m)
+    p = paper_progress(st.orders, st.decisions(trade_date=(start, None)) if start else [], st.operations, PRICES,
+                       paper_config(m))
     for c in p["criteria"]:
         c |= {"label_ko": PAPER_CRITERIA_KO.get(c["id"], c["id"]), "threshold_ko": _threshold_ko(c["id"], c["threshold"]),
               "status_ko": PAPER_STATUS_KO[c["status"]]}
     for v in p["violations"]:
-        v |= {"kind_ko": PAPER_VIOLATION_KO[v["kind"]], "name": _name(v["ticker"], st.screens) if v["ticker"] else None}
+        v |= {"kind_ko": PAPER_VIOLATION_KO[v["kind"]], "name": st.name(v["ticker"]) if v["ticker"] else None}
     for n in p["notes"]:
-        n |= {"kind_ko": PAPER_NOTE_KO[n["kind"]], "name": _name(n["ticker"], st.screens) if n["ticker"] else None}
+        n |= {"kind_ko": PAPER_NOTE_KO[n["kind"]], "name": st.name(n["ticker"]) if n["ticker"] else None}
     c = p["counts"]
     named = {s: ", ".join(PAPER_CRITERIA_KO[x["id"]] for x in p["criteria"] if x["status"] == s) for s in ("unmet", "in_progress")}
     p["summary_ko"] = " · ".join([f"충족 {c['met']}"] + [f"{PAPER_STATUS_KO[s]} {c[s]}" + (f" ({named[s]})" if c[s] else "")
@@ -827,16 +980,58 @@ def positions(as_of: str | None = None, market: str | None = MarketQuery) -> dic
     """모의투자 장부(화면 5): 그 시장의 orders.jsonl 체결 기록을 캐시 종가로 재생한 보유·평가·드로다운·가드 상태. 저장된 상태 없음."""
     _date_param(as_of, "as_of")
     st = _store(market)
-    out = positions_view(st.audit.orders(), PRICES, as_of=as_of, cfg=paper_config(st.market), operations=st.operations)
+    out = positions_view(st.order_rows, PRICES, as_of=as_of, cfg=paper_config(st.market), operations=st.operations)
     for r in out["positions"] + out["closed"]:
-        r["name"] = _name(r["ticker"], st.screens)
+        r["name"] = st.name(r["ticker"])
     for g in out["protections"]:
         g["label_ko"] = RISK_RULE_KO.get(g["id"], g["id"])
     out["exits_by_reason_ko"] = {EXIT_REASON_KO.get(k, k): n for k, n in out["exits_by_reason"].items()}
     out["mode"] = _state_out(st.market)
-    # ponytail: no sector data is connected (no network lookup); the screen shows one "미연결" row until there is
-    out["sector_exposure"] = None
+    out["sector_exposure"] = sector_exposure(out["positions"])
+    out["limits"]["max_sector_pct"] = RiskConfig().max_sector_pct          # the executor's sizing cap (size_targets)
+    out |= _price_out(st.market)
+    # a holding priced from another file than the market's own (KIS missing for it: the Yahoo file)
+    out["price_fallback"] = sorted(r["ticker"] for r in out["positions"] if PRICES.info(r["ticker"])["source"] != out["price_source"])
     return out
+
+
+@app.get("/api/runs", tags=["meta"])
+def list_runs(limit: int = Query(50, ge=1, le=500), stage: Literal["decide", "fill"] | None = None,
+              market: str | None = MarketQuery) -> list[dict]:
+    """일일 루프 단계 기록(run_records), 최신순. 단계마다 상태 · 사유 · 오류(자격 증명 없음) · 카운트."""
+    return [_run_out(r) for r in reversed(_store(market).audit.runs_where(stage=stage, last=limit))]
+
+
+@app.get("/api/data/status", tags=["meta"])
+def data_status() -> dict:
+    """설정 '데이터 · 캐시 상태': 캐시 파일 수 · 크기(출처별), 시장별 마지막 갱신, 벤더별 키 유무(값은 절대 내보내지 않음).
+    벤더 도달은 네트워크를 부르지 않고 마지막 갱신 기록으로 판단한다(갱신 기록이 없는 벤더는 '기록 없음')."""
+    from dotenv import dotenv_values
+
+    cache_dir = DATA_DIR / "cache"
+    files = {"kis": list(cache_dir.glob("*-KIS-data.csv")), "yahoo": list(cache_dir.glob("*-YFin-data.csv"))}
+    cache = {k: {"files": len(v), "kb": round(sum(f.stat().st_size for f in v) / 1024)} for k, v in files.items()}
+    lines = _refresh_lines()
+    env_path = Path(os.environ.get("TRADING_ENV_FILE") or ROOT / ".env")
+    env_file = dotenv_values(env_path) if env_path.exists() else {}
+    vendors = []
+    for v in VENDORS:
+        keys = {k: _key_set(k, env_file) for k in v["keys"]}
+        runs = [x for x in lines if x.get("source") == v["cache"]] if v["cache"] else []
+        if v["keys"] and not all(keys.values()):
+            state = "no_key"
+        elif not runs:
+            state = "unknown"
+        else:
+            last = runs[-1]
+            state = "reachable" if (last.get("symbols") or 0) > len(last.get("failed") or []) else "unreachable"
+        vendors.append({"id": v["id"], "label_ko": v["label_ko"], "use_ko": v["use_ko"], "key_required": bool(v["keys"]),
+                        "keys": keys, "state": state, "state_ko": {"reachable": "도달 가능", "unreachable": "도달 실패",
+                                                                  "no_key": "키 없음", "unknown": "기록 없음"}[state],
+                        "last_refresh_at": runs[-1].get("at") if runs else None})
+    return {"cache": cache, "refresh": {m: _refresh_out(lines, m) for m in MARKETS}, "vendors": vendors,
+            "price_source": {m: _price_out(m) for m in MARKETS},
+            "note": "키는 있는지만 보여 줍니다. 값은 서버 환경 변수(.env)에만 있고 화면 · 응답에 나오지 않습니다."}
 
 
 @app.get("/api/events", tags=["positions"])
@@ -844,10 +1039,10 @@ def events(market: str | None = MarketQuery, limit: int = Query(50, ge=1, le=500
     """가드·잠금 이력(화면 5): 그 시장의 주문·운영 기록에서 모은 가드 · 잠금 · Protections · 개입 · 피크 재설정, 최신순.
     저장된 이력은 없다(execution.book_events)."""
     st = _store(market)
-    rows = book_events(st.audit.orders(), st.operations, PRICES, cfg=paper_config(st.market))
+    rows = book_events(st.order_rows, st.operations, PRICES, cfg=paper_config(st.market))
     for e in rows:
         e["kind_ko"] = BOOK_EVENT_KO[e["kind"]]
-        e["name"] = _name(e["ticker"], st.screens) if e["ticker"] else None
+        e["name"] = st.name(e["ticker"]) if e["ticker"] else None
     return {"market": st.market, "total": len(rows), "counts": dict(Counter(e["kind"] for e in rows)), "events": rows[:limit]}
 
 
@@ -952,7 +1147,7 @@ def halt(body: HaltRequest) -> dict:
 def _peak_reset(st: _Store) -> dict:
     """What a resume after a −20% stop resets the peak to: the book's equity at the last close. The preview and the
     resume both call this, so the preview is the resume's own number."""
-    book = positions_view(st.audit.orders(), PRICES, cfg=paper_config(st.market), operations=st.operations)
+    book = positions_view(st.order_rows, PRICES, cfg=paper_config(st.market), operations=st.operations)
     return {"to": book["equity"], "at": book["as_of"], "before": book["peak"]}
 
 
@@ -1050,8 +1245,8 @@ class ExceptionActionRequest(BaseModel):
 
 ACTION_TOPIC_KO = {"rerun": "재실행은", "retry_next": "다음 세션 재시도는"}
 ACTION_RESULT_KO = {
-    "rerun": "재실행을 예약했습니다 ({n}/{limit}). 재실행 경로가 아직 결정 루프에 연결되지 않아 지금은 실행하지 않습니다 — 연결되면 "
-             "같은 입력으로 다시 판단하고, 다시 읽지 못하면 예외 큐로 돌아옵니다",
+    "rerun": "재실행을 예약했습니다 ({n}/{limit}). 다음 일일 루프 decide에서 그날 결정자로 다시 판단하고 이 예외를 닫습니다 — "
+             "답이 정상 등급이면 그날 결정으로 주문되고, 다시 읽지 못하면 그날 예외로 큐에 돌아옵니다",
     "retry_next": "다음 세션 재시도를 예약했습니다 ({n}/{limit}). 다음 실행이 그날 한도 · 하드 룰을 다시 거쳐 처음 수량 이하로 "
                   "주문하고, 그다음 세션 시가에 체결합니다",
     "hold": "보유(Hold)로 기록했습니다(source=human) · 주문 없음 · 채점에서 제외 — 채점 표에는 '사람 처리'로 따로 셉니다",
@@ -1112,7 +1307,7 @@ def exception_action(order_id: str, body: ExceptionActionRequest, market: str | 
             update["exception_resolved"] = True
         if body.action == "hold":
             # the decision first: an order line that says "held" never stands without the decision it records
-            if not any(d.source == "human" and (d.ticker, d.trade_date) == (o.ticker, o.trade_date) for d in audit.decisions()):
+            if not audit.decisions_where(source="human", ticker=o.ticker, trade_date=o.trade_date):
                 audit.record_decision(DecisionRecord(
                     ticker=o.ticker, trade_date=o.trade_date, rating="Hold", action=None, source="human", market=m,
                     thesis="사람 처리: 보유", settings={"decider": "human", "operator": body.operator, "order_id": order_id},
@@ -1207,8 +1402,27 @@ def approve(ticker: str, trade_date: str, body: ApproveRequest, market: str | No
     st = _store(market)
     if st.state()["mode"] != "manual":
         raise HTTPException(409, "자동 모드에서는 승인 단계가 없습니다. 설정에서 수동 승인 모드로 바꾼 뒤 사용하세요.")
-    exists = any(d.ticker == ticker.upper() and d.trade_date == trade_date for d in st.decisions)
+    exists = bool(st.decisions(ticker=ticker.upper(), trade_date=trade_date))
     if not exists:
         raise HTTPException(404, f"결정 {ticker} {trade_date} 없음")
     return {"implemented": False, "message": "실행 레이어(주문·체결)가 아직 없습니다. 승인 요청은 접수 형식만 검증했습니다.",
             "ticker": ticker.upper(), "trade_date": trade_date, "approver": body.approver}
+
+
+# --- the built dashboard (frontend/dist), one origin with the API ------------------------------------------------
+# Served only when TRADING_STATIC_DIR names it (the Docker image, compose.yaml): one process and one port, the API on
+# the page's own origin — no CORS, no second server. A client route (/decisions, /tickers/…) falls back to
+# index.html; /api/… never does (a missing endpoint stays 404). Development keeps Vite (npm run dev, its proxy).
+
+class _Dashboard(StaticFiles):
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or path.startswith("api"):
+                raise
+            return await super().get_response("index.html", scope)
+
+
+if STATIC_DIR := os.environ.get("TRADING_STATIC_DIR"):
+    app.mount("/", _Dashboard(directory=STATIC_DIR, html=True), name="dashboard")

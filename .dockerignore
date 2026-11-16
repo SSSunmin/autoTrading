@@ -1,0 +1,19 @@
+# secrets and state never go into the image: keys come from env_file, records and the cache from the ./data volume
+.env
+.env.*
+!.env.example
+data/
+.venv/
+**/node_modules/
+frontend/dist/
+**/__pycache__/
+*.egg-info/
+.git/
+.claude/
+.pytest_cache/
+.ruff_cache/
+mockup/
+docs/
+tests/
+i/
+*.lock

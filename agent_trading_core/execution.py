@@ -34,7 +34,8 @@ calendar, currency, sell costs and caps (``paper_config``). Amounts in reasons a
 The drawdown peak is the highest close-of-day equity since the last peak reset (the initial cash before any):
 the −10% halving, the −20% stop and the sizing scale all read that one peak (``_peak``).
 
-ponytail: no sector cap (sector lookup is a network call). After a −20% stop the backtest (simulate.py) also resets
+Buys are capped per sector (``RiskConfig.max_sector_pct``) by ``universe.sector_of`` — the sector file only, no
+network; a ticker the file does not list has no sector and no cap, as in the backtest. After a −20% stop the backtest (simulate.py) also resets
 the peak after ``dd_stop_lock_days`` (20) trading days and goes back to normal weight (RiskConfig.dd_stop_recovery=
 reset_peak); the executor resets it when an admin resumes. Upgrade: the same fixed lock here.
 """
@@ -48,10 +49,13 @@ from dataclasses import dataclass, field
 from datetime import date as Date
 from datetime import datetime, time, timedelta
 from pathlib import Path
+from time import monotonic
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from agent_trading_core import kis
 from agent_trading_core.audit import (
     AuditLog,
     DecisionRecord,
@@ -83,6 +87,7 @@ from agent_trading_core.risk import (
 )
 from agent_trading_core.simulate import sell_proceeds
 from agent_trading_core.symbols import safe_ticker_component
+from agent_trading_core.universe import sector_of
 
 BUY_RATINGS = ("Buy", "Overweight")
 SELL_RATINGS = ("Sell", "Underweight")
@@ -140,26 +145,61 @@ _EMPTY = pd.DataFrame({"Open": [], "Close": []}, index=pd.Index([], dtype=object
 
 class Prices:
     """Daily Open/Close per ticker from the OHLCV cache, indexed by 'YYYY-MM-DD'. Read only: never downloads.
-    ``frames`` (same shape) stand in for the files in tests."""
+    ``frames`` (same shape) stand in for the files in tests.
 
-    def __init__(self, cache_dir: str | Path | None = None, frames: dict[str, pd.DataFrame] | None = None):
+    ``source="kis"`` (the default: the executor and the API) reads the KIS cache ``<symbol>-KIS-data.csv``
+    (kis.cache_path, written by scripts/refresh_cache.py — provisional rows included, listed in ``_provisional.json``)
+    and falls back to the Yahoo file ``<symbol>-YFin-data.csv`` for a ticker KIS has no file of; ``source="yahoo"``
+    reads Yahoo only. ``info(ticker)`` says which file served it. The backtest (simulate.py, paper_backtest.py) does
+    not read prices through here: its source stays config.MARKETS ``data_source_*``."""
+
+    # ponytail: a file is re-checked (stat) at most this often per ticker — a replay asks for one close tens of
+    # thousands of times. A refresh shows up within the second; upgrade: a per-request snapshot if that is too late.
+    RECHECK_SECONDS = 1.0
+
+    def __init__(self, cache_dir: str | Path | None = None, frames: dict[str, pd.DataFrame] | None = None,
+                 source: Literal["kis", "yahoo"] = "kis"):
         self.cache_dir = Path(cache_dir) if cache_dir else None
+        self.source = source
         self._frames = dict(frames or {})
         self._files: dict[str, tuple[int, pd.DataFrame]] = {}
+        self._checked: dict[str, tuple[float, Path | None, int | None]] = {}
+        self._closes: dict[str, tuple[pd.DataFrame, pd.Series]] = {}
+
+    def _file(self, ticker: str) -> tuple[Path | None, int | None]:
+        """The file that serves ``ticker`` now (KIS first unless ``source="yahoo"``) and its mtime; None without one."""
+        now = monotonic()
+        hit = self._checked.get(ticker)
+        if hit and now - hit[0] < self.RECHECK_SECONDS:
+            return hit[1], hit[2]
+        path = stamp = None
+        for v in (["KIS"] if self.source == "kis" else []) + ["YFin"]:
+            q = self.cache_dir / f"{safe_ticker_component(ticker)}-{v}-data.csv"
+            try:
+                path, stamp = q, q.stat().st_mtime_ns
+                break
+            except FileNotFoundError:
+                continue
+        self._checked[ticker] = (now, path, stamp)
+        return path, stamp
 
     def frame(self, ticker: str) -> pd.DataFrame:
         if ticker in self._frames:
             return self._frames[ticker]
         if self.cache_dir is None:
             return _EMPTY
-        path = self.cache_dir / f"{safe_ticker_component(ticker)}-YFin-data.csv"
-        if not path.exists():
+        path, mtime = self._file(ticker)
+        if path is None:
             return _EMPTY
-        stamp = path.stat().st_mtime_ns
+        stamp = (path.name, mtime)
         hit = self._files.get(ticker)
         if hit and hit[0] == stamp:
             return hit[1]
-        raw = pd.read_csv(path, encoding="utf-8", on_bad_lines="skip")
+        try:
+            raw = pd.read_csv(path, encoding="utf-8", on_bad_lines="skip")
+        except FileNotFoundError:                # replaced between the check and here: the next call looks again
+            self._checked.pop(ticker, None)
+            return _EMPTY
         f = pd.DataFrame({"Open": pd.to_numeric(raw["Open"], errors="coerce").to_numpy(),
                           "Close": pd.to_numeric(raw["Close"], errors="coerce").to_numpy()},
                          index=raw["Date"].astype(str).str[:10])
@@ -167,13 +207,34 @@ class Prices:
         self._files[ticker] = (stamp, f)
         return f
 
+    def info(self, ticker: str) -> dict:
+        """Where ``ticker``'s prices come from: ``source`` (kis / yahoo / frames / None: no prices), ``as_of`` (the
+        last day with a close) and ``provisional`` (that day's KIS row is provisional: the session was not over)."""
+        if ticker in self._frames:
+            source = "frames"
+        else:
+            path = self._file(ticker)[0] if self.cache_dir is not None else None
+            source = None if path is None else "kis" if path.name.endswith("-KIS-data.csv") else "yahoo"
+        closes = self._close_series(ticker)
+        as_of = closes.index[-1] if len(closes) else None
+        marks = kis.provisional(self.cache_dir) if source == "kis" else {}
+        return {"source": source, "as_of": as_of, "provisional": as_of is not None and ticker in marks.get(as_of, [])}
+
+    def _close_series(self, ticker: str) -> pd.Series:
+        """The ticker's closes without gaps, oldest first — kept while ``frame`` serves the same frame."""
+        f = self.frame(ticker)
+        hit = self._closes.get(ticker)
+        if hit is None or hit[0] is not f:
+            hit = self._closes[ticker] = (f, f["Close"].dropna().sort_index())
+        return hit[1]
+
     def calendar(self, index: str) -> list[str]:
-        return list(self.frame(index)["Close"].dropna().index)
+        return list(self._close_series(index).index)
 
     def close_asof(self, ticker: str, date: str) -> float | None:
-        s = self.frame(ticker)["Close"]
-        s = s[s.index <= date].dropna()
-        return float(s.iloc[-1]) if len(s) else None
+        s = self._close_series(ticker)
+        i = s.index.searchsorted(date, side="right")
+        return float(s.iloc[i - 1]) if i else None
 
     def open_on(self, ticker: str, date: str) -> float | None:
         f = self.frame(ticker)
@@ -584,8 +645,8 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
     # equal weight across every buy-rated name, held or not, as simulate.run_simulation sizes a rebalance
     buys = [d.ticker for d in decisions if d.rating in BUY_RATINGS]
     # at scale 0 every buy is already locked above; size at full scale so the text names only the caps
-    weights, overrides = size_targets(buys, risk, scale=scale if scale > 0 else 1.0)
-    shared = [o for o in overrides if not o.startswith("max_position_pct")]
+    weights, overrides = size_targets(buys, risk, scale=scale if scale > 0 else 1.0, sector_of=sector_of)
+    shared = [o for o in overrides if not o.startswith(OWN_CAPS)]
     pending_buys = {o.ticker for o in current.values() if o.side == "Buy" and _unsettled(o, date)}
     pending_sells = {o.ticker for o in current.values() if o.side == "Sell" and _unsettled(o, date)}
     # the daily cap counts every buy filling at the same session, whatever its decision date
@@ -643,8 +704,8 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
         fixed = retry.quantity if retry is not None and retry.quantity > 0 else None
         if retry is not None and (orig := (sizing or {}).get(d.ticker)):
             # the denominator of its own decision day, at today's scale: a retry is sized as that call would be today
-            w_day, ov_day = size_targets(orig, risk, scale=scale if scale > 0 else 1.0)
-            sh_day, n = [o for o in ov_day if not o.startswith("max_position_pct")], len(orig)
+            w_day, ov_day = size_targets(orig, risk, scale=scale if scale > 0 else 1.0, sector_of=sector_of)
+            sh_day, n = [o for o in ov_day if not o.startswith(OWN_CAPS)], len(orig)
         else:
             w_day, ov_day, sh_day, n = weights, overrides, shared, len(buys)
         raw = 1.0 / n
@@ -664,7 +725,7 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
         if tl := protections.locked_ticker(d.ticker, day):
             out.append(refuse("blocked", [tl.split(":")[0]], tl, [Intervention(rule=tl.split(":")[0], note=tl)]))
             continue
-        mine = [o for o in ov_day if o.startswith(f"max_position_pct: {d.ticker} ")] + sh_day
+        mine = [o for o in ov_day if o.startswith(tuple(f"{c}: {d.ticker} " for c in OWN_CAPS))] + sh_day
         target = w_day.get(d.ticker, 0.0) * equity
         qty = int(target // unit)
         if fixed is not None and qty >= fixed:
@@ -1000,6 +1061,8 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
 
 LOCK_RULES = ("dd_stop", "daily_loss_limit", "regime", "StoplossGuard")          # a lock on every new buy
 TICKER_LOCK_RULES = ("Cooldown", "LowProfit")                                     # a lock on one name
+# size_targets' caps that name one ticker (its own card); the rest (gross, the drawdown halving) apply to every buy
+OWN_CAPS = ("max_position_pct", "sector_cap")
 INTERVENTION_RULES = ("max_position_pct", "sector_cap", "max_gross_pct", "dd_halve", "auto_order_max")
 
 

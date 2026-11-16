@@ -1,6 +1,6 @@
 import type {
-  BookEvents, Decision, ExceptionAction, ExceptionActionResult, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
-  ResumePreview, ResumeResult, RulesSettings, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
+  BookEvents, DataStatus, Decision, ExceptionAction, ExceptionActionResult, ExceptionItem, HaltResult, Health, Labels, Market, MarketSummary, Mode, Order, PaperProgress, PaperSummary, Performance, Positions,
+  ResumePreview, ResumeResult, RulesSettings, RunRow, ScreenDetail, ScreenSummary, TickerDetail, TickerRow, TradingState,
 } from './types'
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
@@ -45,6 +45,8 @@ async function post<T>(path: string, body: unknown, adminToken?: string): Promis
 export const api = {
   health: (market: Market) => get<Health>('/api/health', { market }),
   labels: () => get<Labels>('/api/labels'),
+  runs: (market: Market, limit = 20) => get<RunRow[]>('/api/runs', { market, limit }),
+  dataStatus: () => get<DataStatus>('/api/data/status'),
   markets: () => get<MarketSummary[]>('/api/markets'),
   screens: (market: Market, params?: { from?: string; to?: string; universe?: string }) =>
     get<ScreenSummary[]>('/api/screens', { ...params, market }),

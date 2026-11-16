@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import { pct } from '../api/client'
-import type { Positions } from '../api/types'
-import { EXIT_REASONS, gaugeMagnitude, gaugeState, SOURCE_KO, type Source } from './partsLogic'
+import { pct, utc } from '../api/client'
+import { kst } from '../api/marketTime'
+import type { Health, Positions } from '../api/types'
+import { EXIT_REASONS, failureBand, gaugeMagnitude, gaugeState, sectorGauges, SOURCE_KO, type Source } from './partsLogic'
 
 /** v0.6 common parts (docs/10 §3 단계 1), on the mockup's markup and app.css tokens. Values are the server's; these
  *  only place them (docs/02 §0: no numbers worked out on screen). */
@@ -34,10 +35,12 @@ export function LimitGauge({ label, value, limit, stop, fmt = (v) => pct(v), not
 }
 
 /** The book's limits as gauges (screens 1 · 5): drawdown with the −20% stop, the day's loss, the largest holding,
- *  gross exposure, the session's buys against the daily cap. A sector row waits for sector data (docs/10 D9). */
+ *  gross exposure, the session's buys against the daily cap, then the three largest sectors against the sector cap
+ *  (the executor sizes buys under it) and the 미분류 sum, which has no cap. */
 export function RiskGauges({ p, amt }: { p: Positions; amt: (v: number | null | undefined) => string }) {
   const frac = (v: number) => pct(v).replace('+', '')
   const top = p.positions.find((r) => r.ticker === p.max_position_ticker)
+  const sectors = sectorGauges(p)
   return (
     <div className="gauges">
       <LimitGauge label="드로다운" value={p.drawdown} limit={p.limits.dd_halve} stop={p.limits.dd_stop}
@@ -48,6 +51,34 @@ export function RiskGauges({ p, amt }: { p: Positions; amt: (v: number | null | 
       <LimitGauge label="그로스 노출" value={p.gross_exposure} limit={p.limits.max_gross_pct} fmt={frac} />
       <LimitGauge label="오늘 매수 금액" value={p.today_buy_amount} limit={p.limits.auto_daily_order_cap} fmt={amt}
         note={`일일 상한은 매수만(매도는 위험 축소) · ${p.today_session ?? '다음 거래일'} 시가 체결분`} />
+      {sectors.capped.map((g) => (
+        <LimitGauge key={g.label} label={g.label} value={g.value} limit={p.limits.max_sector_pct} fmt={frac}
+          note="섹터 파일(data/universe/sectors.csv) 기준 · 신규 매수는 섹터 한도 안에서만" />
+      ))}
+      {sectors.unclassified != null && (
+        <p className="sector-off"><span>섹터 · 미분류</span><span className="tnum">{frac(sectors.unclassified)} <span className="muted">· 섹터 파일에 없는 종목 합계 · 한도 없음</span></span></p>
+      )}
+      {sectors.empty && <p className="sector-off"><span>섹터 노출</span><span className="muted">보유 없음</span></p>}
+    </div>
+  )
+}
+
+/** Under the status bar on every screen (mockup v0.7.2 States ④): a daily-loop stage that failed, a cache refresh
+ *  that left symbols out. Nothing when both are fine. */
+export function FailureBand({ health, to }: { health: Health | undefined; to: string }) {
+  const lines = failureBand(health)
+  if (lines.length === 0) return null
+  return (
+    <div className="fail-band" role="alert">
+      {lines.map((l) => (
+        <div key={l.kind + l.title} className="fail-line">
+          <b>{l.title}</b>
+          <span className="muted wrap">{l.detail}</span>
+          <span className="muted num">{l.kind === 'refresh' ? `마지막 성공 ${l.since ? utc(l.since) : '없음'}` : `기록 ${utc(l.since)}`}</span>
+          {l.kind === 'loop' && health?.loop.retry_at_kst && <span className="num">재시도 {kst(new Date(health.loop.retry_at_kst))} KST</span>}
+          <Link to={to}>캐시 상태 →</Link>
+        </div>
+      ))}
     </div>
   )
 }

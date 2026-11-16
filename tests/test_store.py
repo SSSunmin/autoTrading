@@ -187,13 +187,18 @@ def test_a_book_with_unloaded_files_and_no_database_refuses_to_start_empty(sqlit
 
 
 @pytest.mark.unit
-def test_a_sqlite_append_touches_the_books_file_for_the_backends_reload_and_leaves_it_empty(sqlite_store, tmp_path):
+def test_a_sqlite_append_writes_no_file_and_moves_the_stamp_a_reader_watches(sqlite_store, tmp_path):
     log = market_audit(tmp_path / "audit", "KRX")
     log.record_order(_order())
-    path = tmp_path / "audit" / "KRX" / "orders.jsonl"
-    before = path.stat().st_mtime_ns
+    before = log.stamp()
+    market_audit(tmp_path / "audit", "US").record_operation(
+        OperationRecord(kind="halt", operator="a", role="admin", reason="r", market="US", scope="US"))
+    after_us = log.stamp()
     log.record_order(_order(status="cancelled"))
-    assert path.read_bytes() == b"" and path.stat().st_mtime_ns >= before
+    # ids only grow: orders 1 → 2, operations None → 1 (any market's append counts); no JSONL file is touched
+    assert (before["orders"], after_us["operations"], log.stamp()["orders"]) == (1, 1, 2)
+    assert (before["operations"], after_us["orders"]) == (None, 1)
+    assert not list((tmp_path / "audit").rglob("*.jsonl"))
 
 
 # --- load once, export back ---------------------------------------------------------------------------------------
