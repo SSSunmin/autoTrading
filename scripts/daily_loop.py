@@ -26,9 +26,12 @@ with no benchmark bar yet is ``failed`` (a holiday or a late feed — the next c
 settles it), and a fill whose open-order ticker has no bar yet is ``failed`` during the session (it may still come);
 after the close it is final and goes to the executor as a ``data_delayed`` exception. Before the stage's time on the market's today the call does nothing.
 A call without ``--date`` (a scheduler: ``agent_trading_core.scheduler``, cron, systemd) runs the day that is due
-(``due_day``): the latest weekday whose stage time has come, while the market's next session has not opened — so a
+(``due_day``): the latest session (``market_calendar``: a weekday not on the exchange's holiday list) whose stage
+time has come, while the market's next session has not opened — so a
 restart, a late call or a retry in that window runs it once more if it is not done, and after midnight a day with
-no bar is settled as a holiday on final bars. Weekdays before it that nobody ran get ``skipped`` (``missed``).
+no bar is settled as a holiday on final bars. Weekdays before it that nobody ran get ``skipped`` (``missed``), the
+listed holidays among them ``skipped`` (``holiday``) without a run — as does ``--date`` on one. A year with no
+calendar file runs every weekday and notes "휴장 달력 없음 <year>".
 ``decide`` also compares the fills of the session before with that day's final Open (``check_fill_opens``): a fill
 priced from a provisional row is reported in ``notes`` when they differ, never rewritten. Prices come from the KIS
 cache (``<symbol>-KIS-data.csv``, ``execution.Prices(source="kis")``); a name with no KIS file falls back to its Yahoo
@@ -44,7 +47,7 @@ import argparse
 import os
 import sys
 from collections import Counter
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -55,6 +58,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from baseline_krx import SETUPS, decide_from_screen, memory_text, screen_day, screen_section, sector_of
 
 from agent_trading_core import agent, kis
+from agent_trading_core import market_calendar as cal
 from agent_trading_core.audit import (
     BASELINE_DECIDER,
     RERUN_OPERATOR,
@@ -97,30 +101,38 @@ AFTER = timedelta(minutes=5)                       # a stage runs this long afte
 
 def stage_time(market: str, stage: str, day: date) -> datetime:
     """When ``stage`` of ``day`` may run: the market's session open (fill) or close (decide) + 5 min, aware in the
-    market's time zone (``MARKETS[market]["session"]`` · ``timezone``), so daylight saving follows the zone."""
+    market's time zone (``MARKETS[market]["session"]`` · ``timezone``), so daylight saving follows the zone. The close
+    is the day's own (``market_calendar.session_close``: a US half day closes at 13:00)."""
     tz = ZoneInfo(MARKETS[market]["timezone"])
-    opens, closes = MARKETS[market]["session"].split("-")
-    at = time.fromisoformat(opens if stage == "fill" else closes)
+    at = cal.session_open(market, day) if stage == "fill" else cal.session_close(market, day)
     return datetime.combine(day, at, tz) + AFTER
 
 
 def next_open(market: str, day: date) -> datetime:
-    """The open of the weekday session after ``day``: until then a stage of ``day`` is still caught up."""
-    d = day + timedelta(days=1)
-    while d.weekday() >= 5:
-        d += timedelta(days=1)
-    return stage_time(market, "fill", d) - AFTER
+    """The open of the session after ``day`` (``market_calendar.next_session``): until then a stage of ``day`` is
+    still caught up."""
+    return stage_time(market, "fill", cal.next_session(market, day)) - AFTER
 
 
 def due_day(market: str, stage: str, now: datetime) -> str | None:
-    """The trading day whose ``stage`` is due at ``now``: the latest weekday whose stage time has come, if the next
-    session has not opened yet (the same session); None once it has (that day was missed)."""
+    """The trading day whose ``stage`` is due at ``now``: the latest session (``market_calendar.is_session`` — a listed
+    holiday never is) whose stage time has come, if the next session has not opened yet (the same session); None once
+    it has (that day was missed)."""
     local = now.astimezone(ZoneInfo(MARKETS[market]["timezone"])).date()
-    for back in range(7):
+    for back in range(14):              # the longest closure (a lunar new year beside a weekend) fits
         d = local - timedelta(days=back)
-        if d.weekday() < 5 and stage_time(market, stage, d) <= now:
+        if cal.is_session(market, d) and stage_time(market, stage, d) <= now:
             return d.isoformat() if now < next_open(market, d) else None
     return None
+
+
+def holiday_record(market: str, stage: str, day: date) -> RunRecord:
+    """A listed holiday's record, written without running the stage: ``skipped(holiday)`` like one found after the
+    fact (no benchmark bar), with the list it came from."""
+    name = cal.holiday(market, day) or "이름 없음"
+    return RunRecord(market=market, stage=stage, trade_date=day.isoformat(), status="skipped", reason="holiday",
+                     started_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                     notes=[f"휴장 달력: {name} — {cal.source(market, day.year)}"])
 
 
 def fallback_notes(prices: Prices, tickers, day: str) -> list[str]:
@@ -156,7 +168,12 @@ def run_stage(market: str, stage: str, day: str, data: Path, client, now: dateti
         if any(r.final for r in audit.runs() if (r.stage, r.trade_date) == (stage, day)):
             print(f"{market} {stage} {day}: 이미 완료 — 새 기록 없음")
             return None
-        notes = []
+        d = date.fromisoformat(day)
+        if cal.holiday(market, d) is not None:          # a listed holiday: nothing to fetch, nothing to fail
+            record = holiday_record(market, stage, d)
+            audit.record_run(record)
+            return record
+        notes = [] if cal.covered(market, d.year) else [f"휴장 달력 없음 {d.year}"]
         if decider is None:
             decider = default_decider(audit, market, day)
             if stage == "decide" and trial_on() and not LLM["enabled"]:
@@ -563,7 +580,9 @@ def dry_run(market: str, day: str, data: Path, llm=None) -> int:
 
 def missed_days(audit: AuditLog, stage: str, day: str) -> list[str]:
     """Weekdays after the stage's last recorded day and before ``day`` with no record at all: runs nobody made (the
-    process was down past the next session's open). None before the first record — the loop starts on its first day."""
+    process was down past the next session's open) — and the listed holidays among them, which no run was due on.
+    Both in date order; ``run_due`` tells them apart (``market_calendar.holiday``). None before the first record — the loop starts on its first
+    day."""
     seen = {r.trade_date for r in audit.runs() if r.stage == stage}
     if not seen:
         return []
@@ -589,8 +608,11 @@ def run_due(market: str, stage: str, data: Path, client, now: datetime | None = 
     out = []
     with locked(audit.directory / f"daily_loop_{stage}"):
         for d in missed_days(audit, stage, day):
-            out.append(RunRecord(market=market, stage=stage, trade_date=d, status="skipped", reason="missed",
-                                 started_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")))
+            if cal.holiday(market, date.fromisoformat(d)) is not None:     # a listed holiday: no run was due
+                out.append(holiday_record(market, stage, date.fromisoformat(d)))
+            else:
+                out.append(RunRecord(market=market, stage=stage, trade_date=d, status="skipped", reason="missed",
+                                     started_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")))
             audit.record_run(out[-1])
         last = [r for r in audit.runs() if (r.stage, r.trade_date) == (stage, day)][-1:]
     if last and last[0].status == "skipped" and not last[0].final:

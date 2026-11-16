@@ -178,7 +178,8 @@ def test_decide_fill_decide_records_each_step_once_and_a_rerun_writes_nothing(tm
     r4 = stage(client, "KRX", "decide", "2026-08-06", at("2026-08-06", "15:40"), tmp_path)
     # 08-05 is final now: the fills priced from its provisional Open are reported, not rewritten
     assert r4.counts["fill_open_checked"] == r4.counts["fill_open_mismatch"] == len(open_buys)
-    assert len(r4.notes) == len(open_buys) and all("확정 시가" in n for n in r4.notes)
+    checks = [n for n in r4.notes if n != "휴장 달력 없음 2026"]       # tests run with no calendar (conftest)
+    assert "휴장 달력 없음 2026" in r4.notes and len(checks) == len(open_buys) and all("확정 시가" in n for n in checks)
     before = _lines(tmp_path)
     assert before["runs"] == 4
     for name, day, now in (("decide", "2026-08-04", "2026-08-06 15:41"), ("fill", "2026-08-05", "2026-08-06 15:42"),

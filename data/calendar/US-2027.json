@@ -1,0 +1,51 @@
+{
+ "market": "US",
+ "year": 2027,
+ "source": "https://www.nyse.com/markets/hours-calendars",
+ "fetched": "2026-11-16",
+ "holidays": [
+  {
+   "date": "2027-01-01",
+   "name": "New Year's Day"
+  },
+  {
+   "date": "2027-01-18",
+   "name": "Martin Luther King, Jr. Day"
+  },
+  {
+   "date": "2027-02-15",
+   "name": "Washington's Birthday"
+  },
+  {
+   "date": "2027-03-26",
+   "name": "Good Friday"
+  },
+  {
+   "date": "2027-05-31",
+   "name": "Memorial Day"
+  },
+  {
+   "date": "2027-06-18",
+   "name": "Juneteenth National Independence Day"
+  },
+  {
+   "date": "2027-07-05",
+   "name": "Independence Day"
+  },
+  {
+   "date": "2027-09-06",
+   "name": "Labor Day"
+  },
+  {
+   "date": "2027-11-25",
+   "name": "Thanksgiving Day"
+  },
+  {
+   "date": "2027-12-24",
+   "name": "Christmas Day"
+  }
+ ],
+ "early_close": {
+  "2027-11-26": "13:00"
+ }
+}

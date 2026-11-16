@@ -1,0 +1,73 @@
+{
+ "market": "KRX",
+ "year": 2027,
+ "source": "https://global.krx.co.kr/contents/GLB/05/0501/0501110000/GLB0501110000.jsp",
+ "fetched": "2026-11-16",
+ "holidays": [
+  {
+   "date": "2027-01-01",
+   "name": "New Year's Day"
+  },
+  {
+   "date": "2027-02-08",
+   "name": "Seollal (New Year's Day by the lunar)"
+  },
+  {
+   "date": "2027-02-09",
+   "name": "Substitution Holiday"
+  },
+  {
+   "date": "2027-03-01",
+   "name": "Independence Movement Day"
+  },
+  {
+   "date": "2027-05-03",
+   "name": "Substitution Holiday"
+  },
+  {
+   "date": "2027-05-05",
+   "name": "Children's Day"
+  },
+  {
+   "date": "2027-05-13",
+   "name": "Buddha's Birthday"
+  },
+  {
+   "date": "2027-07-19",
+   "name": "Substitution Holiday"
+  },
+  {
+   "date": "2027-08-16",
+   "name": "Substitution Holiday"
+  },
+  {
+   "date": "2027-09-14",
+   "name": "Chuseok (Korean Thanksgiving)"
+  },
+  {
+   "date": "2027-09-15",
+   "name": "Chuseok (Korean Thanksgiving)"
+  },
+  {
+   "date": "2027-09-16",
+   "name": "Chuseok (Korean Thanksgiving)"
+  },
+  {
+   "date": "2027-10-04",
+   "name": "Substitution Holiday"
+  },
+  {
+   "date": "2027-10-11",
+   "name": "Substitution Holiday"
+  },
+  {
+   "date": "2027-12-27",
+   "name": "Substitution Holiday"
+  },
+  {
+   "date": "2027-12-31",
+   "name": "End of Year Holiday"
+  }
+ ],
+ "early_close": {}
+}
