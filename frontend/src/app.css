@@ -58,8 +58,13 @@
   --app-fs-small: var(--bv-font-size-caption-1);     /* 12 */
 }
 
-/* html is 62.5% (1rem = 10px): text that sets no size of its own reads the body size, not 10px */
-body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: var(--bv-font-family); font-size: var(--app-fs-body); }
+/* html is 62.5% (1rem = 10px): text that sets no size of its own reads the body size, not 10px. Lines break between
+   words (word-break, 2026-11-17): keep-all holds a Korean word whole, and overflow-wrap: break-word breaks only a
+   token longer than its box (a ticker, an id, a URL). Not `anywhere`: that also shrinks a box's min-content, and the
+   grid and flex columns then fold to a letter a line ("일|일 손|실", measured). Inherited by every screen; the
+   nowrap badges and cells below keep their one line. src/typeScale.test.ts holds this. */
+body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: var(--bv-font-family); font-size: var(--app-fs-body);
+  word-break: keep-all; overflow-wrap: break-word; }
 .num { font-variant-numeric: tabular-nums; }
 .muted { color: var(--app-fg-3); font-size: var(--app-fs-small); }
 .up { color: var(--app-up); }
@@ -322,7 +327,7 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .xa-kind { margin-left: 0.6rem; color: var(--app-fail-strong); font-weight: var(--bv-font-weight-semibold); }
 .xa-sec { display: grid; gap: 0.4rem; font-size: var(--app-fs-body); }
 .xa-sec ul { margin: 0; padding-left: 1.8rem; }
-.xa-log { display: block; padding: 0.6rem 0.8rem; background: var(--app-surface-2); border-radius: var(--bv-radius-100); font-size: var(--app-fs-small); white-space: pre-wrap; word-break: break-all; }
+.xa-log { display: block; padding: 0.6rem 0.8rem; background: var(--app-surface-2); border-radius: var(--bv-radius-100); font-size: var(--app-fs-small); white-space: pre-wrap; }
 .xa-need { font-size: var(--app-fs-small); }
 
 /* failure band under the status bar (mockup v0.7.2 States ④) */

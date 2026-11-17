@@ -153,3 +153,42 @@ describe('screen text — no developer wording (type-scale: script paths turned 
     expect(devText(probe)).toEqual(['x.tsx:4 scripts/', 'x.tsx:4 paper_execute.py', 'x.tsx:5 단계 5', 'x.tsx:6 POST /'])
   })
 })
+
+/** word-break (2026-11-17, the user: "단어 단위로 줄바뀜"): the body's line-breaking declarations, read from app.css */
+export function bodyBreaks(css: string): Record<string, string> {
+  const body = css.match(/(?:^|\n)body\s*\{([^}]*)\}/)?.[1] ?? ''
+  return Object.fromEntries([...body.matchAll(/(word-break|overflow-wrap)\s*:\s*([^;}]+)/g)].map((m) => [m[1], m[2].trim()]))
+}
+
+/** places that undo the body's breaks, in CSS or a JSX style: any `word-break` but keep-all (`normal` and
+ *  `break-all` split a Korean word, `break-word` is normal + anywhere), and `overflow-wrap` / its old name `word-wrap`
+ *  set to `anywhere` (folds grid and flex columns to a letter a line — measured).
+ *  ponytail: no exceptions — a deliberate one would be matched by selector, not by path:line (lines move) */
+export function wordSplitters(files: { path: string; text: string }[]) {
+  return files.flatMap(({ path, text }) => [
+    ...text.matchAll(/word-break\s*:\s*(?!keep-all\b)[\w-]+|wordBreak\s*:\s*['"`](?!keep-all\b)[\w-]+/g),
+    ...text.matchAll(/(?:overflow|word)-wrap\s*:\s*anywhere|(?:overflowWrap|wordWrap)\s*:\s*['"`]anywhere/g),
+  ].map((m) => `${path}:${line(text, m.index ?? 0)} ${m[0]}`))
+}
+
+describe('line breaks — between words, never inside a Korean word (word-break)', () => {
+  it('sets keep-all and break-word on body, inherited by every screen', () => {
+    expect(bodyBreaks(css.find((f) => f.path === './app.css')!.text)).toEqual({ 'word-break': 'keep-all', 'overflow-wrap': 'break-word' })
+  })
+
+  it('splits no word anywhere else in src/', () => {
+    expect(wordSplitters([...css, ...tsx])).toEqual([])
+  })
+
+  it('catches what it is for: a body without the rule, any word-break but keep-all, anywhere under either name', () => {
+    expect(bodyBreaks('.a { word-break: keep-all }\nbody { margin: 0; font-size: 1px; }')).toEqual({})
+    expect(bodyBreaks('body { margin: 0;\n  word-break: keep-all; overflow-wrap: anywhere; }')).toEqual({ 'word-break': 'keep-all', 'overflow-wrap': 'anywhere' })
+    const probe = [{ path: 'x.css', text: '.a { word-break: break-all }\n.b { overflow-wrap: anywhere } .c { word-break: keep-all }\n'
+      + '.d { word-break: normal } .e { word-break: break-word }\n.f { word-wrap: anywhere } .g { overflow-wrap: break-word }' },
+      { path: 'x.tsx', text: "<code style={{ wordBreak: 'break-all' }} />\n<p style={{ overflowWrap: \"anywhere\" }} />\n"
+      + "<i style={{ wordBreak: 'normal', wordWrap: `anywhere` }} /> <b style={{ wordBreak: 'keep-all' }} />" }]
+    expect(wordSplitters(probe)).toEqual(['x.css:1 word-break: break-all', 'x.css:3 word-break: normal', 'x.css:3 word-break: break-word',
+      'x.css:2 overflow-wrap: anywhere', 'x.css:4 word-wrap: anywhere',
+      "x.tsx:1 wordBreak: 'break-all", "x.tsx:3 wordBreak: 'normal", 'x.tsx:2 overflowWrap: "anywhere', 'x.tsx:3 wordWrap: `anywhere'])
+  })
+})
