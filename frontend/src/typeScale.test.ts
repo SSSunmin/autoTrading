@@ -192,3 +192,52 @@ describe('line breaks — between words, never inside a Korean word (word-break)
       "x.tsx:1 wordBreak: 'break-all", "x.tsx:3 wordBreak: 'normal", 'x.tsx:2 overflowWrap: "anywhere', 'x.tsx:3 wordWrap: `anywhere'])
   })
 })
+
+/** layout-overflow (2026-11-17): the page never scrolls sideways — a wide table scrolls inside its .matrix box, and
+ *  the columns holding it never grow to its width. jsdom lays nothing out, so these hold the rules that make it so;
+ *  the widths themselves were measured in a browser (54 screens × 3 widths, REPORT-layout-overflow). */
+const NOT_BOXED = ['plan-grid'] // its cells wrap (no nowrap) and it stops at 48rem: never wider than its column
+export function unboxedTables(files: { path: string; text: string }[]) {
+  return files.flatMap(({ path, text }) => [...text.matchAll(/<table\b([^>]*)>/g)]
+    .filter((m) => !/<div className="matrix[ "][^>]*>\s*$/.test(text.slice(0, m.index)))
+    .filter((m) => !NOT_BOXED.some((c) => m[1].includes(`className="${c}"`)))
+    .map((m) => `${path}:${line(text, m.index ?? 0)}`))
+}
+
+/** one rule's declarations, from the first block whose selector list is exactly `selector` */
+export function rule(css: string, selector: string): string {
+  const esc = selector.replace(/[.*+?^${}()|[\]\\>]/g, '\\$&')
+  return css.match(new RegExp(`(?:^|[\\n}])\\s*${esc}\\s*\\{([^}]*)\\}`))?.[1].replace(/\s+/g, ' ').trim() ?? ''
+}
+
+describe('no sideways page scroll — tables scroll in their box (layout-overflow)', () => {
+  const app = css.find((f) => f.path === './app.css')!.text
+
+  it('puts every table in a .matrix box, the box scrolls and the columns around it never grow to the table', () => {
+    expect(tsx.reduce((n, f) => n + (f.text.match(/<table\b/g)?.length ?? 0), 0)).toBeGreaterThan(30)
+    expect(unboxedTables(tsx)).toEqual([])
+    expect(rule(app, '.matrix')).toContain('overflow: auto')
+    expect(rule(app, '.stack-gap')).toContain('grid-template-columns: minmax(0, 1fr)')
+    expect(rule(app, '.cards > *')).toContain('min-width: 0')
+    // the regime badge in a card header: wraps between its phrases (it pushed the page out at 1024 and 768)
+    expect(rule(app, '.regime')).not.toContain('nowrap')
+    expect(rule(app, '.regime')).toContain('flex-wrap: wrap')
+    expect(rule(app, '.regime .tnum')).toContain('white-space: nowrap')
+  })
+
+  it('lays the home KPI cards out by width (2 → 3 → 6 across, 6 only from 2100px), not 6 at every width', () => {
+    const home = tsx.find((f) => f.path === './pages/Home.tsx')!.text
+    expect(home).toMatch(/<Grid [^>]*className="kpi-grid" style=\{\{ gridTemplateColumns: 'var\(--kpi-cols\)' \}\}>/)
+    expect(rule(app, '.kpi-grid')).toBe('--kpi-cols: repeat(2, minmax(0, 1fr));')
+    expect(app).toMatch(/@media \(min-width: 1200px\) \{ \.kpi-grid \{ --kpi-cols: repeat\(3, minmax\(0, 1fr\)\); \} \}/)
+    expect(app).toMatch(/@media \(min-width: 2100px\) \{ \.kpi-grid \{ --kpi-cols: repeat\(6, minmax\(0, 1fr\)\); \} \}/)
+  })
+
+  it('catches what it is for: a bare table, a table after other markup, and leaves a boxed one alone', () => {
+    const probe = [{ path: 'x.tsx', text: '<div className="matrix"><table>\n<table className="x">\n<div className="matrix rs"><table>\n'
+      + '<div className="matrix"><p /><table>\n<table className="plan-grid">\n<div className="matrix">\n  <table>' }]
+    expect(unboxedTables(probe)).toEqual(['x.tsx:2', 'x.tsx:4'])
+    expect(rule('.a { x: 1 }\n.stack-gap { display: grid; gap: 1rem; }', '.stack-gap')).toBe('display: grid; gap: 1rem;')
+    expect(rule('.stack-gap .x { a: 1 }', '.stack-gap')).toBe('')
+  })
+})

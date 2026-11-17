@@ -133,7 +133,16 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .bar .axis { left: 50%; width: 1px; background: var(--app-line); }
 .toolbar { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin-bottom: 1rem; }
 .section { margin-top: 1.4rem; }
-.stack-gap { display: grid; gap: 1.4rem; }
+/* layout-overflow (2026-11-17): a grid column or card never grows to its widest table — the .matrix box scrolls a
+   wide table sideways inside it, and the page itself never scrolls sideways (src/typeScale.test.ts holds this) */
+.stack-gap { display: grid; gap: 1.4rem; grid-template-columns: minmax(0, 1fr); }
+.cards > * { min-width: 0; }
+/* the home KPI cards (DS Grid, `style` takes the tracks): a value like "0.0% · ₩102,499,893" needs ~27rem a card on one
+   line and a figure must never split, so 6 across only from 2100px (6 across at 1920 would give 263px a card with the
+   scrollbar — too tight, review 1R #1; 1920 is 3 across, 538px), 3 from 1200px, else 2. Longer figures (more digits) wrap at the " · " between them, whole. */
+.kpi-grid { --kpi-cols: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 1200px) { .kpi-grid { --kpi-cols: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 2100px) { .kpi-grid { --kpi-cols: repeat(6, minmax(0, 1fr)); } }
 
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
@@ -185,7 +194,8 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 /* the agent's sale (sell-reasons' dashed 에이전트 매도 검토 tag), apart from the rules' solid badges */
 .xr.agent_sell { background: var(--app-surface); color: var(--app-fg); outline: 1px dashed var(--app-line); outline-offset: -1px; }  /* outline: the rules' badges' height */
 
-.regime { display: inline-flex; align-items: center; gap: 0.6rem; font-size: var(--app-fs-small); font-weight: var(--bv-font-weight-semibold); padding: 0.2rem 1rem; border-radius: var(--bv-radius-500); border: 1px solid transparent; white-space: nowrap; }
+.regime { display: inline-flex; align-items: center; gap: 0.6rem; font-size: var(--app-fs-small); font-weight: var(--bv-font-weight-semibold); padding: 0.2rem 1rem; border-radius: var(--bv-radius-500); border: 1px solid transparent; flex-wrap: wrap; row-gap: 0; }
+.regime .tnum { white-space: nowrap; } /* the badge wraps between its phrases in a narrow card header, the figure stays whole */
 .regime.on { background: var(--app-pass-bg); color: var(--app-pass-strong); border-color: var(--app-pass-strong); }
 .regime.off { background: var(--app-warn-bg); color: var(--app-warn); border-color: var(--app-warn-line); }
 .regime.none { background: var(--app-surface-2); color: var(--app-fg-2); border-color: var(--app-line); }
