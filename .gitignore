@@ -24,3 +24,5 @@ data/.kis_token.json
 # 시험 도커 볼륨 사본 · 깊은 경로의 토큰 파일(refresh-banner 보고, 2026-11-17)
 data/trial-copy/
 **/.kis_token.json
+# 새 이름(TRADING_SECRETS_DIR, 저장소 밖이 정상 — 안이면 KisClient가 거부한다; 이중 안전)
+**/kis_token.json

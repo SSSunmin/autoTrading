@@ -6,8 +6,13 @@ Quotations only — no order, balance or account call is made here. Paper (모�
 - Credentials come from the environment or the repository's ``.env`` (``KIS_APP_KEY`` · ``KIS_APP_SECRET`` ·
   ``KIS_ENV``; ``TRADING_ENV_FILE`` names another file); a missing one raises ``VendorNotConfiguredError`` naming the
   variable, never a value.
-- The access token is cached in ``data/.kis_token.json`` (gitignored; under ``TRADING_DATA_DIR`` when set) until shortly before it expires: KIS sends a
-  notice on every issuance and allows one per minute; a token lives a day.
+- The access token is cached in ``kis_token.json`` under ``TRADING_SECRETS_DIR`` (default ``~/.trading-core/secrets``)
+  until shortly before it expires: KIS sends a notice on every issuance and allows one per minute; a token lives a
+  day. The file is kept out of the data folder (a copy of the data — a volume ``docker cp``, a backup — must not carry
+  it) and out of any git working tree: ``KisClient`` refuses a path inside either (``check_token_path``). On POSIX the
+  folder is 0700 and the file 0600. A token left at the old place (``<TRADING_DATA_DIR>/.kis_token.json``) is never
+  read or moved — a new one is issued (KIS hands back the same token within six hours) and a warning names the old
+  file to delete.
 - Calls are spaced ``CALL_INTERVAL`` apart; a throttled answer (``EGW00201``) is retried after a pause. At the
   official samples' 0.5 s a paper account was throttled on 388 of 962 calls, at 1.0 s on 14 of 29 (2026-11-13),
   at 1.1 s on 0 of 15 — so the spacing is 1.1 s.
@@ -39,6 +44,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 from datetime import date, datetime, timedelta
@@ -53,7 +59,12 @@ from agent_trading_core.files import locked, replace_file
 from agent_trading_core.symbols import kis_us_symbol, safe_ticker_component
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN_FILE = Path(os.environ.get("TRADING_DATA_DIR") or ROOT / "data") / ".kis_token.json"
+SECRETS_DIR = Path.home() / ".trading-core" / "secrets"   # outside the repository and the data folder
+TOKEN_NAME = "kis_token.json"
+LEGACY_TOKEN = ".kis_token.json"                          # its old place, in the data folder
+# owner-only modes on POSIX. Windows' os.chmod sets nothing but the read-only flag; there the file sits in the user's
+# profile, which its ACL already keeps to that user
+POSIX = os.name == "posix"
 BASE_URL = {"paper": "https://openapivts.koreainvestment.com:29443"}   # 실전(openapi…:9443) deliberately absent
 CALL_INTERVAL = 1.1            # seconds between calls on a paper account (1.0 was throttled half the time)
 TOKEN_MARGIN = 600             # re-issue this many seconds before the stated expiry
@@ -65,6 +76,7 @@ TOKEN_ERRORS = {"EGW00121", "EGW00123"}   # 유효하지 않은 token · 기간�
 RETRIES = 3
 KST = ZoneInfo("Asia/Seoul")
 REQUIRED = ("KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ENV")
+logger = logging.getLogger(__name__)
 
 INDEX_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice"
 STOCK_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
@@ -87,12 +99,16 @@ CLOSE_TOL = 1e-6                      # relative change of the overlap day's clo
 PROVISIONAL_FILE = "_provisional.json"   # {"YYYY-MM-DD": [symbols whose row of that day is provisional]}
 
 
-def credentials() -> dict[str, str]:
-    """The KIS settings from the environment, after the repository ``.env`` or ``TRADING_ENV_FILE`` (neither
-    overrides it)."""
+def _load_env() -> None:
+    """The repository ``.env`` or ``TRADING_ENV_FILE`` into the environment (neither overrides it); no value read."""
     from dotenv import load_dotenv
 
     load_dotenv(os.environ.get("TRADING_ENV_FILE") or ROOT / ".env", override=False)
+
+
+def credentials() -> dict[str, str]:
+    """The KIS settings from the environment, after the repository ``.env`` or ``TRADING_ENV_FILE``."""
+    _load_env()
     missing = [k for k in REQUIRED if not os.environ.get(k)]
     if missing:
         raise VendorNotConfiguredError(f"KIS 설정 없음: {', '.join(missing)} — 환경변수나 저장소 루트 .env(또는 TRADING_ENV_FILE)에 넣는다")
@@ -100,6 +116,35 @@ def credentials() -> dict[str, str]:
     if env not in BASE_URL:
         raise VendorNotConfiguredError(f"KIS_ENV={env!r}: paper(모의투자)만 지원한다 — 실전 키로 시작하지 않는다")
     return {"appkey": os.environ["KIS_APP_KEY"], "appsecret": os.environ["KIS_APP_SECRET"], "env": env}
+
+
+def data_dir() -> Path:
+    return Path(os.environ.get("TRADING_DATA_DIR") or ROOT / "data")
+
+
+def token_path() -> Path:
+    """Where the access token is kept: ``TRADING_SECRETS_DIR`` (or ``SECRETS_DIR``) / ``kis_token.json``."""
+    return Path(os.environ.get("TRADING_SECRETS_DIR") or SECRETS_DIR).expanduser() / TOKEN_NAME
+
+
+def check_token_path(path: str | Path) -> Path:
+    """``path`` resolved, or ``VendorNotConfiguredError`` when it lies in the data folder or a git working tree —
+    copied with the data, or one ``git add`` from the remote. The message names the path, never a token or key."""
+    p = Path(path).expanduser().resolve()
+    data = data_dir().expanduser().resolve()
+    if p.is_relative_to(data):
+        raise VendorNotConfiguredError(f"KIS 토큰 파일이 데이터 폴더 안이다: {p} (데이터 폴더 {data}) — 데이터를 복사하면 "
+                                       "토큰이 따라간다. TRADING_SECRETS_DIR를 데이터 폴더 · 저장소 밖으로 둔다")
+    tree = next((d for d in p.parents if (d / ".git").exists()), None)
+    if tree is not None:
+        raise VendorNotConfiguredError(f"KIS 토큰 파일이 git 작업 트리 안이다: {p} (작업 트리 {tree}) — "
+                                       "TRADING_SECRETS_DIR를 저장소 밖으로 둔다")
+    return p
+
+
+def _owner_only(path: Path, mode: int) -> None:
+    if POSIX:
+        os.chmod(path, mode)
 
 
 def date_chunks(start: date, end: date, days: int) -> list[tuple[date, date]]:
@@ -134,12 +179,17 @@ def to_frame(rows: list[dict], fields: dict[str, str], symbol: str) -> pd.DataFr
 class KisClient:
     """One credential set, its token, and the call spacing. ``now`` / ``sleep`` are injectable for tests."""
 
-    def __init__(self, creds: dict[str, str] | None = None, *, session=None, token_file: Path = TOKEN_FILE,
+    def __init__(self, creds: dict[str, str] | None = None, *, session=None, token_file: Path | None = None,
                  now=time.time, sleep=time.sleep):
+        _load_env()                      # a TRADING_SECRETS_DIR set in .env counts from the first client on
+        self.token_file = check_token_path(token_file or token_path())   # before the key is even read
+        legacy = data_dir() / LEGACY_TOKEN
+        if legacy.exists():
+            logger.warning("옛 KIS 토큰 파일이 데이터 폴더에 남아 있다: %s — 읽거나 옮기지 않고 %s에 새로 발급한다. "
+                           "옛 파일은 지운다", legacy, self.token_file)
         self.creds = creds or credentials()
         self.base = BASE_URL[self.creds["env"]]
         self.session = session or requests.Session()
-        self.token_file = Path(token_file)
         self.now, self.sleep = now, sleep
         self._token: tuple[str, float] | None = None
         self._last_call = 0.0
@@ -171,10 +221,18 @@ class KisClient:
                                          f"{body.get('error_description', '')}".strip())
         expires = datetime.strptime(body["access_token_token_expired"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=KST)
         self._token = (body["access_token"], expires.timestamp())
-        self.token_file.parent.mkdir(parents=True, exist_ok=True)
-        replace_file(self.token_file, lambda tmp: Path(tmp).write_text(json.dumps(
-            {"env": self.creds["env"], "key_id": self._key_id(), "access_token": self._token[0],
-             "expires_at": self._token[1]}), encoding="utf-8"))
+        self.token_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _owner_only(self.token_file.parent, 0o700)       # mkdir's mode is masked and skips a folder already there
+        text = json.dumps({"env": self.creds["env"], "key_id": self._key_id(), "access_token": self._token[0],
+                           "expires_at": self._token[1]})
+
+        def write(tmp: str) -> None:
+            # created 0600 (not chmod after: no moment it is readable by others); os.replace keeps the mode
+            with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as f:
+                f.write(text)
+            _owner_only(Path(tmp), 0o600)                # a umask cannot widen it; this states it
+
+        replace_file(self.token_file, write)
         self.stats["token_issued"] += 1
         return self._token[0]
 

@@ -2,6 +2,7 @@
 throttle retry, 100-row windows, response → frame, settings errors that name variables but never values, the
 KIS cache file and its incremental update, and the comparison helpers in scripts/kis_check.py. No network."""
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -27,6 +28,13 @@ _rspec.loader.exec_module(rc)
 KEY, SECRET = "PSfakeappkey0000000000000000000000000", "fakesecret" * 18
 CREDS = {"appkey": KEY, "appsecret": SECRET, "env": "paper"}
 T0 = 1_800_000_000.0     # 2027-01-15 KST, a fixed "now"
+
+
+@pytest.fixture(autouse=True)
+def _no_repository_env(tmp_path, monkeypatch):
+    """KisClient loads the env file before it picks the token path: an empty one here, so the repository .env never
+    lands in this process (a test that wants one sets its own TRADING_ENV_FILE)."""
+    monkeypatch.setenv("TRADING_ENV_FILE", str(tmp_path / "none.env"))
 
 
 class Resp:
@@ -242,6 +250,7 @@ def test_us_pages_backward_from_the_end_date(tmp_path):
 @pytest.mark.unit
 def test_settings_name_the_missing_variable_and_refuse_a_live_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(kis, "ROOT", tmp_path)                            # no repository .env
+    monkeypatch.delenv("TRADING_ENV_FILE")                                # ROOT/.env, the file this test writes
     for k in ("KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ENV"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("KIS_APP_KEY", KEY)
@@ -532,3 +541,138 @@ def test_a_us_share_class_is_asked_with_a_slash(tmp_path):
     df = kis.fetch(_client(tmp_path, s), "BRK-B", date(2026, 11, 12), date(2026, 11, 12), tmp_path)
     assert len(df) == 1 and {p["SYMB"] for _, p, _ in s.calls} == {"BRK/B"}
     assert json.loads((tmp_path / kis.EXCHANGE_FILE).read_text(encoding="utf-8")) == {"BRK-B": "NAS"}
+
+
+# ---- where the token is kept (token-location, 2026-11-17) ---------------------------------------------------------
+
+@pytest.fixture
+def places(tmp_path, monkeypatch):
+    """A data folder and a secrets folder side by side, outside any git tree; no old token anywhere."""
+    data, secrets = tmp_path / "data", tmp_path / "secrets"
+    data.mkdir()
+    monkeypatch.setenv("TRADING_DATA_DIR", str(data))
+    monkeypatch.setenv("TRADING_SECRETS_DIR", str(secrets))
+    return data, secrets
+
+
+@pytest.mark.unit
+def test_the_default_place_is_outside_the_data_folder_and_the_repository(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRADING_SECRETS_DIR", raising=False)
+    monkeypatch.delenv("TRADING_DATA_DIR", raising=False)
+    assert kis.token_path() == Path.home() / ".trading-core" / "secrets" / "kis_token.json"   # by name only
+    # the guard on the default's shape, with a home of its own (a real home under git would be refused, rightly)
+    monkeypatch.setattr(kis, "SECRETS_DIR", tmp_path / "home" / ".trading-core" / "secrets")
+    path = kis.token_path()
+    assert not path.resolve().is_relative_to(kis.data_dir().resolve()) and not path.resolve().is_relative_to(kis.ROOT)
+    assert kis.check_token_path(path) == path.resolve()
+
+
+@pytest.mark.unit
+def test_a_secrets_dir_set_only_in_the_env_file_counts_from_the_first_client(places, tmp_path, monkeypatch):
+    env_file, chosen = tmp_path / "local.env", tmp_path / "chosen"
+    env_file.write_text(f"TRADING_SECRETS_DIR={chosen}", encoding="utf-8")
+    monkeypatch.delenv("TRADING_SECRETS_DIR")                 # restored after the test, over what .env loads
+    monkeypatch.setenv("TRADING_ENV_FILE", str(env_file))
+    c = kis.KisClient(CREDS, session=FakeSession(), now=Clock(), sleep=lambda _: None)
+    assert c.token_file == (chosen / "kis_token.json").resolve()
+    # and a data-folder value there is refused by that same first client
+    data = Path(os.environ["TRADING_DATA_DIR"])
+    monkeypatch.delenv("TRADING_SECRETS_DIR")
+    env_file.write_text(f"TRADING_SECRETS_DIR={data / 's'}", encoding="utf-8")
+    with pytest.raises(VendorNotConfiguredError, match="데이터 폴더 안"):
+        kis.KisClient(CREDS, session=FakeSession())
+
+
+@pytest.mark.unit
+def test_the_token_is_written_to_the_secrets_folder_and_reused_from_it(places):
+    data, secrets = places
+    s = FakeSession()
+    c = kis.KisClient(CREDS, session=s, now=Clock(), sleep=lambda _: None)
+    assert c.token_file == (secrets / "kis_token.json").resolve() and c.token() == "tok1"
+    assert (secrets / "kis_token.json").exists() and not list(data.iterdir())        # nothing in the data folder
+    s2 = FakeSession()
+    assert kis.KisClient(CREDS, session=s2, now=Clock(), sleep=lambda _: None).token() == "tok1" and s2.posts == []
+
+
+@pytest.mark.parametrize("where", ["data", "data_nested", "explicit"])
+@pytest.mark.unit
+def test_a_token_path_in_the_data_folder_is_refused_before_any_request(places, monkeypatch, where):
+    data, _ = places
+    if where == "data":
+        monkeypatch.setenv("TRADING_SECRETS_DIR", str(data))
+    elif where == "data_nested":
+        monkeypatch.setenv("TRADING_SECRETS_DIR", str(data / "a" / ".." / "secrets"))
+    s = FakeSession()
+    with pytest.raises(VendorNotConfiguredError, match="데이터 폴더 안") as e:
+        kis.KisClient(CREDS, session=s, token_file=data / "t.json" if where == "explicit" else None)
+    assert s.posts == [] and KEY not in str(e.value) and SECRET not in str(e.value)
+
+
+@pytest.mark.parametrize("marker", ["dir", "file"])        # a clone has a .git folder, a worktree a .git file
+@pytest.mark.unit
+def test_a_token_path_in_a_git_working_tree_is_refused(places, tmp_path, monkeypatch, marker):
+    repo = tmp_path / "repo"
+    (repo / "deep").mkdir(parents=True)
+    (repo / ".git").mkdir() if marker == "dir" else (repo / ".git").write_text("gitdir: elsewhere", encoding="utf-8")
+    monkeypatch.setenv("TRADING_SECRETS_DIR", str(repo / "deep" / "secrets"))
+    with pytest.raises(VendorNotConfiguredError, match="git 작업 트리 안") as e:
+        kis.KisClient(CREDS, session=FakeSession())
+    assert str(repo) in str(e.value) and KEY not in str(e.value)
+
+
+@pytest.mark.unit
+def test_this_repository_itself_is_refused(places):
+    with pytest.raises(VendorNotConfiguredError, match="git 작업 트리 안"):
+        kis.check_token_path(kis.ROOT / "secrets" / "kis_token.json")
+
+
+@pytest.mark.parametrize("posix", [True, False])
+@pytest.mark.unit
+def test_owner_only_modes_on_posix_and_nothing_elsewhere(places, monkeypatch, posix):
+    _, secrets = places
+    calls = []
+    monkeypatch.setattr(kis, "POSIX", posix)
+    monkeypatch.setattr(kis.os, "chmod", lambda path, mode: calls.append((Path(path), mode)))
+    kis.KisClient(CREDS, session=FakeSession(), now=Clock(), sleep=lambda _: None).token()
+    if posix:
+        assert [(p.parent if m == 0o600 else p, m) for p, m in calls] == [(secrets, 0o700), (secrets, 0o600)]
+        assert calls[1][0].name.startswith("kis_token.json.") and calls[1][0].suffix == ".tmp"   # before the move
+    else:
+        assert calls == []                                   # Windows: os.chmod only sets the read-only flag
+
+
+@pytest.mark.unit
+def test_the_real_modes_on_this_machine(places):
+    _, secrets = places
+    kis.KisClient(CREDS, session=FakeSession(), now=Clock(), sleep=lambda _: None).token()
+    assert kis.POSIX is (os.name == "posix") and (secrets / "kis_token.json").exists()
+    if kis.POSIX:
+        assert (secrets.stat().st_mode & 0o777, (secrets / "kis_token.json").stat().st_mode & 0o777) == (0o700, 0o600)
+    else:    # Windows: no mode set — the file is plain writable by its owner, not marked read-only
+        assert os.access(secrets / "kis_token.json", os.W_OK)
+
+
+@pytest.mark.unit
+def test_an_old_token_in_the_data_folder_is_not_read_or_moved_and_is_named(places, caplog):
+    data, secrets = places
+    old = data / ".kis_token.json"
+    old.write_text(json.dumps({"env": "paper", "key_id": hashlib.sha256(KEY.encode()).hexdigest()[:12],
+                               "access_token": "oldTOKENvalue123", "expires_at": T0 + 86_400}), encoding="utf-8")
+    before = old.read_bytes()
+    s = FakeSession()
+    with caplog.at_level("WARNING", logger="agent_trading_core.kis"):
+        c = kis.KisClient(CREDS, session=s, now=Clock(), sleep=lambda _: None)
+        assert c.token() == "tok1" and len(s.posts) == 1                 # a new one, not the old file's
+    assert old.read_bytes() == before                                    # left as it was, for the person to delete
+    assert "oldTOKENvalue123" not in (secrets / "kis_token.json").read_text(encoding="utf-8")
+    text = caplog.text
+    assert str(old) in text and "지운다" in text
+    for secret in ("oldTOKENvalue123", "tok1", KEY, SECRET):
+        assert secret not in text
+
+
+@pytest.mark.unit
+def test_a_client_given_its_credentials_loads_no_repository_key(tmp_path):
+    before = os.environ.get("KIS_APP_KEY")
+    kis.KisClient(CREDS, session=FakeSession(), token_file=tmp_path / "t.json")
+    assert os.environ.get("KIS_APP_KEY") == before                      # the autouse empty env file, not the .env

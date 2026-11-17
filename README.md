@@ -50,6 +50,9 @@ uv pip install --python .venv -e ".[dev]"
 | `KIS_APP_SECRET` | 앱 시크릿 |
 | `KIS_ACCOUNT_NO` | 계좌번호 앞 8자리(CANO). 시세 조회에는 쓰지 않는다 |
 | `KIS_ENV` | `paper`만 지원(모의투자 서버). 다른 값이면 시작하지 않는다 |
+| `TRADING_SECRETS_DIR` | 접근 토큰 `kis_token.json`을 두는 폴더(기본 `~/.trading-core/secrets`). 데이터 폴더 · 저장소 안이면 시작하지 않는다 |
+
+실계좌 키는 이 `.env`에 넣지 않는다 — 저장소 밖 파일에 두고 `TRADING_ENV_FILE`로 가리킨다(docs/00 §8).
 
 ## 사용 흐름
 
