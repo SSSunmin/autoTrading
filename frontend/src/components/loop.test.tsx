@@ -36,7 +36,8 @@ describe('runChipText: the server\'s next stage, or the retry of a failed one', 
 
 describe('failureBand (mockup ④)', () => {
   const refresh = { at: '2026-11-13T21:30:15+09:00', source: 'kis', symbols: 504, last_final_day: '2026-11-12',
-    failed_count: 0, failed_symbols: [], failed_error: null, last_success_at: '2026-11-13T21:30:15+09:00' }
+    failed_count: 0, failed_symbols: [], failed_error: null, resolved_count: 0, resolved_symbols: [],
+    last_success_at: '2026-11-13T21:30:15+09:00' }
   it('nothing failed, or nothing loaded: no band', () => {
     expect(failureBand(undefined)).toEqual([])
     expect(failureBand({ loop: loop({}), refresh })).toEqual([])
@@ -49,6 +50,12 @@ describe('failureBand (mockup ④)', () => {
   it('a refresh that left symbols out: count of all, the names, the last full success', () => {
     const lines = failureBand({ loop: loop({}), refresh: { ...refresh, failed_count: 2, failed_symbols: ['BRK-B', 'BF-B'], failed_error: 'NoMarketDataError: x', last_success_at: null } })
     expect(lines).toEqual([{ kind: 'refresh', title: '캐시 갱신 실패 · 2 / 504 심볼', detail: 'BRK-B · BF-B — NoMarketDataError: x', since: null }])
+  })
+  it('failures a later update resolved: counted in the title, never a band of their own', () => {
+    const lines = failureBand({ loop: loop({}), refresh: { ...refresh, failed_count: 1, failed_symbols: ['BF-B'], failed_error: 'NoMarketDataError: x',
+      resolved_count: 1, resolved_symbols: ['BRK-B'], last_success_at: null } })
+    expect(lines).toEqual([{ kind: 'refresh', title: '캐시 갱신 실패 · 1 / 504 심볼 (이후 해결 1)', detail: 'BF-B — NoMarketDataError: x', since: null }])
+    expect(failureBand({ loop: loop({}), refresh: { ...refresh, resolved_count: 2, resolved_symbols: ['BRK-B', 'BF-B'], last_success_at: null } })).toEqual([])
   })
   it('more failures than names served: an ellipsis', () => {
     const lines = failureBand({ loop: loop({}), refresh: { ...refresh, failed_count: 12, failed_symbols: ['A'] } })

@@ -295,7 +295,8 @@ def test_the_data_status_says_whether_each_key_is_set_and_never_its_value(tmp_pa
     assert body["cache"]["kis"]["files"] == 1 and body["cache"]["yahoo"]["files"] == 1
     assert body["refresh"]["KRX"] | {} == {"at": "2026-11-14T15:40:00+09:00", "source": "kis", "symbols": 41, "last_final_day": None,
                                          "failed_count": 1, "failed_symbols": ["005930.KS"],
-                                         "failed_error": "VendorUnavailableError: timeout", "last_success_at": "2026-11-13T15:40:00+09:00"}
+                                         "failed_error": "VendorUnavailableError: timeout", "resolved_count": 0, "resolved_symbols": [],
+                                         "last_success_at": "2026-11-13T15:40:00+09:00"}
     monkeypatch.setenv("KIS_ENV", "paper")
     assert {x["id"]: x["state"] for x in api.get("/api/data/status").json()["vendors"]}["kis"] == "reachable"
     # no response carries a value: the status, health and both markets' cards scanned for every secret

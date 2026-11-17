@@ -128,7 +128,7 @@ function DataTables({ d }: { d: DataStatus }) {
         </tbody>
       </table></div>
       <div className="matrix"><table>
-        <thead><tr><th>시장</th><th>가격 출처</th><th>가격 기준일</th><th>마지막 갱신</th><th className="r">심볼</th><th className="r">실패</th><th>마지막 성공</th></tr></thead>
+        <thead><tr><th>시장</th><th>가격 출처</th><th>가격 기준일</th><th>마지막 갱신</th><th className="r">심볼</th><th className="r">실패</th><th>마지막 전체 성공</th></tr></thead>
         <tbody>
           {MARKETS.map((m) => {
             const r = d.refresh[m], p = d.price_source[m]
@@ -136,7 +136,8 @@ function DataTables({ d }: { d: DataStatus }) {
               <tr key={m}><td>{MARKET_KO[m]}</td><td className="num">{p.price_source ?? '없음'}</td>
                 <td className="num">{p.price_as_of ?? '–'}{p.price_provisional ? ' · 잠정' : ''}</td>
                 <td className="num">{r ? utc(r.at) : '기록 없음'}</td><td className="r num">{r?.symbols ?? '–'}</td>
-                <td className={`r num ${r && r.failed_count > 0 ? 'alert-t' : ''}`} title={r?.failed_symbols.join(' · ')}>{r?.failed_count ?? '–'}</td>
+                <td className={`r num ${r && r.failed_count > 0 ? 'alert-t' : ''}`} title={r?.failed_symbols.join(' · ')}>{r?.failed_count ?? '–'}
+                  {r && r.resolved_count > 0 && <span className="muted" title={r.resolved_symbols.join(' · ')}> · 이후 해결 {r.resolved_count}</span>}</td>
                 <td className="num">{r?.last_success_at ? utc(r.last_success_at) : '–'}</td></tr>
             )
           })}

@@ -21,3 +21,6 @@ data/results/
 .env.*
 !.env.example
 data/.kis_token.json
+# 시험 도커 볼륨 사본 · 깊은 경로의 토큰 파일(refresh-banner 보고, 2026-11-17)
+data/trial-copy/
+**/.kis_token.json
