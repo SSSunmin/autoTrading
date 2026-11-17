@@ -154,4 +154,4 @@ cd frontend && npm install && npm run dev
 
 - `docs/01-오픈소스-규칙-조사.md`: 종목 선별·매수매도 규칙을 어디서 빌릴지 (freqtrade, Lean, qlib, ai-hedge-fund 코드 근거)
 - `docs/02-대시보드-화면-기획서.md`: 선별 근거·결정 근거를 보여주는 대시보드 화면 기획
-- 국내 데이터: 재무는 DART(`agent_trading_core/dart.py` — LLM 스냅샷의 재무 · 공시 섹션, `config.LLM["fundamentals"]` 기본 꺼짐, 키 `DART_API_KEY`, docs/01 §12-8), 뉴스·커뮤니티는 국내 소스로 교체. 가격·정산은 yfinance `.KS/.KQ` 그대로 사용 가능. 미국 재무 소스는 미정.
+- 국내 데이터: 재무는 DART(`agent_trading_core/dart.py` — LLM 스냅샷의 재무 · 공시 섹션, `config.LLM["fundamentals"]` 기본 꺼짐, 키 `DART_API_KEY`, docs/01 §12-8). 미국 재무는 SEC EDGAR(`agent_trading_core/edgar.py` — 같은 플래그, 키 없음 · `SEC_USER_AGENT` 연락처, docs/01 §12-9), 뉴스·커뮤니티는 국내 소스로 교체. 가격·정산은 yfinance `.KS/.KQ` 그대로 사용 가능. 미국 재무 소스는 미정.

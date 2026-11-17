@@ -36,7 +36,7 @@ import anthropic
 import pandas as pd
 from stockstats import wrap
 
-from agent_trading_core import dart
+from agent_trading_core import dart, edgar
 from agent_trading_core.audit import DecisionRecord, EvidenceItem
 from agent_trading_core.config import LLM
 from agent_trading_core.rating import RATING_REVIEW
@@ -53,7 +53,9 @@ from agent_trading_core.structured import validate_text
 
 ROOT = Path(__file__).resolve().parents[1]
 PROMPT_VERSION = "fm-v1"        # bump with any change to SYSTEM_PROMPT or the user message layout
-FUNDAMENTALS_PROMPT_VERSION = "fm-v2"   # LLM["fundamentals"]: SYSTEM_PROMPT + FUNDAMENTALS_PROMPT, the DART section
+# LLM["fundamentals"]: SYSTEM_PROMPT + FUNDAMENTALS_PROMPT, the DART (KRX) and SEC EDGAR (US) sections. fm-v2 was the
+# DART-only prompt, never switched on (no record carries it); its text named the KRX section alone.
+FUNDAMENTALS_PROMPT_VERSION = "fm-v3"
 
 # USD per million tokens, claude-opus-5-5 (2026-10 price list): input, output, cache read, 5-minute cache write
 PRICE = {"input_tokens": 4.00, "output_tokens": 20.00, "cache_read_input_tokens": 0.20,
@@ -97,11 +99,11 @@ SYSTEM_PROMPT = """당신은 롱온리 주식 재량 운용 펀드매니저다. 
 
 # Appended to SYSTEM_PROMPT when LLM["fundamentals"] is on. Fixed text: no date or ticker, so the cache prefix holds.
 FUNDAMENTALS_PROMPT = """
-## 재무 스냅샷(DART)
-- 국내 종목에는 사용자 메시지에 "재무 스냅샷(DART)" 섹션이 붙는다. 실적·재무 점검과 밸류에이션에서 재무 숫자는 이 섹션의 값만 쓰고, 인용할 때 보고서 기간과 접수번호를 함께 적는다.
-- 섹션은 기준일 전날까지 접수된 정기보고서와 공시만 담는다. 그 뒤에 나온 실적이나 공시를 안다고 가정하지 않는다.
+## 재무 스냅샷(DART · SEC EDGAR)
+- 국내 종목에는 "재무 스냅샷(DART)", 미국 종목에는 "재무 스냅샷(SEC EDGAR)" 섹션이 사용자 메시지에 붙는다. 실적·재무 점검과 밸류에이션에서 재무 숫자는 이 섹션의 값만 쓰고, 인용할 때 보고서 기간과 출처(DART 접수번호, SEC form · accession)를 함께 적는다.
+- 섹션은 기준일 전날까지 접수·제출된 보고서와 공시만 담는다. 그 뒤에 나온 실적이나 공시를 안다고 가정하지 않는다.
 - 섹션의 PER·PBR·EPS·BPS는 섹션에 적힌 정의(주식 수 출처, 순이익·자본 범위)대로만 해석한다. 섹션에 없는 배수나 추정 실적은 지어내지 않고, 필요하면 섹션 숫자에서 어떻게 계산했는지 적는다.
-- 공시는 제목과 접수일만 주어진다. 제목에서 내용을 추측해 숫자를 만들지 않는다.
+- 공시는 제목(미국은 form과 8-K items 번호)과 날짜만 주어진다. 그것에서 내용을 추측해 숫자를 만들지 않는다.
 - 섹션이 "재무 데이터 없음"이면 그 사유를 밝히고, 재무 숫자는 "스냅샷에 없음"으로 쓴다.
 """
 
@@ -157,21 +159,37 @@ def system_prompt() -> str:
     return SYSTEM_PROMPT + FUNDAMENTALS_PROMPT if fundamentals_on() else SYSTEM_PROMPT
 
 
+FUNDAMENTALS_TITLE = {"KRX": "재무 스냅샷(DART)", "US": "재무 스냅샷(SEC EDGAR)"}
+
+
+def fundamentals_client(market: str, cache_dir: str | Path):
+    """The run's DART (KRX) or SEC EDGAR (US) client with the flag on, else None: one a run, so its cache counts and a
+    failed network, key or User-Agent is not tried again per ticker."""
+    if not fundamentals_on():
+        return None
+    return {"KRX": lambda: dart.DartClient(Path(cache_dir) / "dart"),
+            "US": lambda: edgar.EdgarClient(Path(cache_dir) / "edgar")}.get(market, lambda: None)()
+
+
 def fundamentals_section(market: str, ticker: str, day: str, close: float | None, cache_dir: str | Path,
-                         client: dart.DartClient | None = None) -> tuple[Section | None, str | None]:
-    """(the "재무 스냅샷(DART)" section, why its figures are missing or None). No section with the flag off or outside
-    KRX (no US source yet). A failure (no key, the request limit, the network, no corp code, a refused answer) is a
-    section that says so, never a stopped decision; the reason is the run record's note."""
-    if not fundamentals_on() or market != "KRX":
+                         client=None) -> tuple[Section | None, str | None]:
+    """(the "재무 스냅샷(DART)" or "재무 스냅샷(SEC EDGAR)" section, why its figures are missing or None). No section with
+    the flag off or in another market. A failure (no key or User-Agent, the request limit, the network, no corp code
+    or CIK, a refused answer or one of another shape) is a section that says so, never a stopped decision; the reason
+    is the run record's note."""
+    if not fundamentals_on() or market not in FUNDAMENTALS_TITLE:
         return None, None
+    title = FUNDAMENTALS_TITLE[market]
+    source, error, plain = ((dart, dart.DartError, (dart.NO_KEY, dart.NO_CORP)) if market == "KRX"
+                            else (edgar, edgar.EdgarError, (edgar.NO_UA, edgar.NO_CIK)))
     try:
-        text, summary = dart.build(client or dart.DartClient(Path(cache_dir) / "dart"), ticker, day, close)
-        return Section("fundamentals", "재무 스냅샷(DART)", text, summary), None
-    except dart.DartError as e:      # the status code or the exception's class beside the kind, never the key
-        why = e.kind if e.kind in (dart.NO_KEY, dart.NO_CORP) else str(e)
+        text, summary = source.build(client or fundamentals_client(market, cache_dir), ticker, day, close)
+        return Section("fundamentals", title, text, summary), None
+    except error as e:               # the status code or the exception's class beside the kind, never a secret
+        why = e.kind if e.kind in plain else str(e)
     except Exception as e:           # an answer of an unexpected shape, a cache that cannot be written
         why = f"처리 오류 {type(e).__name__}"
-    return Section("fundamentals", "재무 스냅샷(DART)", dart.missing_text(why), f"재무 데이터 없음({why})"), why
+    return Section("fundamentals", title, dart.missing_text(why), f"재무 데이터 없음({why})"), why
 
 
 def market_section(frame: pd.DataFrame, as_of: str, provisional: bool = False, look_back: int = 20) -> Section:

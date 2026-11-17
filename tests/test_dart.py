@@ -34,6 +34,7 @@ def _no_real_key(tmp_path, monkeypatch):
     env.write_text("", encoding="utf-8")
     monkeypatch.setenv("TRADING_ENV_FILE", str(env))
     monkeypatch.delenv("DART_API_KEY", raising=False)
+    monkeypatch.delenv("SEC_USER_AGENT", raising=False)
 
 
 def corp_zip() -> bytes:
@@ -230,13 +231,13 @@ class Capture(FakeManager):
 
 
 @pytest.mark.unit
-def test_the_flag_on_adds_the_section_to_krx_only_under_fm_v2(tmp_path, monkeypatch):
+def test_the_flag_on_adds_the_dart_section_to_krx_under_fm_v3(tmp_path, monkeypatch):
     monkeypatch.setitem(dl.LLM, "fundamentals", True)
     monkeypatch.setattr(dart, "build", lambda c, t, d, close: (f"섹션 {t} {d} 종가 {close:g}", f"요약 {t}"))
     llm, market = Capture(), _market()
     market.today = "2026-08-04"
     r = dl.run_stage("KRX", "decide", "2026-08-04", tmp_path, market, at("2026-08-04", "15:40"), decider="llm", llm=llm)
-    assert r.status == "ok" and llm.requests and any("fm-v2" in n for n in r.notes)
+    assert r.status == "ok" and llm.requests and any("fm-v3" in n for n in r.notes)
     for q in llm.requests:
         text = q["messages"][0]["content"]
         assert q["system"][0]["text"] == agent.SYSTEM_PROMPT + agent.FUNDAMENTALS_PROMPT
@@ -244,11 +245,13 @@ def test_the_flag_on_adds_the_section_to_krx_only_under_fm_v2(tmp_path, monkeypa
         assert "## 재무 스냅샷(DART)\n\n섹션 " in text and f"2026-08-04 종가 {float(close):g}" in text
         assert text.index("## 선별") < text.index("## 재무 스냅샷(DART)") < text.index("## 포트폴리오")
     d = market_audit_decisions(tmp_path)
-    assert all(x.settings["prompt_version"] == "fm-v2" for x in d)
+    assert all(x.settings["prompt_version"] == "fm-v3" for x in d)
     assert all(any(e.source == "fundamentals" and e.summary.startswith("요약 ") for e in x.evidence) for x in d)
     # the system prompt has no date or ticker: one cache prefix for every call
     assert not re.search(r"\d{4}-\d{2}-\d{2}|\d{6}\.K[SQ]", agent.FUNDAMENTALS_PROMPT)
-    assert agent.fundamentals_section("US", "AAPL", DAY, 1.0, tmp_path) == (None, None)
+    # US takes the SEC EDGAR section (tests/test_edgar.py), not DART's; no User-Agent here, so it says so
+    section, why = agent.fundamentals_section("US", "AAPL", DAY, 1.0, tmp_path)
+    assert section.title == "재무 스냅샷(SEC EDGAR)" and why == "SEC_USER_AGENT 미설정"
 
 
 def market_audit_decisions(data):

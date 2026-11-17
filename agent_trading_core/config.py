@@ -158,8 +158,9 @@ LLM = {
     # (replayed from the decision records, scripts/daily_loop.default_decider), then the rule again. None: no end.
     "trial": False,
     "trial_sessions": 5,
-    # DART financials and filings in a KRX ticker's snapshot (agent.fundamentals_section, docs/01 §12-8). False: the
-    # user message and PROMPT_VERSION stay as they are; True: the "재무 스냅샷(DART)" section and prompt fm-v2.
+    # Financials and filings in a ticker's snapshot (agent.fundamentals_section): DART for KRX (docs/01 §12-8), SEC
+    # EDGAR for US (§12-9). False: the user message and PROMPT_VERSION stay as they are; True: the "재무 스냅샷(DART)" ·
+    # "재무 스냅샷(SEC EDGAR)" section and prompt fm-v3.
     "fundamentals": False,
 }
 
@@ -172,6 +173,20 @@ DART = {
     "periodic_days": 500,                # the periodic-report list looks this far back (five reports: 4 quarters + Q3)
     "recent_days": 30,                   # the filings listed in the section
     "disclosures_max": 10,
+}
+
+
+# SEC EDGAR (agent_trading_core/edgar.py): no key; SEC_USER_AGENT (a contact: name and e-mail) from the environment or
+# the .env, none = no request. SEC allows 10 requests a second across all machines; a cold ticker takes two (facts,
+# submissions) and the ticker table one a week, a cached one none.
+EDGAR = {
+    "timeout": 20,                       # seconds per request
+    "min_interval": 0.2,                 # seconds between requests: 5 a second, half SEC's limit
+    "tickers_max_age_days": 7,           # company_tickers.json is downloaded again after this
+    "max_quarter_age_days": 500,         # a latest quarter ending longer ago than this is no section (as DART's 500)
+    "shares_max_lag_days": 120,          # a cover page's share count older than this before the latest quarter end
+    "recent_days": 30,                   # the filings listed in the section
+    "filings_max": 10,
 }
 
 
