@@ -53,16 +53,19 @@ def test_shared_or_replayed_alone_the_screens_answer_the_same_bytes(ledger, monk
         kind="capital_set", operator="관리자", role="admin", reason="입금", market="KRX", target="paper", before={},
         effective_from="2026-06-04", after={"account": "paper", "amount": 11_000_000.0, "change": "flow", "flow": 1_000_000.0}))
     # same-day fills of one name, two reasons (review 1R #1): an agent sale of half the 200 left, then the rule's
-    # stop-loss of the rest — the one applied last closes the holding (full), and the gate replays newest first
-    for oid, rules in (("paper-2026-06-05-000270.KS", []), ("paper-2026-06-05-000270.KS-exit", ["stop_loss"])):
-        krx.record_order(OrderRecord(order_id=oid, ticker="000270.KS", trade_date="2026-06-05", side="Sell", quantity=100,
+    # stop-loss of the rest a second later — the one applied last closes the holding (full); the gate reads the same
+    # book (placed in one second they keep the order they come in, so a function replaying newest first on its own
+    # would differ — test_replay_order covers that case on the shared book)
+    for oid, rules, at in (("paper-2026-06-05-000270.KS", [], "2026-06-05T06:40:00Z"),
+                           ("paper-2026-06-05-000270.KS-exit", ["stop_loss"], "2026-06-05T06:40:01Z")):
+        krx.record_order(OrderRecord(order_id=oid, ticker="000270.KS", trade_date="2026-06-05", placed_at=at, side="Sell", quantity=100,
                                      filled_quantity=100, filled_price=9_000.0, fill_date="2026-06-08", status="filled",
                                      market="KRX", rules_applied=rules))
     pos = client.get("/api/positions").json()
     assert pos["cash_flows"] == [{"date": "2026-06-04", "amount": 1_000_000.0}]
-    # record order: the stop-loss came last and closed it; the gate's newest-first order closes it on the agent sale
+    # placed in that order, the stop-loss closed it — on the positions and on the gate alike (replay-order)
     assert pos["exits_by_reason"]["stop_loss"] == 2
-    assert client.get("/api/paper/progress").json()["paper"]["exits_by_reason"].get("stop_loss") == 1
+    assert client.get("/api/paper/progress").json()["paper"]["exits_by_reason"].get("stop_loss") == 2
     _fresh(main)
     shared = {p: client.get(p).content for p in GETS}
     _fresh(main)
@@ -82,11 +85,11 @@ def test_a_request_replays_each_market_once(ledger, monkeypatch):  # noqa: F811
     seen.clear(), _fresh(main)
     client.get("/api/markets")
     assert sorted(seen) == ["KRX", "US"]
-    # a user opening the five screens one after another, nothing kept yet: one per market, the gate's apart
+    # a user opening the five screens one after another, nothing kept yet: one replay per market, the gate's too
     seen.clear(), _fresh(main)
     for p in SCREENS:
         client.get(p)
-    assert sorted(seen) == ["KRX", "KRX", "US"]        # the gate keeps its own (newest-first) replay
+    assert sorted(seen) == ["KRX", "US"]
     # before the share each screen function replayed by itself
     seen.clear(), _fresh(main)
     monkeypatch.setattr(main._Store, "shared_book", lambda self, **_: None)

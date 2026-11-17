@@ -390,11 +390,19 @@ class Book:
 
 
 def replay(orders: list[OrderRecord], prices: Prices, cfg: PaperConfig, until: str) -> Book:
-    """Cash, holdings and equity after every fill up to and including ``until``. Same-day sells settle before buys."""
+    """Cash, holdings and equity after every fill up to and including ``until``. Same-day sells settle before buys,
+    and fills of one day and side in the order they were placed (``placed_at``), read from each record and not from
+    the list — so the screens (record order) and the gate (newest first) see the same closes (replay-order,
+    2026-11-17). ``orders``: record rows in record order (an order's last row is its state, ``latest_orders``), or
+    one row per order in any order.
+    ponytail: ``placed_at`` is to the second; orders placed in the same second keep the order they come in (a stable
+    sort), which is the record order for every caller that passes record rows (the API's shared book, the executor).
+    A row with no ``placed_at`` (none in the logs today) reads the clock when parsed and sorts last among its day's
+    side. Exact order for both needs a write sequence on the record — a store change."""
     fills = sorted((o for o in latest_orders(orders).values()
                     if o.status in ("filled", "partial") and o.filled_quantity > 0 and o.filled_price
                     and o.fill_date and o.fill_date <= until),
-                   key=lambda o: (o.fill_date, o.side != "Sell"))
+                   key=lambda o: (o.fill_date, o.side != "Sell", o.placed_at))
     book = Book(cfg.initial_cash, {}, [], [], units=cfg.initial_cash)
     flows = sorted((d, a) for d, a in cfg.cash_flows if d <= until)
 
@@ -1146,7 +1154,7 @@ def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | No
     operations log, for the peak reset (``peak_base``) and the capital (``with_capital``); without it the peak counts
     from the start and the capital is ``cfg``'s. ``agent_sells`` (``agent_sell_orders``): sells counted and shown as
     ``AGENT_SELL`` in ``exits_by_reason`` and ``closed``, apart from the rules' reasons and the rating downgrade; the
-    replay itself does not change. ``book``: this market's ``replay`` of the same orders (same order) and capital to
+    replay itself does not change. ``book``: this market's ``replay`` of the same orders and capital to
     the same day, done once by the caller and shared by the screens (the API); None replays here. A market with no
     index prices yet is as of its own date (``market_today`` at ``now``, default the clock)."""
     risk, cfg = risk or RiskConfig(), with_capital(cfg or PaperConfig(), operations or [])
@@ -1280,7 +1288,7 @@ def book_events(orders: list[OrderRecord], operations: list[OperationRecord], pr
     ``protections`` a lock a close newly set (Cooldown on every close, StoplossGuard / LowProfit when they fire);
     ``intervention`` a buy whose size a cap or the dd_halve scale cut; ``peak_reset`` an admin resume that reset the
     drawdown peak. Read from the records only, nothing stored. ``book``: this market's ``replay`` of the same orders
-    (same order) and capital to the same day, shared by the caller (the API); None replays here."""
+    and capital to the same day, shared by the caller (the API); None replays here."""
     risk, cfg = risk or RiskConfig(), with_capital(cfg or PaperConfig(), operations)
     calendar = prices.calendar(cfg.index)
     book = book if book is not None else replay(orders, prices, cfg, until=calendar[-1] if calendar else "9999-12-31")
@@ -1335,7 +1343,7 @@ def book_series(orders: list[OrderRecord], operations: list[OperationRecord], pr
     (the time-weighted unit value against the starting cash — a deposit or withdrawal is no gain, ``unit_values``),
     ``drawdown_pct`` (that value against its running peak, from the starting cash — as ``paper_progress``, no peak
     reset), ``exposure_pct`` (holdings / equity) and ``cash_pct`` (cash / equity), and ``equity``. Read from the
-    records only. ``book``: this market's ``replay`` of the same orders (same order) and capital to ``as_of``,
+    records only. ``book``: this market's ``replay`` of the same orders and capital to ``as_of``,
     shared by the caller (the API); None replays here."""
     cfg = with_capital(cfg, operations)
     calendar = prices.calendar(cfg.index)
@@ -1398,8 +1406,8 @@ def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], o
 
     With cash flows (``capital_set`` while running, ``with_capital``) the drawdown, the day returns and the period
     return are time-weighted (``unit_values``): a deposit or withdrawal is never a gain, a loss or a breach.
-    ``book``: this market's ``replay`` of the same orders (same order — same-day fills apply in it) and capital to
-    ``as_of``, shared by the caller (the API); None replays here."""
+    ``book``: this market's ``replay`` of the same orders and capital to ``as_of``, shared by the caller (the API);
+    None replays here."""
     criteria = criteria or PAPER_TRADING
     cfg = with_capital(cfg, operations)
     calendar = prices.calendar(cfg.index)

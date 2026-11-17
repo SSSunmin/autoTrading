@@ -252,21 +252,18 @@ class _Store:
             hit = self._cache[name] = (key, pickle.dumps(compute(), pickle.HIGHEST_PROTOCOL))
         return pickle.loads(hit[1])
 
-    def shared_book(self, *, newest_first: bool = False) -> Book | None:
+    def shared_book(self) -> Book | None:
         """This market's ``replay`` to the last day of its index prices, once per ``book_key()``, handed to the screen
-        functions (``book=``): the positions, the guard history and the series of a request — and of the requests
-        after it — share one replay of the order rows in record order. ``newest_first``: the gate's own, of the orders
-        newest first as it has always been called (``_Store.orders``) — same-day fills apply in input order, so the
-        two can differ in a close's ``full`` and the last digits of the equity; kept apart, not merged. None while
-        the index has no prices: each function then dates its own."""
+        functions (``book=``): the positions, the gate, the guard history and the series of a request — and of the
+        requests after it — share one replay (``replay`` orders a day's fills by the records, not by the list, so
+        one book serves them all — replay-order). None while the index has no prices: each function then dates its
+        own."""
         key = self.book_key()                    # before the replay: a file rewritten during it moves the next key
         calendar = PRICES.calendar(paper_config(self.market).index)
         if not calendar:
             return None
         cfg = with_capital(paper_config(self.market), self.operations)
-        orders = self.orders if newest_first else self.order_rows
-        return self.replayed("replay:newest" if newest_first else "replay", key,
-                             lambda: replay(orders, PRICES, cfg, until=calendar[-1]))
+        return self.replayed("replay", key, lambda: replay(self.order_rows, PRICES, cfg, until=calendar[-1]))
 
     @property
     def agent_sells(self) -> set[str]:
@@ -1430,7 +1427,7 @@ def _progress(st: _Store, expected: bool = True) -> dict:
     def gate() -> dict:
         start = paper_start(st.orders, st.operations, m)
         return paper_progress(st.orders, st.decisions(trade_date=(start, None)) if start else [], st.operations, PRICES,
-                              paper_config(m), book=st.shared_book(newest_first=True))
+                              paper_config(m), book=st.shared_book())
     p = st.replayed("progress", st.book_key("decisions"), gate)
     for c in p["criteria"]:
         c |= {"label_ko": PAPER_CRITERIA_KO.get(c["id"], c["id"]), "threshold_ko": _threshold_ko(c["id"], c["threshold"]),
