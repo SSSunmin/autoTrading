@@ -384,7 +384,8 @@ def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: 
     to ``on_record`` as soon as it is made, so a crash keeps what was paid for. Returns (records, counts).
     ``only``: ask these tickers instead (a holding gets the sell review); ``used``: calls this run made already;
     ``deferred``: given a list, a ticker that cannot be asked goes there as (ticker, reason), not to the rule.
-    ``notes``: given a list, a line per reason the DART section had no figures (``LLM["fundamentals"]`` on)."""
+    ``notes``: given a list, a line per reason the DART or SEC EDGAR section had no figures (``LLM["fundamentals"]``
+    on)."""
     book = replay(list(latest_orders(audit.orders()).values()), prices, cfg, until=day)
     targets = [(agent.HOLDING, t) for t in sorted(book.holdings)]
     targets += [(agent.CANDIDATE, c.ticker) for c in sorted(run.selected, key=lambda c: c.rank or 0)
@@ -404,8 +405,7 @@ def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: 
         except Exception as e:      # no key: every target gets the rule decision, said so in each record
             no_client = f"client: {type(e).__name__}: {e}"[:200]
     records, counts, no_fundamentals = [], Counter(), {}
-    # one DART client a run: its cache counts, and a failed network or key is not tried again per ticker
-    dart_client = agent.dart.DartClient(cache / "dart") if agent.fundamentals_on() and market == "KRX" else None
+    fundamentals_client = agent.fundamentals_client(market, cache)     # one a run (DART or SEC EDGAR)
     for kind, t in targets:
         cap = LLM["max_calls_per_run"]
         reason = no_client or (f"max_calls_per_run({cap})" if used + counts["llm_calls"] >= cap else None)
@@ -413,7 +413,7 @@ def agent_decide(audit: AuditLog, market: str, run: ScreenRun, day: str, cache: 
         if reason is None:
             try:
                 prices_now = agent.market_section(kis.read_cache(kis.cache_path(t, cache)), day, t in provisional)
-                fundamentals, why = agent.fundamentals_section(market, t, day, prices_now.close, cache, dart_client)
+                fundamentals, why = agent.fundamentals_section(market, t, day, prices_now.close, cache, fundamentals_client)
                 if why:
                     no_fundamentals.setdefault(why, []).append(t)
                 snap = agent.Snapshot(t, day, MARKETS[market]["currency"], [
