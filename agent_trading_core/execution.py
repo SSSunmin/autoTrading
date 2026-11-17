@@ -642,6 +642,13 @@ def dd_stop_standing(operations: list[OperationRecord]) -> bool:
     return any(op.target == "dd_stop" for op in standing_halts(operations))
 
 
+def market_today(market: str, now: datetime | None = None) -> str:
+    """The market's own date at ``now`` (default the clock), in its ``MARKETS`` timezone: 00:30 KST is still the day
+    before in New York, so a US book with no prices yet is not dated a day ahead by a server on Seoul time."""
+    tz = ZoneInfo(MARKETS[market]["timezone"])
+    return (now.astimezone(tz) if now else datetime.now(tz)).date().isoformat()
+
+
 def next_trading_day(calendar: list[str], date: str, market: str) -> str:
     """The trading day after ``date``: from the index calendar, or past its end the market's next session
     (``market_calendar.next_session`` — a listed holiday is skipped; a year with no calendar file, every weekday)."""
@@ -1131,18 +1138,21 @@ def agent_sell_orders(decisions: list[DecisionRecord]) -> set[str]:
 
 def positions_view(orders: list[OrderRecord], prices: Prices, *, as_of: str | None = None,
                    risk: RiskConfig | None = None, cfg: PaperConfig | None = None,
-                   operations: list[OperationRecord] | None = None, agent_sells: Collection[str] = ()) -> dict:
+                   operations: list[OperationRecord] | None = None, agent_sells: Collection[str] = (),
+                   book: Book | None = None, now: datetime | None = None) -> dict:
     """Holdings with their stop line, trailing high and expiry, the book's equity and drawdown, the guards'
     state, as of ``as_of`` (default: the last trading day in the data). ``exit_signal`` is the same verdict the
     executor turns into a rule-exit order at that day's close (``exit_signals``). ``operations``: the market's
     operations log, for the peak reset (``peak_base``) and the capital (``with_capital``); without it the peak counts
     from the start and the capital is ``cfg``'s. ``agent_sells`` (``agent_sell_orders``): sells counted and shown as
     ``AGENT_SELL`` in ``exits_by_reason`` and ``closed``, apart from the rules' reasons and the rating downgrade; the
-    replay itself does not change."""
+    replay itself does not change. ``book``: this market's ``replay`` of the same orders (same order) and capital to
+    the same day, done once by the caller and shared by the screens (the API); None replays here. A market with no
+    index prices yet is as of its own date (``market_today`` at ``now``, default the clock)."""
     risk, cfg = risk or RiskConfig(), with_capital(cfg or PaperConfig(), operations or [])
     calendar = prices.calendar(cfg.index)
-    as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else datetime.now().strftime("%Y-%m-%d"))
-    book = replay(orders, prices, cfg, until=as_of)
+    as_of = check_date(as_of) if as_of else (calendar[-1] if calendar else market_today(cfg.market, now))
+    book = book if book is not None else replay(orders, prices, cfg, until=as_of)
     day = _day_index(calendar, as_of)
     rows = []
     for h in sorted(book.holdings.values(), key=lambda h: h.entry_date):
@@ -1263,16 +1273,17 @@ INTERVENTION_RULES = ("max_position_pct", "sector_cap", "max_gross_pct", "dd_hal
 
 
 def book_events(orders: list[OrderRecord], operations: list[OperationRecord], prices: Prices, *,
-                risk: RiskConfig | None = None, cfg: PaperConfig | None = None) -> list[dict]:
+                risk: RiskConfig | None = None, cfg: PaperConfig | None = None, book: Book | None = None) -> list[dict]:
     """The guard / lock history of one book (screen 5), newest first, each ``{date, kind, ticker, text}``:
     ``guard`` the system halts (daily loss, −20% stop) and each day the drawdown first crossed dd_halve;
     ``lock`` buys a lock refused (one line per decision day and lock set; a name's own lock per order);
     ``protections`` a lock a close newly set (Cooldown on every close, StoplossGuard / LowProfit when they fire);
     ``intervention`` a buy whose size a cap or the dd_halve scale cut; ``peak_reset`` an admin resume that reset the
-    drawdown peak. Read from the records only, nothing stored."""
+    drawdown peak. Read from the records only, nothing stored. ``book``: this market's ``replay`` of the same orders
+    (same order) and capital to the same day, shared by the caller (the API); None replays here."""
     risk, cfg = risk or RiskConfig(), with_capital(cfg or PaperConfig(), operations)
     calendar = prices.calendar(cfg.index)
-    book = replay(orders, prices, cfg, until=calendar[-1] if calendar else "9999-12-31")
+    book = book if book is not None else replay(orders, prices, cfg, until=calendar[-1] if calendar else "9999-12-31")
     out: list[dict] = []
 
     def add(date: str, kind: str, text: str, ticker: str | None = None) -> None:
@@ -1319,12 +1330,13 @@ def book_events(orders: list[OrderRecord], operations: list[OperationRecord], pr
 # --- the paper-trading gate (screen 8, docs/05 §4) ---------------------------------------------------------
 
 def book_series(orders: list[OrderRecord], operations: list[OperationRecord], prices: Prices, cfg: PaperConfig,
-                as_of: str | None = None) -> dict:
+                as_of: str | None = None, *, book: Book | None = None) -> dict:
     """The paper book day by day from its start (``paper_start``) to ``as_of`` (the calendar's last day): ``nav_pct``
     (the time-weighted unit value against the starting cash — a deposit or withdrawal is no gain, ``unit_values``),
     ``drawdown_pct`` (that value against its running peak, from the starting cash — as ``paper_progress``, no peak
     reset), ``exposure_pct`` (holdings / equity) and ``cash_pct`` (cash / equity), and ``equity``. Read from the
-    records only."""
+    records only. ``book``: this market's ``replay`` of the same orders (same order) and capital to ``as_of``,
+    shared by the caller (the API); None replays here."""
     cfg = with_capital(cfg, operations)
     calendar = prices.calendar(cfg.index)
     latest = latest_orders(orders)
@@ -1333,7 +1345,7 @@ def book_series(orders: list[OrderRecord], operations: list[OperationRecord], pr
     out = {"start": start, "as_of": as_of, "initial_cash": cfg.initial_cash, "rows": []}
     if start is None or as_of is None or as_of < start:
         return out
-    book = replay(list(latest.values()), prices, cfg, until=as_of)
+    book = book if book is not None else replay(list(latest.values()), prices, cfg, until=as_of)
     eq_by_day, ex_by_day, nav_by_day = dict(book.equity), dict(book.exposure), dict(unit_values(book, cfg))
     peak = cfg.initial_cash
     for d in (d for d in calendar if start <= d <= as_of):
@@ -1366,7 +1378,7 @@ def _status(ok: bool) -> str:
 
 def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], operations: list[OperationRecord],
                    prices: Prices, cfg: PaperConfig, *, as_of: str | None = None,
-                   criteria: dict | None = None) -> dict:
+                   criteria: dict | None = None, book: Book | None = None) -> dict:
     """The six ``PAPER_TRADING`` criteria over the market's paper run, from its first day to ``as_of`` (default: the
     last trading day in the data), as docs/05 §4 defines them:
 
@@ -1385,7 +1397,9 @@ def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], o
     trading day; ``paper`` the period's figures the reference table compares (``paper_expected``).
 
     With cash flows (``capital_set`` while running, ``with_capital``) the drawdown, the day returns and the period
-    return are time-weighted (``unit_values``): a deposit or withdrawal is never a gain, a loss or a breach."""
+    return are time-weighted (``unit_values``): a deposit or withdrawal is never a gain, a loss or a breach.
+    ``book``: this market's ``replay`` of the same orders (same order — same-day fills apply in it) and capital to
+    ``as_of``, shared by the caller (the API); None replays here."""
     criteria = criteria or PAPER_TRADING
     cfg = with_capital(cfg, operations)
     calendar = prices.calendar(cfg.index)
@@ -1406,7 +1420,7 @@ def paper_progress(orders: list[OrderRecord], decisions: list[DecisionRecord], o
         out["counts"]["in_progress"] = len(criteria)
         return out
 
-    book = replay(list(latest.values()), prices, cfg, until=as_of)
+    book = book if book is not None else replay(list(latest.values()), prices, cfg, until=as_of)
     eq_by_day, ex_by_day, nav_by_day = dict(book.equity), dict(book.exposure), dict(unit_values(book, cfg))
     series, peak, prev, breaches = [], cfg.initial_cash, cfg.initial_cash, []
     for d in (d for d in calendar if start <= d <= as_of):
