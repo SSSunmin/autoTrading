@@ -698,17 +698,39 @@ def _refresh_lines() -> list[dict]:
     return out
 
 
+def _last_final_row(symbol: str, marks: dict[str, list[str]]) -> str | None:
+    """The latest date in ``symbol``'s KIS cache file whose row is final (not listed in ``_provisional.json``), read
+    from the file's tail; None: no file, or no final row there."""
+    try:
+        with kis.cache_path(symbol, DATA_DIR / "cache").open("rb") as f:
+            f.seek(max(0, f.seek(0, 2) - 512))
+            tail = f.read().decode("utf-8", "replace").splitlines()     # a cut first line or the header: no date
+    except (OSError, ValueError):       # no file, or a symbol that is no file name
+        return None
+    days = [d for d in (x.split(",", 1)[0] for x in tail) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)
+            and symbol not in marks.get(d, [])]
+    return max(days, default=None)
+
+
 def _refresh_out(lines: list[dict], market: str) -> dict | None:
-    """The market's latest cache refresh: when, how many symbols, which failed, and the last refresh with none failed."""
+    """The market's latest cache refresh: when, how many symbols, which still fail, and the last refresh with none
+    failed. A logged failure is resolved — counted apart, never dropped — once the symbol's KIS file holds a final row
+    dated after that refresh's last final day: a later update (the daily loop's, which logs no line here) brought it
+    past the day the failed run could not reach. A line without its last final day, or not of KIS: nothing resolved."""
     mine = [x for x in lines if x.get("market") == market]
     if not mine:
         return None
     last = mine[-1]
-    failed = last.get("failed") or []
+    logged = last.get("failed") or []
+    upto = last.get("last_final_day")
+    marks = kis.provisional(DATA_DIR / "cache") if upto and last.get("source") == "kis" else None
+    resolved = [f for f in logged if marks is not None and (_last_final_row(f.get("symbol") or "", marks) or "") > upto]
+    failed = [f for f in logged if f not in resolved]
     ok = next((x for x in reversed(mine) if not x.get("failed")), None)
     return {"at": last.get("at"), "source": last.get("source"), "symbols": last.get("symbols"),
-            "last_final_day": last.get("last_final_day"), "failed_count": len(failed),
+            "last_final_day": upto, "failed_count": len(failed),
             "failed_symbols": [f.get("symbol") for f in failed][:10], "failed_error": failed[0].get("error") if failed else None,
+            "resolved_count": len(resolved), "resolved_symbols": [f.get("symbol") for f in resolved][:10],
             "last_success_at": ok.get("at") if ok else None}
 
 

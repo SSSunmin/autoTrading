@@ -44,7 +44,8 @@ export function runChipText(loop: LoopStatus | undefined, kstTime: (iso: string)
 export interface BandLine { kind: 'loop' | 'refresh'; title: string; detail: string; since: string | null }
 
 /** The failure band under the status bar (mockup v0.7.2 States ④): a scheduled stage whose latest record failed, a
- *  cache refresh that left symbols out. Gone once both are fine. */
+ *  cache refresh that left symbols out and still does (a later update resolved the rest — counted in the title).
+ *  Gone once both are fine. */
 export function failureBand(h: Pick<Health, 'loop' | 'refresh'> | undefined): BandLine[] {
   if (!h) return []
   const out: BandLine[] = h.loop.failed.map((r) => ({
@@ -53,7 +54,7 @@ export function failureBand(h: Pick<Health, 'loop' | 'refresh'> | undefined): Ba
   }))
   const f = h.refresh
   if (f && f.failed_count > 0) {
-    out.push({ kind: 'refresh', title: `캐시 갱신 실패 · ${f.failed_count} / ${f.symbols ?? '?'} 심볼`,
+    out.push({ kind: 'refresh', title: `캐시 갱신 실패 · ${f.failed_count} / ${f.symbols ?? '?'} 심볼${f.resolved_count > 0 ? ` (이후 해결 ${f.resolved_count})` : ''}`,
       detail: `${f.failed_symbols.join(' · ')}${f.failed_count > f.failed_symbols.length ? ' …' : ''}${f.failed_error ? ` — ${f.failed_error}` : ''}`,
       since: f.last_success_at })
   }

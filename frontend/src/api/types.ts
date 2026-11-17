@@ -553,9 +553,13 @@ export interface RefreshInfo {
   source: string | null
   symbols: number | null
   last_final_day: string | null
+  /** the symbols of the latest refresh that still fail: a logged failure whose cache file has since been brought
+   *  past that refresh's last final day (the daily loop's update) is counted in resolved_count instead */
   failed_count: number
   failed_symbols: string[]
   failed_error: string | null
+  resolved_count: number
+  resolved_symbols: string[]
   /** the latest refresh of the market with no symbol failed; null: none */
   last_success_at: string | null
 }

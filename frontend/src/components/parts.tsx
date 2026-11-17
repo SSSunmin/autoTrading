@@ -74,7 +74,7 @@ export function FailureBand({ health, to }: { health: Health | undefined; to: st
         <div key={l.kind + l.title} className="fail-line">
           <b>{l.title}</b>
           <span className="muted wrap">{l.detail}</span>
-          <span className="muted num">{l.kind === 'refresh' ? `마지막 성공 ${l.since ? utc(l.since) : '없음'}` : `기록 ${utc(l.since)}`}</span>
+          <span className="muted num">{l.kind === 'refresh' ? `마지막 전체 성공 ${l.since ? utc(l.since) : '없음'}` : `기록 ${utc(l.since)}`}</span>
           {l.kind === 'loop' && health?.loop.retry_at_kst && <span className="num">재시도 {kst(new Date(health.loop.retry_at_kst))} KST</span>}
           <Link to={to}>캐시 상태 →</Link>
         </div>
