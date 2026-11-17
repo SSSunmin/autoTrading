@@ -72,6 +72,7 @@ from agent_trading_core.execution import (
     CAPITAL_MAX,
     EXIT_SUFFIX,
     SMALL_ACCOUNT,
+    Book,
     Prices,
     agent_sell_orders,
     book_events,
@@ -83,6 +84,7 @@ from agent_trading_core.execution import (
     effective_state,
     execution_lock,
     fmt_money,
+    market_today,
     next_trading_day,
     open_orders,
     paper_config,
@@ -90,7 +92,9 @@ from agent_trading_core.execution import (
     paper_progress,
     paper_start,
     positions_view,
+    replay,
     standing_halts,
+    with_capital,
 )
 from agent_trading_core.krx_names import (
     ACCOUNT_MODE_KO,
@@ -230,15 +234,15 @@ class _Store:
         """What a replay of this market's book reads, as a key: the order and operation records (a capital_set is an
         operation) and ``kinds``, the price file serving each ticker the book ever traded and its index (a refresh
         rewrites the file, a provisional row included — and the provisional list itself), the market's calendar files,
-        today (a default as_of falls back on it) and ``as_of``. Stamps as of ``refresh``: a record another process
-        appends after it is read in by the next request's refresh."""
+        the market's own date (``market_today`` — a default as_of falls back on it) and ``as_of``. Stamps as of
+        ``refresh``: a record another process appends after it is read in by the next request's refresh."""
         tickers = self._get("book_tickers", ("orders",), lambda: sorted({o.ticker for o in self.order_rows}))
         marks = PRICES.cache_dir / kis.PROVISIONAL_FILE
         return (tuple(self._stamp.get(k) for k in ("orders", "operations", *kinds)),
                 PRICES.stamp([paper_config(self.market).index, *tickers]),
                 marks.stat().st_mtime_ns if marks.exists() else None,
                 tuple(sorted((p.name, p.stat().st_mtime_ns) for p in market_calendar.calendar_dir().glob(f"{self.market}-*.json"))),
-                _clock().astimezone().date().isoformat(), as_of)
+                market_today(self.market, _clock()), as_of)
 
     def replayed(self, name: str, key: tuple, compute):
         """``compute()`` once per ``key`` (``book_key``), in memory only. Kept pickled: each call gets its own copy, so
@@ -247,6 +251,22 @@ class _Store:
         if hit is None or hit[0] != key:
             hit = self._cache[name] = (key, pickle.dumps(compute(), pickle.HIGHEST_PROTOCOL))
         return pickle.loads(hit[1])
+
+    def shared_book(self, *, newest_first: bool = False) -> Book | None:
+        """This market's ``replay`` to the last day of its index prices, once per ``book_key()``, handed to the screen
+        functions (``book=``): the positions, the guard history and the series of a request — and of the requests
+        after it — share one replay of the order rows in record order. ``newest_first``: the gate's own, of the orders
+        newest first as it has always been called (``_Store.orders``) — same-day fills apply in input order, so the
+        two can differ in a close's ``full`` and the last digits of the equity; kept apart, not merged. None while
+        the index has no prices: each function then dates its own."""
+        key = self.book_key()                    # before the replay: a file rewritten during it moves the next key
+        calendar = PRICES.calendar(paper_config(self.market).index)
+        if not calendar:
+            return None
+        cfg = with_capital(paper_config(self.market), self.operations)
+        orders = self.orders if newest_first else self.order_rows
+        return self.replayed("replay:newest" if newest_first else "replay", key,
+                             lambda: replay(orders, PRICES, cfg, until=calendar[-1]))
 
     @property
     def agent_sells(self) -> set[str]:
@@ -338,7 +358,8 @@ def _book(st: _Store, as_of: str | None = None) -> dict:
     screen, the ticker page, the peak reset and the capital check until its inputs move (``_Store.book_key``); a copy."""
     return st.replayed("book" if as_of is None else "book@", st.book_key("decisions", as_of=as_of),
                        lambda: positions_view(st.order_rows, PRICES, as_of=as_of, cfg=paper_config(st.market),
-                                              operations=st.operations, agent_sells=st.agent_sells))
+                                              operations=st.operations, agent_sells=st.agent_sells,
+                                              book=st.shared_book() if as_of is None else None, now=_clock()))
 
 
 def _clock() -> datetime:
@@ -1155,7 +1176,7 @@ def _series(st: _Store) -> tuple[dict, bool]:
     hit = st._cache.get("series")
     if hit is not None and hit[0] == key:
         return hit[1], True
-    book = book_series(rows, st.operations, PRICES, cfg)
+    book = book_series(rows, st.operations, PRICES, cfg, book=st.shared_book())
     ref, _, ref_error = _reference_equity(m)
     base = None
     if ref is not None and book["start"] and len(ref):
@@ -1409,7 +1430,7 @@ def _progress(st: _Store, expected: bool = True) -> dict:
     def gate() -> dict:
         start = paper_start(st.orders, st.operations, m)
         return paper_progress(st.orders, st.decisions(trade_date=(start, None)) if start else [], st.operations, PRICES,
-                              paper_config(m))
+                              paper_config(m), book=st.shared_book(newest_first=True))
     p = st.replayed("progress", st.book_key("decisions"), gate)
     for c in p["criteria"]:
         c |= {"label_ko": PAPER_CRITERIA_KO.get(c["id"], c["id"]), "threshold_ko": _threshold_ko(c["id"], c["threshold"]),
@@ -1596,8 +1617,8 @@ def events(market: str | None = MarketQuery, limit: int = Query(50, ge=1, le=500
     """가드·잠금 이력(화면 5): 그 시장의 주문·운영 기록에서 모은 가드 · 잠금 · Protections · 개입 · 피크 재설정, 최신순.
     저장된 이력은 없다(execution.book_events)."""
     st = _store(market)
-    rows = st.replayed("events", st.book_key(), lambda: book_events(st.order_rows, st.operations, PRICES,
-                                                                     cfg=paper_config(st.market)))
+    rows = st.replayed("events", st.book_key(), lambda: book_events(
+        st.order_rows, st.operations, PRICES, cfg=paper_config(st.market), book=st.shared_book()))
     for e in rows:
         e["kind_ko"] = BOOK_EVENT_KO[e["kind"]]
         e["name"] = st.name(e["ticker"]) if e["ticker"] else None
