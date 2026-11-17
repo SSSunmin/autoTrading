@@ -79,7 +79,7 @@ export default function Home() {
       {halted && <HaltBand state={halted} market={market} />}
 
       <p className="page-sub section"><b>{info?.label_ko ?? market} 장부</b> · 아래는 상단바에서 고른 시장 기준입니다(금액 {info?.currency ?? ""}).</p>
-      <Grid columns={6} gap="1.2rem">
+      <Grid gap="1.2rem" className="kpi-grid" style={{ gridTemplateColumns: 'var(--kpi-cols)' }}>
         {kpis.map((k) => <AgentKpiCard key={k.label} label={k.label} value={k.value} delta={book.error ?? k.delta} />)}
       </Grid>
 
