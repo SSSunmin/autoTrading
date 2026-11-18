@@ -7,8 +7,7 @@ import type { Decision, ExceptionItem } from '../api/types'
 import { useLabels } from '../hooks/useLabels'
 import { useMarketPath } from '../hooks/useMarket'
 import { Pct, RatingBadge } from './common'
-import { actionWord, bodySlot, confidenceText, evidenceSlot, execSlot, kindTag, mainOrder, priceCells, ratingPill, sections, sourceTag } from './cardLogic'
-import { orderWords } from './decisionLogic'
+import { actionWord, bodySlot, confidenceText, evidenceSlot, execLines, execSlot, kindTag, mainOrder, priceCells, ratingPill, sections, sourceTag } from './cardLogic'
 import { ExceptionButtons, Interventions, PlanGrid } from './decisionParts'
 import { FillTime } from './risk'
 
@@ -16,7 +15,8 @@ import { FillTime } from './risk'
  *  kind · rating · action / decision day · confidence), ② prices (four cells), ③ the execution state (badge, time, three
  *  cells), ④ the body (a memo's thesis with bull and bear, a sell review's reasons and reasoning), ⑤ evidence (two, "+n건"),
  *  ⑥ the buttons — so the same thing sits at the same height on every card in a row. "전체 보기" opens the card in place:
- *  every cut line in full, the memo's fields under Korean headings, every piece of evidence. An exception still on the
+ *  every cut line in full, the memo's other fields under Korean headings (each text once — card-dedupe), every piece of
+ *  evidence. An exception still on the
  *  queue adds its action row above the buttons (below every slot). ``showPlan``: the 하드룰 개입 tab shows the 원안 vs
  *  최종 grid without opening. ``defaultOpen``: start open (the tests render both states without a DOM). */
 export function DecisionCard({ d, exception, tokenRequired = false, showPlan = false, defaultOpen = false }: {
@@ -82,10 +82,9 @@ export function DecisionCard({ d, exception, tokenRequired = false, showPlan = f
             </div>
           ))}
         </div>
-        {open && d.orders.map((x) => (
-          <div key={x.order_id} className="dc-exec-text">
-            {orderWords(x)}{x.filled_price != null ? ` · ${amt(x.filled_price)} · ${amt(x.amount)}` : ''}{x.reason ? ` · ${x.reason}` : ''}
-            {x.exception_resolved && x.exception_action && <> <AgentChip variant="secondary">처리됨 · {labels?.exception_action_ko[x.exception_action] ?? x.exception_action}</AgentChip></>}
+        {open && execLines(d, exec, body, amt, labels?.exception_action_ko).map((x) => (
+          <div key={x.id} className="dc-exec-text">
+            {x.text}{x.done && <> <AgentChip variant="secondary">{x.done}</AgentChip></>}
           </div>
         ))}
         {open && !o && d.tradeable && d.source !== 'human' && <div className="dc-exec-text">주문 기록 없음 · 아직 모의 실행 전 (결정은 다음 거래일 시가에 주문됩니다)</div>}

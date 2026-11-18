@@ -5,8 +5,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import { money } from '../api/client'
-import type { Decision, MemoCard, Order } from '../api/types'
-import { actionWord, bodySlot, execSlot, NONE, priceCells, reasonChips, sections, sourceTag } from './cardLogic'
+import type { Decision, MemoCard, Order, RawCard } from '../api/types'
+import { actionWord, bodySlot, execLines, execSlot, NONE, priceCells, reasonChips, sections, sourceTag } from './cardLogic'
 import { DecisionCard } from './DecisionCard'
 import { ExceptionButtons } from './decisionParts'
 
@@ -38,6 +38,7 @@ const dec = (d: Partial<Decision> = {}): Decision => ({
 const html = (d: Decision, defaultOpen = false) =>
   renderToStaticMarkup(<MemoryRouter initialEntries={['/decisions?market=US']}><DecisionCard d={d} defaultOpen={defaultOpen} /></MemoryRouter>)
 const slots = (out: string) => [...out.matchAll(/class="(dc-(?:head|price|exec|body|memo|ev|xa|foot))[ "]/g)].map((m) => m[1])
+const css = readFileSync(join(__dirname, '..', 'app.css'), 'utf8')
 
 describe('six fixed slots, in the mockup order', () => {
   it('a folded memo card: head · prices · execution · body · evidence · buttons, nothing else', () => {
@@ -99,9 +100,9 @@ describe('전체 보기 opens the card in place', () => {
     expect(open).toContain('class="dc open"')
     expect(open.match(/class="dc-ev-row"/g)).toHaveLength(3)
     const heads = [...open.matchAll(/<section><div class="lb ?(?:up|down)? ?">([^<]+)<\/div>/g)].map((m) => m[1])
-    expect(heads).toEqual(['사업', '논지', '▲ 강세', '▼ 약세', '밸류에이션', '촉매', '무효화 조건', '청산 계획 · 기간', '5일 정산'])
+    expect(heads).toEqual(['사업', '하락 시 가격', '밸류에이션', '촉매', '무효화 조건', '청산 계획 · 기간', '5일 정산'])   // 논지 · 강세 · 약세 are ④
     expect(open).toContain('<span class="rc date">2027-01-28</span><span>1분기 실적</span>')
-    expect(open).toContain('하락 시 가격 $365.00')
+    expect(open).toContain('하락 시 가격</div><p>$365.00</p>')
     expect(open).toContain('목표가에서 절반 · 12개월')
     expect(open).toContain('>접기</button>')
     expect(open).not.toContain('원문 전체')                                   // every field read
@@ -110,19 +111,100 @@ describe('전체 보기 opens the card in place', () => {
   it('a text the parser did not read in full also shows the whole text, and every leftover field — nothing lost', () => {
     const part: MemoCard = { ...MEMO, bull: null, missing: ['Bull case'], extra: [{ label: 'Note', text: '추가 메모' }, { label: null, text: '떨어진 줄' }], complete: false }
     const s = sections(dec({ card: part, thesis: '**Thesis**: 원래 텍스트 전부' }), amt)
-    expect(s.map((x) => x.label)).toEqual(['사업', '논지', '▼ 약세', '밸류에이션', '촉매', '무효화 조건', '청산 계획 · 기간', 'Note', '기타', '원문 전체'])
+    expect(s.map((x) => x.label)).toEqual(['사업', '하락 시 가격', '밸류에이션', '촉매', '무효화 조건', '청산 계획 · 기간', 'Note', '기타', '원문 전체'])
     expect(s.at(-1)).toEqual({ label: '원문 전체', text: '**Thesis**: 원래 텍스트 전부', pre: true })
     expect(bodySlot(dec({ card: part }), false).rows[0]).toEqual({ label: '▲ 강세', text: NONE, tone: 'up' })
   })
 })
 
+describe('each text once on the open card (card-dedupe: the user saw ④ again in the memo, ③ again in the order line)', () => {
+  // the open card's visible text; a value 0 times is lost, 2 times repeated
+  const seen = (d: Decision) => { const t = html(d, true).replace(/<[^>]+>/g, ''); return (v: string) => t.split(v).length - 1 }
+  const once = (d: Decision, values: string[]) => { const n = seen(d); expect(values.filter((v) => n(v) !== 1).map((v) => `${v} ×${n(v)}`)).toEqual([]) }
+  const sell = (o: Partial<Order>) => order({ side: 'Sell', side_ko: '매도', ...o })
+
+  it('a memo with a filled buy: every field, the prices and the fill', () => {
+    once(dec({ card: { ...MEMO, extra: [{ label: 'Note', text: '추가 메모' }] }, orders: [order({})] }), [
+      '결제망 운영.', '결제 건수 성장이 이어진다.', '해외 결제가 빨라진다', '수수료 규제', 'PER 27배', '$365.00', '1분기 실적', '2027-01-28', '연말 결제',
+      '결제 성장 한 자릿수', '법안 통과', '목표가에서 절반', '12개월', 'Note', '추가 메모', '$400.00', '$460.00', '매수 40주', '$401.00', '$16,040.00'])
+  })
+  it('a memo the parser did not read in full: the record whole, once', () => {
+    once(dec({ thesis: '원래 텍스트 전부', card: { ...MEMO, bull: null, missing: ['Bull case'], complete: false } }), ['원래 텍스트 전부', '결제 건수 성장이 이어진다.'])
+  })
+  it('a sell review with a partial sell: reasons, reasoning, checks, the 목표 line, the fill and what is left', () => {
+    const o = sell({ quantity: 14, filled_quantity: 14, filled_price: 513.1, amount: 7_183.4, reason: '목표가 근접 축소',
+      plan: { proposed: { side: 'Sell', weight_pct: 0.12, qty: 20, amount: 10_000 }, final: { side: 'Sell', weight_pct: 0.08, qty: 14, amount: 7_000 }, interventions: [] } })
+    once(dec({
+      card: { kind: 'review', action: 'Trim', trim_to_pct: 7.5, reasons: ['overweight', 'target_reached', 'would_not_rebuy'], reasoning: '비중이 한도를 넘어 줄인다',
+        checks: [{ condition: '점유율 하락', met: true, evidence: '2분기 점유율 31%' }, { condition: '규제 강화', met: false, evidence: null }],
+        revised_target: 540, missing: [], extra: [{ label: null, text: '떨어진 줄' }], complete: true },
+      orders: [o], price_ctx: { close: 512, avg_price: 468.2, stop_loss_pct: -0.08, realized: { [o.order_id]: { pnl: 628.6, full: false } } },
+    }), ['비중 과다', '목표가 도달', '다시 사지 않음', '비중이 한도를 넘어 줄인다', '점유율 하락', '2분기 점유율 31%', '규제 강화', '떨어진 줄', '7.5%', '$540.00',
+      '부분 매도 14주', '남은 6주', '$513.10', '$7,183.40', '+$628.60', '목표가 근접 축소'])
+  })
+  it('REVIEW: the model text and why; without it the record whole', () => {
+    const card: RawCard = { kind: 'raw', reason: '등급 줄이 없음', raw: '첫 문단\n\n둘째 문단', missing: [], extra: [], complete: true }
+    once(dec({ rating: 'REVIEW', tradeable: false, card }), ['첫 문단\n\n둘째 문단', '등급 줄이 없음'])
+    once(dec({ rating: 'REVIEW', tradeable: false, thesis: '**Rating**: REVIEW', card: { ...card, raw: null, complete: false } }), ['**Rating**: REVIEW'])
+  })
+  it('a rule exit and a hand-made record: their text once, the sell fill once', () => {
+    once(dec({ source: 'rule', source_kind: 'rule', rating: 'Sell', settings: { exit_reason: 'stop_loss' },
+      card: { kind: 'text', label: null, text: '손절선 아래 마감', missing: [], extra: [], complete: true },
+      orders: [sell({ rules_applied: ['stop_loss'] })] }), ['손절선 아래 마감', '$401.00', '$16,040.00'])
+    // the parser's heading on a rule exit's text: ④'s label, its one place (review 1R #2)
+    once(dec({ source: 'rule', source_kind: 'rule', rating: 'Sell', settings: { exit_reason: 'stop_loss' },
+      card: { kind: 'text', label: '청산 메모', text: '손절선 아래 마감', missing: [], extra: [], complete: true }, orders: [sell({ rules_applied: ['stop_loss'] })] }),
+    ['청산 메모', '손절선 아래 마감'])
+    once(dec({ source: 'human', source_kind: 'human', card: { kind: 'text', label: '사람 메모', text: '수동으로 정리함', missing: [], extra: [], complete: true } }),
+      ['사람 메모', '수동으로 정리함'])
+  })
+  it('the order lines: what ③ says is left out (digit grouping aside), another order keeps its whole line, the 처리됨 chip once', () => {
+    const lines = (d: Decision, act: Record<string, string> = {}) =>
+      execLines(d, execSlot(d, amt, { action: act }), bodySlot(d, true), amt, act).map((x) => [x.text, x.done])
+    expect(lines(dec({ orders: [order({})] }))).toEqual([])                                   // all of it in ③
+    const big = sell({ quantity: 1_400, filled_quantity: 1_400, amount: 561_400 })
+    expect(lines(dec({ orders: [big], price_ctx: { close: 400, avg_price: 380, stop_loss_pct: -0.08, realized: { [big.order_id]: { pnl: 1, full: false } } } })))
+      .toEqual([['$561,400.00', null]])                                                       // "매도 1400주" is ③'s "부분 매도 1,400주"
+    // a halt's leftover of the same size as the card's own order: its words are its own, not ③'s
+    const left = order({ order_id: 'x', status: 'cancelled', status_ko: '취소', filled_quantity: 0, filled_price: null, reason: '정지로 취소' })
+    expect(lines(dec({ orders: [left, order({})] }))).toEqual([['매수 40주 · 정지로 취소', null]])
+    // a memo's ▼ 약세 naming the same words is no order: the reason stays (review 1R #1)
+    expect(lines(dec({ card: { ...MEMO, bear: '정지로 취소 위험이 있다' }, orders: [left, order({})] }))).toEqual([['매수 40주 · 정지로 취소', null]])
+    const exc = order({ status: 'exception', status_ko: '예외', quantity: 23, filled_quantity: 0, filled_price: null, exception_resolved: true, exception_action: 'dismiss_order' })
+    expect(lines(dec({ orders: [exc] }), { dismiss_order: '무시' })).toEqual([])               // ③ 처리 says 무시
+    const halted = { ...exc, status: 'cancelled', status_ko: '취소' } as Order
+    expect(lines(dec({ orders: [halted, order({ order_id: 'y' })] }), { dismiss_order: '무시' })).toEqual([['매수 23주', '처리됨 · 무시']])
+    // a blocked buy whose reason is the lock line under its grid: once (KB금융 measured twice); a cut's note is a tooltip only, kept
+    const note = '국면 필터: 200일선 아래, 신규 매수 없음'
+    const plan = (iv: object) => ({ proposed: { side: 'Buy', weight_pct: 0.5, qty: 9, amount: 900 }, final: { side: 'Hold', weight_pct: null, qty: 0, amount: 0 }, interventions: [iv] })
+    const blocked = (iv: object) => dec({ orders: [order({ status: 'blocked', status_ko: '차단', quantity: 0, filled_quantity: 0, filled_price: null, reason: note, plan: plan(iv) } as never)] })
+    once(blocked({ rule: 'regime_filter', before: null, after: null, note }), [note])
+    expect(lines(blocked({ rule: 'regime_filter', before: null, after: null, note }))).toEqual([['매수 0주', null]])
+    expect(lines(blocked({ rule: 'max_position_pct', before: '50%', after: '0%', note }))).toEqual([[`매수 0주 · ${note}`, null]])
+  })
+  it('kept, by the directive (the folded slots as they are): ③ and ④ both name a rule exit\'s order, ② and ④ a trim with no plan', () => {
+    const exit = dec({ source: 'rule', source_kind: 'rule', rating: 'Sell', settings: { exit_reason: 'stop_loss' },
+      card: { kind: 'text', label: null, text: '손절선 아래 마감', missing: [], extra: [], complete: true }, orders: [sell({})] })
+    expect(seen(exit)('매도 40주')).toBe(2)
+    const trim = dec({ card: { kind: 'review', action: 'Trim', trim_to_pct: 7.5, reasons: [], checks: [], reasoning: '줄인다', revised_target: null, missing: [], extra: [], complete: true } })
+    expect(seen(trim)('7.5%')).toBe(2)
+  })
+})
+
 describe('REVIEW and the 하드룰 개입 grid (review 1R #1 · #3)', () => {
-  it('REVIEW: 원문 전체 is the whole model text the server cut, or the record whole when it has none', () => {
+  it('REVIEW: ④ is the whole model text the server cut, or the record whole when it has none — and no section repeats it', () => {
     const raw = '첫 문단\n\n둘째 문단\n**Thesis**: y'
-    const s = sections(dec({ card: { kind: 'raw', reason: 'x', raw, missing: [], extra: [], complete: true } }), amt)
-    expect(s.filter((x) => x.label === '원문 전체')).toEqual([{ label: '원문 전체', text: raw, pre: true }])
-    const none = sections(dec({ thesis: '**Rating**: REVIEW\n\n**사유**: x', card: { kind: 'raw', reason: 'x', raw: null, missing: ['원문'], extra: [], complete: false } }), amt)
-    expect(none.filter((x) => x.label === '원문 전체')).toEqual([{ label: '원문 전체', text: '**Rating**: REVIEW\n\n**사유**: x', pre: true }])
+    const d = dec({ card: { kind: 'raw', reason: 'x', raw, missing: [], extra: [], complete: true } })
+    expect(bodySlot(d, true).sum).toBe(raw)
+    expect(sections(d, amt)).toEqual([])
+    const whole = '**Rating**: REVIEW\n\n**사유**: x'
+    const cut: RawCard = { kind: 'raw', reason: 'x', raw: null, missing: ['원문'], extra: [], complete: false }
+    const none = dec({ thesis: whole, card: cut })
+    expect(bodySlot(none, true).sum).toBe(whole)
+    expect(sections(none, amt)).toEqual([])
+    // the model's text cut out of a longer record: the record whole still shows, below
+    expect(sections({ ...none, card: { ...cut, raw } }, amt)).toEqual([{ label: '원문 전체', text: whole, pre: true }])
+    expect(css).toMatch(/\.dc\.open \.dc-sum \{[^}]*white-space: pre-wrap;/)      // its line breaks kept
   })
   it('the 원안 vs 최종 grid of a folded card sits below the evidence, every slot above it in place', () => {
     const plan = { proposed: { side: 'Buy', weight_pct: 0.08, qty: 15, amount: 6000 }, final: { side: 'Hold', weight_pct: null, qty: 0, amount: 0 },
@@ -217,7 +299,6 @@ describe('execution slot: the badge and three cells per state (mockup §1-1, §2
 })
 
 describe('the slot heights are fixed in CSS while folded, minimums when open', () => {
-  const css = readFileSync(join(__dirname, '..', 'app.css'), 'utf8')
   const rule = (sel: string) => css.match(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? ''
   it('holds the mockup heights: head 80 · prices 94 · execution 84 · body 148 · evidence 76', () => {
     for (const [sel, h] of [['.dc-head', '8rem'], ['.dc-price', '9.4rem'], ['.dc-exec', '8.4rem'], ['.dc-body', '14.8rem'], ['.dc-ev', '7.6rem']]) {
