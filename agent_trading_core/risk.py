@@ -9,6 +9,7 @@ backtest. The pieces, in the order the loop applies them each day (docs/01 §3, 
 - ``Protections``      freqtrade's four: StoplossGuard (global lock after N stops), MaxDrawdown (via drawdown_scale),
                        Cooldown (no re-entry right after an exit), LowProfit (lock a ticker that keeps losing)
 - ``regime_on``        index above its 200-day average; below it no new buys are opened
+- ``regime_released``  backtest only (docs/12): a release that lets new buys open below the average anyway
 - ``size_targets``     equal weight capped per name, per sector and by gross exposure, scaled by the guards
 
 The functions return the reason they fired as text so ``DecisionRecord.hard_rule_overrides`` and the
@@ -182,6 +183,33 @@ def regime_on(index_closes: pd.Series, cfg: RiskConfig) -> bool:
     if len(s) < cfg.regime_ma_days:
         return True
     return float(s.iloc[-1]) >= float(s.iloc[-cfg.regime_ma_days:].mean())
+
+
+# releases of the regime filter measured in docs/12 — one value each, fixed before the run (no grid)
+REGIME_RELEASES = ("half", "ma50", "low_rebound")
+RELEASE_HALF_SCALE = 0.5      # "half": new buys at half weight
+RELEASE_MA_DAYS = 50          # "ma50": last close above its 50-day average
+RELEASE_LOW_DAYS = 60         # "low_rebound": last close this far over the lowest close of the last 60 sessions
+RELEASE_REBOUND = 0.10
+
+
+def regime_released(index_closes: pd.Series, rule: str | None) -> bool:
+    """With the index below its regime average, may new buys open anyway under ``rule``? Reads the closes it is
+    given (the caller cuts them at the decision day). None: never. "half": always — the caller halves the weights.
+    "ma50": last close above the 50-day simple average. "low_rebound": last close at least +10% over the lowest
+    close of the last 60 sessions, the last one included. Fewer bars than the window: not released.
+    Backtest only: the executor (execution.py) has no release."""
+    if rule is None:
+        return False
+    if rule == "half":
+        return True
+    s = index_closes.dropna()
+    if rule == "ma50":
+        return len(s) >= RELEASE_MA_DAYS and float(s.iloc[-1]) > float(s.iloc[-RELEASE_MA_DAYS:].mean())
+    if rule == "low_rebound":
+        return (len(s) >= RELEASE_LOW_DAYS
+                and float(s.iloc[-1]) / float(s.iloc[-RELEASE_LOW_DAYS:].min()) - 1 >= RELEASE_REBOUND - EPS)
+    raise ValueError(f"regime release {rule!r}: one of {REGIME_RELEASES} or None")
 
 
 def size_targets(targets: list[str], cfg: RiskConfig, *, scale: float = 1.0,
