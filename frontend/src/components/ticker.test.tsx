@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ThesisCheck, TickerDetail, TickerHolding } from '../api/types'
 import { HoldingPanel, ThesisPanel, TickerFacts } from './ticker'
-import { earningsLine, latestReview, metLine, TICKER_TABS, verdictBadge } from './tickerLogic'
+import { bandTiles, earningsLine, latestReview, metLine, TICKER_TABS, verdictBadge } from './tickerLogic'
 
 const html = (el: ReactElement) => renderToStaticMarkup(<MemoryRouter>{el}</MemoryRouter>)
 
@@ -63,6 +63,15 @@ describe('ticker tabs and verdicts', () => {
     expect(earningsLine(detail({ market: 'KRX', earnings_note_ko: '국내 실적 발표일 미제공' }))).toEqual({ date: null, sub: '국내 실적 발표일 미제공', failed: false })
     expect(earningsLine(detail({ earnings: { date: null, date_to: null, source: 'yfinance calendar', fetched: '2026-06-03', error: null, failed: null },
       earnings_note_ko: '출처에 예정일 없음' }))).toEqual({ date: null, sub: 'yfinance calendar · 2026-06-03 조회 · 출처에 예정일 없음', failed: false })
+  })
+})
+
+describe('등급 띠 (tile-overflow)', () => {
+  it("each decision is the rating's short code over its MM/DD, the mockup's tile", () => {
+    expect(bandTiles([{ date: '2026-06-05', rating: 'Hold' }, { date: '2026-07-24', rating: 'Overweight' }, { date: '2026-11-17', rating: 'REVIEW' }]))
+      .toEqual([{ date: '2026-06-05', rating: 'Hold', code: 'H', md: '06/05' }, { date: '2026-07-24', rating: 'Overweight', code: 'OW', md: '07/24' },
+        { date: '2026-11-17', rating: 'REVIEW', code: 'R', md: '11/17' }])
+    expect(bandTiles([{ date: '2026-01-02', rating: 'Neutral' as never }])[0].code).toBe('Neutral')   // an unknown rating shows as it is
   })
 })
 

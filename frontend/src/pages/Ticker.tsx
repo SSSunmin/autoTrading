@@ -4,11 +4,12 @@ import { AgentEmptyState, AgentSectionPanel, AgentSelect, AgentTabs } from '@bv-
 
 import { api, stockName } from '../api/client'
 import { useApi } from '../hooks/useApi'
+import { useLabels } from '../hooks/useLabels'
 import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded, Pct, RatingBadge, RuleCell, TickerCell } from '../components/common'
 import { DecisionCard } from '../components/DecisionCard'
 import { HoldingPanel, ThesisPanel, TickerFacts } from '../components/ticker'
-import { TICKER_TABS } from '../components/tickerLogic'
+import { bandTiles, TICKER_TABS } from '../components/tickerLogic'
 import type { TickerDetail } from '../api/types'
 
 /** 4: one instrument. Identity, decision history as the memo reads, screening history, outcomes and lessons, the
@@ -36,6 +37,7 @@ export default function Ticker() {
 }
 
 function Body({ d, tab, setTab }: { d: TickerDetail; tab: string; setTab: (t: string) => void }) {
+  const labels = useLabels()
   const latest = d.screening[0]
   return (
     <>
@@ -52,7 +54,11 @@ function Body({ d, tab, setTab }: { d: TickerDetail; tab: string; setTab: (t: st
         {tab === 'decisions' && (
           <>
             <div className="timeline" style={{ marginBottom: '1.2rem' }}>
-              {d.timeline.map((t) => <span key={t.date} className={`tl ${t.rating}`} title={`${t.date} ${t.rating}`}>{t.date.slice(5).replace('-', '/')}</span>)}
+              <span className="tl-label">등급 띠</span>
+              {bandTiles(d.timeline).map((t) => (
+                <span key={t.date} className="tl-item" title={`${t.date} ${labels.data?.rating_ko?.[t.rating] ?? t.rating}`}>
+                  <span className={`tl ${t.rating}`}>{t.code}</span><span className="tl-d">{t.md}</span>
+                </span>))}
             </div>
             {d.decisions.length ? <div className="cards">{d.decisions.map((x) => <DecisionCard key={`${x.trade_date}-${x.source}`} d={x} />)}</div>
               : <AgentEmptyState title="보유 외 결정이 없습니다" description="투자 메모(사업 요약 → 논지 → 불/베어 → 밸류에이션 → 촉매 → 무효화 조건 → 등급·비중 → 매도 계획)는 LLM 에이전트가 연결되면 같은 순서로 표시됩니다." />}

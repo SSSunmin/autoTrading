@@ -6,6 +6,13 @@ export const TICKER_TABS = [
   { id: 'snapshot', label: '검증 스냅샷' }, { id: 'thesis', label: '논지 점검' }, { id: 'holding', label: '보유' },
 ] as const
 
+/** The 등급 띠 of the 결정 이력 tab (mockup Ticker.dc.html): a tile per decision with the rating's short code, the
+ *  MM/DD under it. */
+const RATING_CODE: Record<string, string> = { Buy: 'B', Overweight: 'OW', Hold: 'H', Underweight: 'UW', Sell: 'S', REVIEW: 'R' }
+export function bandTiles(timeline: TickerDetail['timeline']) {
+  return timeline.map((t) => ({ ...t, code: RATING_CODE[t.rating] ?? t.rating, md: t.date.slice(5).replace('-', '/') }))
+}
+
 /** A verdict as a rating chip, the KRX colours (red up, blue down): 유지 neutral, 축소 · 청산 the sell side. */
 export function verdictBadge(c: Pick<ThesisCheck, 'verdict' | 'verdict_ko'>): { rating: Rating | 'pending'; label: string } {
   const rating = ({ keep: 'Hold', trim: 'Underweight', exit: 'Sell', memo: 'pending' } as const)[c.verdict]
