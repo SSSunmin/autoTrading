@@ -3,11 +3,14 @@
 exit's reason, which stays on its own order. The ticker tab's verdict mapping is the same function."""
 
 import importlib
+import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from agent_trading_core.audit import DecisionRecord, OrderRecord, market_audit
+from agent_trading_core.krx_names import SELL_REASON_KO
 from agent_trading_core.schemas import SellAction, SellReason
 from tests.test_api import _cache
 from tests.test_ticker_detail import DAYS, _memo, _rec, _review
@@ -69,7 +72,7 @@ def test_reviews_list_every_reason_the_action_and_the_linked_order(book):
         ("2026-06-02", "000660.KS", "Trim", "축소")]
     by = {(r["trade_date"], r["ticker"]): r for r in rows}
     trim = by[("2026-06-02", "000660.KS")]
-    assert trim["reasons"] == ["thesis_broken", "overweight"] and trim["reasons_ko"] == ["논지 깨짐", "비중 초과"]
+    assert trim["reasons"] == ["thesis_broken", "overweight"] and trim["reasons_ko"] == ["논지 훼손", "비중 과다"]
     assert trim["trim_to_pct"] == 2 and (trim["met"], trim["total"]) == (1, 2)
     (o,) = trim["orders"]
     assert o["status"] == "filled" and o["fill_date"] == "2026-06-04"
@@ -92,7 +95,7 @@ def test_reviews_filter_by_action_ticker_and_dates_and_markets_stay_apart(book):
     assert book.get("/api/reviews", params={"action": "Sell"}).status_code == 422
     assert book.get("/api/reviews", params={"from": "2026-06-05", "to": "2026-06-01"}).status_code == 422
     (us,) = book.get("/api/reviews", params={"market": "US"}).json()
-    assert (us["ticker"], us["market"], us["reasons_ko"]) == ("AAPL", "US", ["촉매 소멸", "더 좋은 대안"])
+    assert (us["ticker"], us["market"], us["reasons_ko"]) == ("AAPL", "US", ["촉매 소멸", "더 나은 대안"])
     assert "AAPL" not in {r["ticker"] for r in book.get("/api/reviews").json()}
 
 
@@ -159,3 +162,15 @@ def test_a_failed_yahoo_call_is_a_failure_not_no_date(monkeypatch):
     assert counts == {"calls": 2, "dated": 0, "none": 1, "failed": 1}
     assert "error" not in book["AAPL"] and book["AAPL"]["date"] is None                       # 예정일 없음
     assert book["ZZZZQ"]["error"] == "RuntimeError: HTTP Error 404: Quote not found"           # 조회 실패
+
+
+@pytest.mark.unit
+def test_the_server_reason_words_are_the_cards_words():
+    """sell-label-unify (2026-11-18): the server's labels (``reasons_ko``, ``/api/labels``) say what the cards' chips
+    say — the v0.8 mockup's words, ``frontend/src/components/cardLogic.ts`` ``REASON_KO`` — for every ``SellReason``."""
+    src = (Path(__file__).parents[1] / "frontend/src/components/cardLogic.ts").read_text(encoding="utf-8")
+    block = re.search(r"export const REASON_KO: Record<string, string> = \{(.*?)\}", src, re.DOTALL).group(1)
+    front = dict(re.findall(r"(\w+): '([^']+)'", block))
+    assert front == SELL_REASON_KO
+    assert set(SELL_REASON_KO) == {r.value for r in R}
+    assert SELL_REASON_KO["thesis_broken"] == "논지 훼손" and SELL_REASON_KO["hard_rule"] == "하드 룰"

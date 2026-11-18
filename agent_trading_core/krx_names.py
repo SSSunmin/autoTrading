@@ -49,9 +49,9 @@ RATING_KO: dict[str, str] = {
 }
 
 SELL_REASON_KO: dict[str, str] = {
-    "target_reached": "목표가 도달", "thesis_broken": "논지 깨짐", "better_alternative": "더 좋은 대안",
-    "overweight": "비중 초과", "catalyst_gone": "촉매 소멸", "would_not_rebuy": "재매수 테스트 실패",
-    "hard_rule": "하드룰 발동",
+    "target_reached": "목표가 도달", "thesis_broken": "논지 훼손", "better_alternative": "더 나은 대안",
+    "overweight": "비중 과다", "catalyst_gone": "촉매 소멸", "would_not_rebuy": "다시 사지 않음",
+    "hard_rule": "하드 룰",
 }
 
 

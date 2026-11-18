@@ -118,7 +118,7 @@ def test_thesis_checks_run_oldest_first_with_the_action_as_the_verdict(world):
     memo, trim, hold = rows
     assert memo["met"] is None and memo["total"] == 2 and [c["met"] for c in memo["checks"]] == [None, None]
     assert (trim["met"], trim["total"], trim["trim_to_pct"], trim["rating"]) == (1, 2, 2, "Underweight")
-    assert trim["reasons_ko"] == ["논지 깨짐"]
+    assert trim["reasons_ko"] == ["논지 훼손"]
     assert (hold["met"], hold["reasons"], hold["rating_ko"]) == (0, [], "보유")
     us = world.get("/api/tickers/AAPL", params={"market": "US"}).json()["thesis_checks"]
     assert [(r["verdict"], r["met"]) for r in us] == [("memo", None), ("exit", 2)]

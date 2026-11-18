@@ -1,4 +1,6 @@
 import type { ReactElement } from 'react'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
@@ -132,6 +134,18 @@ describe('exit-reason bar', () => {
     expect(h).toContain('<span class="xr agent_sell">에이전트 매도</span>')
     expect(h).toContain('<span class="xr exit_signal">등급 하향</span>')
     expect(h).toContain('<i class="xseg agent_sell" style="width:25%"></i>')
+  })
+  it('v0.8 §2-3: every rule exit one grey, the agent sale its own blue', () => {
+    const css = readFileSync(join(__dirname, '..', 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')   // comments out
+    // every rule whose selector list names the bar or its legend swatch, whatever else it sets (review 1R #1)
+    const bg = (sel: string) => [...css.matchAll(/([^{}]*\.(?:xseg|xsw)\b[^{}]*)\{([^}]*)\}/g)]
+      .filter((m) => m[1].split(',').map((x) => x.trim()).includes(sel))
+      .flatMap((m) => [...m[2].matchAll(/background(?:-color)?:\s*([^;]+)/g)].map((b) => b[1].trim()))
+    for (const el of ['xseg', 'xsw']) {
+      expect(bg(`.${el}`)).toEqual(['var(--app-fg-3)'])
+      for (const r of ['stop_loss', 'trailing', 'expired', 'force', 'exit_signal', 'delisted']) expect(bg(`.${el}.${r}`)).toEqual([])  // none of its own
+      expect(bg(`.${el}.agent_sell`)).toEqual(['var(--app-down)'])
+    }
   })
 })
 

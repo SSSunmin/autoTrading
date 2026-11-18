@@ -297,12 +297,9 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .rs-preview caption { caption-side: top; text-align: left; padding-bottom: 0.4rem; }
 .xbar { display: flex; height: 24px; border-radius: var(--bv-radius-100); overflow: hidden; background: var(--app-gauge-track); }
 .xseg { display: block; height: 100%; }
-.xseg.stop_loss, .xsw.stop_loss { background: var(--app-fail); }
-.xseg.trailing, .xsw.trailing { background: var(--app-trailing); }
-.xseg.expired, .xsw.expired { background: var(--app-fg-3); }
-.xseg.exit_signal, .xsw.exit_signal { background: var(--app-gauge); }
-.xseg.force, .xsw.force { background: var(--app-forced); }
-.xseg, .xsw { background: var(--app-review); }
+/* v0.8 §2-3: every rule exit (손절 · 트레일링 · 기간 · Protections · 등급 하향, and any other rule) one grey; the agent
+   sale its own blue (.agent_sell, below). The mockup names no hex for the bar: the scale's grey, as 기간 had */
+.xseg, .xsw { background: var(--app-fg-3); }
 .xlegend { list-style: none; margin: 0.8rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 1.6rem; }
 .xlegend li { display: flex; gap: 0.6rem; align-items: center; }
 .xsw { display: inline-block; width: 1rem; height: 1rem; border-radius: 2px; }
@@ -512,5 +509,5 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .dc-xa-btns { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; }
 .dc-xa-btns > button { flex: 1 1 0; min-width: 0; }
 .dc-foot { display: flex; gap: 0.8rem; align-items: center; justify-content: space-between; }
-/* v0.8 §2-3: in the 청산 사유 분포 the agent sale is a blue bar of its own, apart from the rules (was striped grey) */
+/* v0.8 §2-3: in the 청산 사유 분포 the agent sale is a blue bar of its own, apart from the grey rules (above) */
 .xseg.agent_sell, .xsw.agent_sell { background: var(--app-down); }
