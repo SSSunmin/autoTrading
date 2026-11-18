@@ -122,8 +122,14 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .src { font-size: var(--app-fs-small); text-transform: uppercase; letter-spacing: 0.05em; color: var(--bv-color-blue-50); font-weight: var(--bv-font-weight-semibold); }
 .memo { font-size: var(--app-fs-body); white-space: pre-wrap; color: var(--app-fg-2); max-width: 70ch; }
 .meta { display: flex; gap: 1.4rem; flex-wrap: wrap; font-size: var(--app-fs-small); color: var(--app-fg-2); }
-.timeline { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-.tl { width: 2.8rem; height: 2.8rem; border-radius: var(--bv-radius-100); display: grid; place-items: center; font-size: var(--app-fs-small); font-weight: var(--bv-font-weight-semibold); color: var(--bv-color-common-100); }
+/* 등급 띠 (mockup Ticker.dc.html): the rating's code in a tile, the MM/DD under it. A minimum width and padding, no
+   fixed box — the date once overflowed a 2.8rem square (tile-overflow, 2026-11-18) */
+.timeline { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+.tl-label { font-size: var(--app-fs-small); font-weight: var(--bv-font-weight-semibold); color: var(--app-fg-2); }
+.tl-item { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.tl { box-sizing: border-box; min-width: 4.4rem; padding: 0.4rem 0.6rem; border-radius: var(--bv-radius-100); text-align: center; white-space: nowrap;
+  font-size: var(--app-fs-small); font-weight: 700; line-height: 1.5; color: var(--bv-color-common-100); }
+.tl-d { font-size: var(--app-fs-small); color: var(--app-fg-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tl.Buy, .tl.Overweight { background: var(--app-up); }
 .tl.Sell, .tl.Underweight { background: var(--app-down); }
 .tl.Hold { background: var(--app-hold); }
