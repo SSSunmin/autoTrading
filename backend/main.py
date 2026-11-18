@@ -451,6 +451,8 @@ def _decision_out(d: DecisionRecord, st: _Store, memory_by_key: dict, orders_by_
     # 하드룰 개입 tab: a rule cut or blocked one of its orders (OrderRecord.plan), or the agent listed one itself
     out["has_intervention"] = bool(d.hard_rule_overrides) or any(o.plan and o.plan.interventions for o in orders)
     out["review"] = _review_of(d)
+    out["card"] = thesis_card(d.thesis)
+    out["price_ctx"] = _price_ctx(d, st, orders)
     return out
 
 
@@ -470,6 +472,168 @@ def _review_of(d: DecisionRecord) -> dict | None:
     return {"action": r["action"], "verdict": verdict, "verdict_ko": verdict_ko, "reasons": r["reasons"],
             "reasons_ko": [SELL_REASON_KO.get(x, x) for x in r["reasons"]], "trim_to_pct": r["trim_to_pct"],
             "met": sum(c["met"] for c in r["checks"]), "total": len(r["checks"])}
+
+
+# 결정 카드 v0.8: the recorded text read back field by field (display only — the record keeps its text, ``thesis``)
+_LABEL = re.compile(r"^\*\*([^*\n]+?)\*\*: ?(.*)$")
+_INLINE_LABEL = re.compile(r" · \*\*([^*\n]+?)\*\*: ?")
+_CATALYST = re.compile(r"^(.*?) \((\d{4}-\d{2}(?:-\d{2})?)\)$")   # Catalyst.expected_by: YYYY-MM or YYYY-MM-DD
+_REVIEW_TEXT = re.compile(r"^\*\*Rating\*\*: REVIEW\s*$", re.MULTILINE)
+_CHECK_LINE = re.compile(r"^- \[([x ])\] (.*?)(?: — (.*))?$")
+_PRICE_TRIPLE = re.compile(r"^([0-9.eE+-]+) / ([0-9.eE+-]+) / ([0-9.eE+-]+)")
+_PRICE_NOTE = re.compile(r"^\(upside [+-]?[0-9.]+%, downside [+-]?[0-9.]+%(?:, reward/risk [0-9.]+:1)?\)$")
+_ACTION_LINE = re.compile(r"^(Hold|Trim|Exit)(?: \(to ([0-9.eE+-]+)%\))?$")
+_SIZING = re.compile(r"^([0-9.eE+-]+)% of equity$")
+MEMO_LABELS = ("Business", "Thesis", "Bull case", "Bear case", "Valuation", "Price / Target / Downside", "Catalysts",
+               "Invalidation", "Conviction", "Time Horizon", "Exit Plan")
+REVIEW_LABELS = ("Action", "Reasons", "Invalidation checks", "Reasoning")
+
+
+def _num(text: str | None) -> float | None:
+    try:
+        return float(text) if text is not None else None
+    except ValueError:
+        return None
+
+
+def _labelled(text: str) -> tuple[list[list[str]], list[str]]:
+    """``**Label**: value`` fields in order (a value runs on over the lines below it up to a blank line; the checks
+    block keeps its lines), and every other non-blank line in order — nothing of the text is dropped. A field written
+    inline after " · " on a line (the memo's "**Sizing**") is its own field."""
+    fields: list[list[str]] = []
+    rest: list[str] = []
+    cur: list[str] | None = None
+    for line in text.splitlines():
+        if m := _LABEL.match(line):
+            head, *inline = _INLINE_LABEL.split(m.group(2))
+            cur = [m.group(1).strip(), head.strip()]
+            fields.append(cur)
+            fields += [[inline[i].strip(), inline[i + 1].strip()] for i in range(0, len(inline) - 1, 2)]
+        elif not line.strip():
+            cur = cur if cur is not None and cur[0] == "Invalidation checks" else None
+        elif cur is not None:
+            cur[1] = f"{cur[1]}\n{line.strip()}".strip()
+        else:
+            rest.append(line.strip())
+    return fields, rest
+
+
+def thesis_card(text: str) -> dict:
+    """A decision's text as the card's fields (``schemas.render_investment_memo`` / ``render_sell_review`` labels; the
+    record is not changed). ``kind``: memo · review · raw (REVIEW: the reason and the model's text) · text (any other:
+    a rule exit, the baseline's 근거, a person's Hold). ``missing``: expected labels not found or not readable;
+    ``extra``: labelled fields it does not use and lines outside any field, in order. With ``complete`` false the card
+    also shows the whole text (원문), so a parse that falls short loses nothing."""
+    if _REVIEW_TEXT.search(text):
+        # REVIEW (agent.py): "**사유**: …" then "**원문**: " and the model's own text to the end — many paragraphs,
+        # often with labels of its own, so it is cut off whole, never parsed
+        head, sep, raw = text.partition("**원문**: ")
+        reason = head.partition("**사유**: ")[2].strip() or None
+        missing = [k for k, v in (("사유", reason), ("원문", raw if sep else None)) if not v]
+        return {"kind": "raw", "reason": reason, "raw": raw if sep else None, "missing": missing, "extra": [],
+                "complete": not missing}
+    fields, rest = _labelled(text)
+    first: dict[str, str] = {}
+    for k, v in fields:
+        first.setdefault(k, v)
+    used = {"Rating"}
+    missing: list[str] = []
+    leftover: list[dict] = []
+
+    def take(label: str) -> str | None:
+        used.add(label)
+        v = first.get(label)
+        if v is None or not v.strip():
+            missing.append(label)
+            return None
+        return v
+
+    if "Action" in first:
+        line = take("Action")
+        action = _ACTION_LINE.match(line or "")
+        if line and action is None:
+            missing.append("Action")
+        reasons = take("Reasons")
+        block = take("Invalidation checks")
+        checks: list[dict] = []
+        for line in (block or "").splitlines():
+            if c := _CHECK_LINE.match(line):
+                checks.append({"condition": c.group(2), "met": c.group(1) == "x", "evidence": c.group(3)})
+            elif checks:                     # a check's evidence run on to the next line
+                checks[-1]["evidence"] = f"{checks[-1]['evidence'] or ''}\n{line}".strip()
+            else:                            # before any check: not read — the card shows the whole text
+                missing.append("Invalidation checks")
+                break
+        if block and not checks and "Invalidation checks" not in missing:
+            missing.append("Invalidation checks")
+        used.add("Revised Target")
+        card = {"kind": "review", "action": action.group(1) if action else None,
+                "trim_to_pct": _num(action.group(2)) if action else None,
+                "reasons": [] if reasons in (None, "none") else [r.strip() for r in reasons.split(",") if r.strip()],
+                "checks": checks, "reasoning": take("Reasoning"), "revised_target": _num(first.get("Revised Target"))}
+    elif "Thesis" in first or "Business" in first:
+        triple, *more = (take("Price / Target / Downside") or "").split("\n")
+        prices = _PRICE_TRIPLE.match(triple)
+        # text after the three numbers on their line, and lines run on under them: kept beside the prices
+        # (the renderer's own "(upside …, downside …[, reward/risk …])" is read from the numbers, not kept)
+        note = triple[prices.end():].strip() if prices else ""
+        tail = [x for x in ([] if _PRICE_NOTE.match(note) else [note]) + more if x.strip()]
+        if tail:
+            leftover.append({"label": "Price / Target / Downside", "text": "\n".join(tail)})
+        if triple and prices is None:
+            missing.append("Price / Target / Downside")
+        price, target, downside = (float(x) for x in prices.groups()) if prices else (None, None, None)
+        catalysts = []
+        # ponytail: the renderer joins catalysts and invalidations with "; ", so one with "; " in its own words reads
+        # as two (shown, not lost); a structured field would need the record format to change
+        for c in (take("Catalysts") or "").split("; "):
+            if c.strip():
+                m = _CATALYST.match(c.strip())
+                catalysts.append({"event": m.group(1), "date": m.group(2)} if m else {"event": c.strip(), "date": None})
+        conv_text = take("Conviction")
+        conviction = _num(conv_text)
+        if conv_text and conviction is None:
+            missing.append("Conviction")
+        used.add("Sizing")
+        sizing = _SIZING.match(first.get("Sizing") or "")
+        card = {"kind": "memo", "business": take("Business"), "thesis": take("Thesis"), "bull": take("Bull case"),
+                "bear": take("Bear case"), "valuation": take("Valuation"), "price": price, "target": target,
+                "downside": downside, "catalysts": catalysts,
+                "invalidation": [c.strip() for c in (take("Invalidation") or "").split("; ") if c.strip()],
+                "conviction": conviction, "sizing_pct": float(sizing.group(1)) if sizing else None,
+                "horizon": take("Time Horizon"), "exit_plan": take("Exit Plan")}
+    else:
+        body = [(k, v) for k, v in fields if k != "Rating"]
+        if body:
+            used.add(body[0][0])
+            card = {"kind": "text", "label": body[0][0], "text": body[0][1]}
+        else:
+            card, rest = {"kind": "text", "label": None, "text": "\n".join(rest)}, []
+    seen: set[str] = set()
+    extra = leftover
+    for k, v in fields:                      # a label it does not use, and a used label's second occurrence
+        if k not in used or k in seen:
+            extra.append({"label": k, "text": v})
+        seen.add(k)
+    extra += [{"label": None, "text": line} for line in rest]
+    return card | {"missing": missing, "extra": extra, "complete": not missing and not extra}
+
+
+def _price_ctx(d: DecisionRecord, st: _Store, orders: list[OrderRecord]) -> dict:
+    """What the card's price slot needs beyond the text: the decision day's close, the holding's average fill (the
+    sell this card placed, else the book's holding now), the stop-loss rule, and each of the card's sell orders'
+    realized P&L — read from the book's replay (``shared_book``), never the record; with no shared book (no index
+    prices yet) it replays on its own to the market's day, as the screen functions do."""
+    calendar = PRICES.calendar(paper_config(st.market).index)
+    book = st.shared_book() or replay(st.order_rows, PRICES, with_capital(paper_config(st.market), st.operations),
+                                      until=calendar[-1] if calendar else market_today(st.market))
+    closed = {c.order_id: c for c in book.closed} if book else {}
+    mine = [closed[o.order_id] for o in orders if o.order_id in closed]
+    held = book.holdings.get(d.ticker) if book else None
+    avg = mine[0].entry_price if mine else held.avg_price if held else None
+    return {"close": PRICES.close_asof(d.ticker, d.trade_date), "avg_price": avg,
+            "stop_loss_pct": RiskConfig().stop_loss_pct,
+            "realized": {c.order_id: {"pnl": c.pnl, "full": c.full} for c in mine}}
 
 
 def _screen_summary(s: ScreenRun) -> dict:

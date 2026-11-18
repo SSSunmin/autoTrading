@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import type { Order, SellReviewInfo, TickerDetail } from '../api/types'
+import { REASON_KO } from './cardLogic'
 import { DecisionCard } from './DecisionCard'
 import { ReviewBadges, TickerFacts } from './ticker'
 import { earningsLine, reviewOrderLine, SELL_REASONS } from './tickerLogic'
@@ -25,15 +26,21 @@ const order = (o: Partial<Order>): Order => ({
 const card = (d: object) => renderToStaticMarkup(<MemoryRouter initialEntries={['/decisions?market=KRX']}>
   <DecisionCard d={{ ticker: 'A.KS', name: '에이', trade_date: '2026-06-02', rating: 'Underweight', rating_ko: '비중 축소', source: 'agent',
     source_kind: 'agent', source_kind_ko: '에이전트 결정', evidence: [], hard_rule_overrides: [], thesis: '', market: 'KRX', tradeable: true,
-    orders: [], review: null, ...d } as never} />
+    orders: [], review: null, settings: {}, card: { kind: 'text', label: null, text: '', missing: [], extra: [], complete: true },
+    price_ctx: { close: 10_500, avg_price: 10_000, stop_loss_pct: -0.08, realized: {} }, ...d } as never} />
 </MemoryRouter>)
 
 describe('sell reason badges', () => {
-  it('shows all seven reasons with their labels, each its own class', () => {
+  it('shows all seven reasons in the v0.8 order and words: 하드 룰 amber, the first other filled, the rest outlined', () => {
     const r = review({ reasons: [...SELL_REASONS], reasons_ko: SELL_REASONS.map((x) => KO[x]) })
     const out = renderToStaticMarkup(<ReviewBadges r={r} />)
-    for (const x of SELL_REASONS) expect(out).toContain(`<span class="tag sell-reason ${x}">${KO[x]}</span>`)
-    expect(SELL_REASONS).toHaveLength(7)
+    const chips = [...out.matchAll(/<span class="rc (\w+)">([^<]+)<\/span>/g)].map((m) => `${m[1]}:${m[2]}`)
+    expect(chips).toEqual(['hard:하드 룰', 'sub:논지 훼손', 'sub:목표가 도달', 'sub:촉매 소멸', 'sub:더 나은 대안', 'sub:비중 과다', 'sub:다시 사지 않음'])
+    expect(Object.keys(REASON_KO).sort()).toEqual([...SELL_REASONS].sort())
+    // a table cell (positions): the main reason and "+n"
+    const cell = renderToStaticMarkup(<ReviewBadges r={review({})} max={1} />)
+    expect(cell).toContain('<span class="rc main">논지 훼손</span><span class="rc more">+1</span>')
+    expect(cell).not.toContain('비중 과다')
   })
 
   it('names its source unless told not to, and uses the 논지 점검 verdict chip', () => {
@@ -44,7 +51,7 @@ describe('sell reason badges', () => {
     expect(renderToStaticMarkup(<ReviewBadges r={review({})} source={false} />)).not.toContain('review-src')
     const hold = renderToStaticMarkup(<ReviewBadges r={review({ action: 'Hold', verdict: 'keep', verdict_ko: '논지 유지', reasons: [], reasons_ko: [], trim_to_pct: null })} />)
     expect(hold).toContain('<span class="rating Hold">논지 유지</span>')
-    expect(hold).not.toContain('sell-reason')
+    expect(hold).not.toContain('class="rc')
     expect(hold).not.toContain('목표 비중')
   })
 
@@ -62,18 +69,21 @@ describe('sell reason badges', () => {
 })
 
 describe('decision card: the agent review apart from a rule exit', () => {
-  it('a review card carries its badges and order line', () => {
-    const out = card({ review: review({}), orders: [order({})] })
-    expect(out).toContain('에이전트 매도 검토')
-    expect(out).toContain('<span class="tag sell-reason thesis_broken">논지 깨짐</span>')
-    expect(out).toContain('Trim 10% → 54주 매도 · 체결')
+  it('a review card carries its kind tag, verdict, reasons and the sale it made', () => {
+    const out = card({ review: review({}), orders: [order({})],
+      card: { kind: 'review', action: 'Trim', trim_to_pct: 10, reasons: ['overweight', 'thesis_broken'], checks: [], reasoning: '비중이 커졌다',
+        revised_target: null, missing: [], extra: [], complete: true } })
+    expect(out).toContain('<span class="kind agent">에이전트 · 매도 검토</span>')
+    expect(out).toContain('<span class="rating Underweight">축소</span>')
+    expect(out).toContain('<span class="rc main">논지 훼손</span><span class="rc sub">비중 과다</span>')
+    expect(out).toContain('매도 54주')
   })
   it('a rule exit card has no agent sell-review badge', () => {
     const out = card({ source: 'rule', source_kind: 'rule', source_kind_ko: '규칙 청산', rating: 'Sell', rating_ko: '매도',
       orders: [order({ order_id: 'paper-2026-06-02-A.KS-exit', rules_applied: ['stop_loss'] })] })
-    expect(out).not.toContain('review-badges')
-    expect(out).not.toContain('에이전트 매도 검토')
-    expect(out).toContain('규칙 청산')
+    expect(out).not.toContain('class="rc main"')
+    expect(out).not.toContain('에이전트 · 매도 검토')
+    expect(out).toContain('<span class="kind rule">규칙 · 청산</span>')
   })
 })
 

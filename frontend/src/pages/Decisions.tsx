@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AgentAlert, AgentEmptyState, AgentSectionPanel, AgentSelect, AgentTabs } from '@bv-ds/ui'
+import { AgentAlert, AgentEmptyState, AgentSelect, AgentTabs } from '@bv-ds/ui'
 
 import { api } from '../api/client'
 import type { Decision, ExceptionItem } from '../api/types'
@@ -50,7 +50,12 @@ export default function Decisions() {
   const nExc = exceptions.data?.length ?? 0
   const items = exceptions.data ?? []
   const token = mode.data?.admin_token_required ?? false
-  const card = (d: Decision) => <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} exception={exceptionOf(d, items)} tokenRequired={token} />
+  const card = (d: Decision, showPlan = false) => (
+    <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} exception={exceptionOf(d, items)} tokenRequired={token} showPlan={showPlan} />
+  )
+  // the queue item's own card: the decision it belongs to (its REVIEW, or the decision whose order it is)
+  const decisionOf = (x: ExceptionItem) => rows.find((d) => exceptionOf(d, [x]) === x)
+  const count = (n: number, alert = false) => <span className={alert && n > 0 ? 'nav-badge' : 'nav-count'}>{n}</span>
 
   return (
     <>
@@ -64,17 +69,19 @@ export default function Decisions() {
           options={(dates.data ?? []).map((d) => ({ value: d, label: d }))} />
         {mode.data && <span className="muted">{mode.data.label_ko}</span>}
       </div>
+      {/* v0.8 §2-1: the sell review is a kind of decision, beside 결정·실행; the tab a person works (the queue) after it,
+          its count the only red badge */}
       <AgentTabs value={tab} onChange={setTab} label="결정 분류" items={[
-        { id: 'all', label: `결정·실행 ${rows.length}` },
-        { id: 'exceptions', label: `예외 큐 ${nExc}` },
-        { id: 'override', label: `하드룰 개입 ${overrides.length}` },
-        { id: 'reviews', label: `매도 검토 ${reviews.length}` },
+        { id: 'all', label: <>결정·실행 {count(rows.length)}</> },
+        { id: 'reviews', label: <>매도 검토 {count(reviews.length)}</> },
+        { id: 'exceptions', label: <>예외 큐 {count(nExc, true)}</> },
+        { id: 'override', label: <>하드룰 개입 {count(overrides.length)}</> },
       ]} />
 
       <div className="section">
         {tab === 'all' && (
           <Loaded state={all} empty="이 날짜의 결정이 없습니다">
-            {() => <div className="cards">{rows.map(card)}</div>}
+            {() => <div className="dc-grid">{rows.map((d) => card(d))}</div>}
           </Loaded>
         )}
 
@@ -82,9 +89,11 @@ export default function Decisions() {
           <Loaded state={exceptions} empty="예외가 없습니다"
             emptyDescription="모든 결정의 등급을 읽을 수 있었고 거부된 주문도 없습니다(처리한 예외는 빠집니다). REVIEW·자동 실행 한도 초과·벤더 장애가 생기면 여기에 올라옵니다.">
             {(items) => (
-              <div className="cards">
+              <div className="dc-grid">
                 {items.map((x) => {
-                  const d = rows.find((r) => r.ticker === x.ticker)
+                  const d = decisionOf(x)
+                  // this item's own card and buttons: a decision with two exceptions is two cards, each its own (review 1R #4)
+                  if (d) return <DecisionCard key={x.kind + x.ticker + (x.ref ?? x.order_id ?? '')} d={d} exception={x} tokenRequired={token} />
                   return (
                     <article key={x.kind + x.ticker + (x.ref ?? '')} className="card">
                       <div className="hd">
@@ -93,12 +102,7 @@ export default function Decisions() {
                       </div>
                       <div className="exec exception">{x.summary} · {x.pending_action_ko ?? '자동 주문하지 않았습니다.'}</div>
                       {x.review && <div className="review-line"><ReviewBadges r={x.review} /></div>}
-                      {x.kind === 'review' && d && (
-                        <AgentSectionPanel title="에이전트 원문 전체" description="등급 파서가 읽지 못한 텍스트. Hold로 뭉개지 않고 사람이 봅니다">
-                          <pre className="raw">{d.thesis}</pre>
-                        </AgentSectionPanel>
-                      )}
-                      {x.kind !== 'review' && x.detail && <div className="memo">{x.detail}</div>}
+                      {x.detail && <div className="memo">{x.detail}</div>}
                       <div className="meta">
                         <ExceptionButtons item={x} tokenRequired={token} />
                         <span className="muted num" style={{ marginLeft: 'auto' }}>{x.trade_date}</span>
@@ -114,9 +118,9 @@ export default function Decisions() {
         {tab === 'reviews' && (
           <Loaded state={all} empty="이 날짜의 결정이 없습니다">
             {() => reviews.length === 0 ? (
-              <AgentEmptyState title="매도 검토가 없습니다" description="이 날짜에 보유 종목의 에이전트 매도 검토(유지 · 축소 · 청산)가 없습니다. 규칙 청산(손절 · 트레일링 · 기간)은 결정·실행 탭의 규칙 청산 카드에 있습니다." />
+              <AgentEmptyState title="매도 검토가 없습니다" description="이 결정일에는 매도 검토가 없습니다. 보유 종목이 있어야 검토가 열리고, 결정일마다 보유 종목 하나에 카드 한 장이 쌓입니다." />
             ) : (
-              <div className="cards">{reviews.map(card)}</div>
+              <div className="dc-grid">{reviews.map((d) => card(d))}</div>
             )}
           </Loaded>
         )}
@@ -126,7 +130,7 @@ export default function Decisions() {
             {() => overrides.length === 0 ? (
               <AgentEmptyState title="하드룰 개입이 없습니다" description="이 날짜에 하드 룰이 비중·수량을 줄이거나 매수를 막은 주문이 없습니다. 개입이 있으면 원안(에이전트)과 최종(룰 적용 후)이 나란히 표시됩니다." />
             ) : (
-              <div className="cards">{overrides.map(card)}</div>
+              <div className="dc-grid">{overrides.map((d) => card(d, true))}</div>
             )}
           </Loaded>
         )}

@@ -113,7 +113,9 @@ describe('a rerun the loop closed links to its answer', () => {
   } as unknown as Order)
   const card = (o: Order) => renderToStaticMarkup(<MemoryRouter initialEntries={['/decisions?market=KRX']}>
     <DecisionCard d={{ ticker: 'A.KS', name: '에이', trade_date: '2026-11-12', rating: 'REVIEW', rating_ko: '검토', source: 'agent', source_kind: 'agent',
-      orders: [o], evidence: [], hard_rule_overrides: [], thesis: '', market: 'KRX', tradeable: false } as never} />
+      orders: [o], evidence: [], hard_rule_overrides: [], thesis: '', market: 'KRX', tradeable: false, settings: {},
+      card: { kind: 'raw', reason: null, raw: null, missing: [], extra: [], complete: true },
+      price_ctx: { close: null, avg_price: null, stop_loss_pct: -0.08, realized: {} } } as never} />
   </MemoryRouter>)
   it('the answer chip goes to that day\'s decisions', () => {
     const out = card(order({ rerun_answer: { ticker: 'A.KS', trade_date: '2026-11-13', rating: 'Buy', rating_ko: '매수', attempt: 1, same_day: false } }))

@@ -72,7 +72,7 @@ describe('논지 점검 tab', () => {
     expect(out).toContain('<span class="rating Underweight">축소</span><span class="muted">2026-06-05 검토 · 2개 조건 중 1개 충족</span>')
     expect(out.indexOf('2026-06-01')).toBeLessThan(out.indexOf('2026-06-05</span><span class="review-badges'))
     expect(out).toContain('목표 비중 2%')
-    expect(out).toContain('<span class="tag sell-reason thesis_broken">논지 깨짐</span>')
+    expect(out).toContain('<span class="rc main">논지 훼손</span>')          // v0.8 chips: every reason here, the mockup's words
     expect(out).toContain('<li class="met"><span class="tag">충족</span> 영업이익률 12% 미만')
     expect(out).toContain('HBM 공급 부족')
     expect(out).toContain('₩14,000')

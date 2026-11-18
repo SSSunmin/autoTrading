@@ -47,7 +47,7 @@ export default function Positions() {
                         <td className="r num">{amt(r.trailing_high)}{r.trailing_active ? ` → ${amt(r.trailing_stop_price)}` : ''}</td>
                         <td className="r num">{r.holding_days}</td><td className="num">{r.expiry_date ?? '–'}</td>
                         <td className="wrap">{r.exit_signal ? <><ExitReasonBadge reason={r.exit_signal.reason} labels={exitKo} /> <span className="muted">{r.exit_signal.note}</span></> : <span className="muted">없음</span>}</td>
-                        <td className="wrap">{r.last_review ? <><span className="muted num">{r.last_review.trade_date}</span> <ReviewBadges r={r.last_review} source={false} /></>
+                        <td className="wrap">{r.last_review ? <><span className="muted num">{r.last_review.trade_date}</span> <ReviewBadges r={r.last_review} source={false} max={1} /></>
                           : <span className="muted">검토 없음</span>}</td>
                       </tr>
                     ))}</tbody>

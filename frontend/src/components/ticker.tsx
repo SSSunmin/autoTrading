@@ -2,6 +2,7 @@ import { AgentEmptyState, AgentSectionPanel } from '@bv-ds/ui'
 
 import { money } from '../api/client'
 import type { Market, SellReviewInfo, ThesisCheck, TickerDetail, TickerHolding } from '../api/types'
+import { reasonChips } from './cardLogic'
 import { Pct, RatingBadge } from './common'
 import { earningsLine, latestReview, metLine, verdictBadge } from './tickerLogic'
 
@@ -20,17 +21,18 @@ export function TickerFacts({ d }: { d: TickerDetail }) {
   )
 }
 
-/** A sell review's badges: the verdict (the 논지 점검 mapping) and every reason the agent gave. ``source`` adds the
- *  "에이전트 매도 검토" tag so a card or a positions row never reads it as a rule exit's reason (ExitReasonBadge). */
-export function ReviewBadges({ r, source = true }: {
-  r: Pick<SellReviewInfo, 'action' | 'verdict' | 'verdict_ko' | 'reasons' | 'reasons_ko' | 'trim_to_pct'>; source?: boolean
+/** A sell review's badges: the verdict (the 논지 점검 mapping) and the reasons the agent gave as the v0.8 chips (the
+ *  mockup's order and words, the main one filled, 하드 룰 amber — ``max`` shown and "+n": a table cell 1). ``source`` adds
+ *  the "에이전트 매도 검토" tag so a row never reads it as a rule exit's reason (ExitReasonBadge). */
+export function ReviewBadges({ r, source = true, max }: {
+  r: Pick<SellReviewInfo, 'action' | 'verdict' | 'verdict_ko' | 'reasons' | 'reasons_ko' | 'trim_to_pct'>; source?: boolean; max?: number
 }) {
   const b = verdictBadge(r)
   return (
     <span className="review-badges">
       {source && <span className="tag review-src">에이전트 매도 검토</span>}
       <RatingBadge rating={b.rating} label={b.label} />
-      {r.reasons.map((x, i) => <span key={x} className={`tag sell-reason ${x}`}>{r.reasons_ko[i] ?? x}</span>)}
+      {r.reasons.length > 0 && reasonChips(r.reasons, max).map((c) => <span key={c.text} className={`rc ${c.cls}`}>{c.text}</span>)}
       {r.action === 'Trim' && r.trim_to_pct != null && <span className="muted">목표 비중 {r.trim_to_pct}%</span>}
     </span>
   )

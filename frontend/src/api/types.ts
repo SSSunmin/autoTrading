@@ -164,6 +164,65 @@ export interface Decision {
   orders: Order[]
   /** a sell review read back from its text: the agent's action and reasons (a rule exit's reason is on its order) */
   review: SellReviewInfo | null
+  /** the text read back field by field for the card (display only — ``thesis`` keeps the record's text) */
+  card: DecisionCardText
+  price_ctx: PriceCtx
+}
+
+/** One labelled field the parser did not use, or a line outside any field (label null): kept, shown on the card. */
+export interface CardExtra { label: string | null; text: string }
+
+interface CardParse {
+  /** expected labels not found or not readable */
+  missing: string[]
+  extra: CardExtra[]
+  /** every expected field read and nothing left over; false: the card also shows the whole text */
+  complete: boolean
+}
+
+export interface MemoCard extends CardParse {
+  kind: 'memo'
+  business: string | null
+  thesis: string | null
+  bull: string | null
+  bear: string | null
+  valuation: string | null
+  price: number | null
+  target: number | null
+  downside: number | null
+  catalysts: { event: string; date: string | null }[]
+  invalidation: string[]
+  conviction: number | null
+  sizing_pct: number | null
+  horizon: string | null
+  exit_plan: string | null
+}
+
+export interface ReviewCard extends CardParse {
+  kind: 'review'
+  action: 'Hold' | 'Trim' | 'Exit' | null
+  trim_to_pct: number | null
+  reasons: string[]
+  checks: { condition: string; met: boolean; evidence: string | null }[]
+  reasoning: string | null
+  revised_target: number | null
+}
+
+/** REVIEW: why the rating could not be read, and the model's text */
+export interface RawCard extends CardParse { kind: 'raw'; reason: string | null; raw: string | null }
+
+/** any other text: a rule exit's note, the baseline's 근거, a person's Hold */
+export interface TextCard extends CardParse { kind: 'text'; label: string | null; text: string }
+
+export type DecisionCardText = MemoCard | ReviewCard | RawCard | TextCard
+
+/** The price slot's facts beyond the text, from the book's replay: the decision day's close, the holding's average
+ *  fill, the stop rule (−0.08) and each of the card's sell orders' realized P&L. */
+export interface PriceCtx {
+  close: number | null
+  avg_price: number | null
+  stop_loss_pct: number
+  realized: Record<string, { pnl: number; full: boolean }>
 }
 
 /** The agent's sell review as a badge: action as the verdict (Hold 논지 유지 · Trim 축소 · Exit 청산), every reason. */
