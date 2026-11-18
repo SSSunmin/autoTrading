@@ -12,6 +12,7 @@ from agent_trading_core.risk import (
     daily_loss_blocks,
     drawdown_scale,
     regime_on,
+    regime_released,
     size_targets,
 )
 
@@ -104,3 +105,24 @@ def test_size_targets_applies_name_sector_gross_caps_and_scale():
     assert sum(w.values()) == pytest.approx(1.0) and ov == []
     w, ov = size_targets(["A", "B"], RiskConfig(max_position_pct=0.6, max_sector_pct=1.0, max_gross_pct=0.8))
     assert sum(w.values()) == pytest.approx(0.8) and ov[0].startswith("max_gross_pct")
+
+
+@pytest.mark.unit
+def test_regime_releases_read_their_own_windows():
+    flat = pd.Series([100.0] * 60)
+    assert not regime_released(flat, None)
+    assert regime_released(flat, "half")                                 # always, the caller halves the weights
+    # ma50: strictly above the 50-day average (today included); at it, or with fewer than 50 bars, not released
+    assert not regime_released(flat, "ma50")
+    assert regime_released(pd.Series([100.0] * 49 + [100.1]), "ma50")
+    assert not regime_released(pd.Series([100.0] * 48 + [101.0]), "ma50")
+    assert not regime_released(pd.Series([100.0] * 10 + [90.0] * 40), "ma50")   # below its average
+    # low_rebound: +10% or more over the lowest close of the last 60 sessions; a lower low before them is not seen
+    assert regime_released(pd.Series([100.0] * 59 + [110.0]), "low_rebound")    # exactly +10%
+    assert not regime_released(pd.Series([100.0] * 59 + [109.9]), "low_rebound")
+    old_low = pd.Series([50.0] + [100.0] * 59 + [109.9])                 # the 50 is 61 sessions back
+    assert not regime_released(old_low, "low_rebound")
+    assert regime_released(pd.Series([50.0] + [100.0] * 58 + [109.9]), "low_rebound")   # 60 back: inside
+    assert not regime_released(pd.Series([100.0] * 58 + [120.0]), "low_rebound")       # 59 bars: too short
+    with pytest.raises(ValueError):
+        regime_released(flat, "ma20")

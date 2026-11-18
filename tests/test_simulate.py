@@ -1,5 +1,10 @@
 """The portfolio simulation keeps its books, fills at the next open, and lets the hard rules cut a crash."""
 
+import hashlib
+import json
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -98,3 +103,89 @@ def test_metrics_drawdown_dates_and_windows():
     w = window_metrics(e, {"dip": ("2024-01-02", "2024-01-04")})
     assert w["dip"]["return"] == pytest.approx(95 / 110 - 1) and w["dip"]["max_drawdown"] == pytest.approx(95 / 110 - 1)
     assert metrics(pd.Series([1.0])) == {}
+
+
+def _jump_index(day: str) -> pd.DataFrame:
+    """Falling 0.2% a day — always below its 200-day average — with a one-off +12% jump on ``day``: from then on above
+    its 50-day average and 12% over its 60-day low, still below the 200-day average (~22% above the close)."""
+    t = np.arange(len(DATES))
+    path = 3000 * np.exp(-0.002 * t)
+    path[DATES >= pd.Timestamp(day)] *= 1.12
+    return _frame(path)
+
+
+RISK_TWO = RiskConfig(max_position_pct=0.5, max_sector_pct=1.0)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rule", ["ma50", "low_rebound"])
+def test_a_release_opens_buys_below_the_200_day_line_from_the_decision_close_only(rule):
+    frames = _paths()
+    dates = DATES[DATES >= pd.Timestamp(START)]
+    jump = dates[5 * 20 + 1]                      # the day after a rebalance (rebalances on every 5th session)
+    idx = _jump_index(jump.strftime("%Y-%m-%d"))
+    kept = run_simulation(frames, idx, _cfg(label="kept", risk=RISK_TWO, regime_filter=True))
+    assert not kept.trades and kept.exposure.max() == 0
+    r = run_simulation(frames, idx, _cfg(label=rule, risk=RISK_TWO, regime_filter=True, regime_release=rule))
+    # the first rebalance that sees the jump is 4 sessions after it; its orders fill the next open. Reading one close
+    # ahead would decide on the rebalance before the jump and fill on the jump day itself.
+    first_fill = dates[5 * 21 + 1]
+    assert r.trades and min(pd.Timestamp(t.entry_date) for t in r.trades) == first_fill
+    assert any(e["kind"] == "override" and f"국면 해제({rule})" in e["text"] for e in r.events)
+
+
+@pytest.mark.unit
+def test_the_half_release_buys_below_the_line_at_half_weight():
+    frames = _paths()
+    t = np.arange(len(DATES))
+    falling = _frame(3000 * np.exp(-0.0008 * t))                     # always below its own average
+    full = run_simulation(frames, falling, _cfg(label="off", risk=RISK_TWO))
+    half = run_simulation(frames, falling, _cfg(label="half", risk=RISK_TWO, regime_filter=True, regime_release="half"))
+    a, b = full.trades[0], half.trades[0]
+    assert (a.ticker, a.entry_date) == (b.ticker, b.entry_date)
+    assert b.quantity == pytest.approx(a.quantity / 2, abs=1)         # whole shares
+    assert half.exposure.max() <= 0.5 * full.exposure.max() + 0.02
+
+
+@pytest.mark.unit
+def test_a_release_needs_the_filter_and_a_known_rule():
+    with pytest.raises(ValueError):
+        _cfg(risk=RiskConfig(), regime_release="ma50")                 # no regime_filter
+    with pytest.raises(ValueError):
+        _cfg(risk=RiskConfig(), regime_filter=True, regime_release="ma20")
+
+
+@pytest.mark.unit
+def test_without_a_release_the_regime_filter_runs_as_before():
+    """A run whose index crosses its 200-day line both ways: equity, trades and events hash to the digest the code
+    before the release option gave (develop ddf1426, measured 2026-11-18) — the default path is unchanged."""
+    t = np.arange(len(DATES))
+    wave = _frame(2500 * (1 + 0.15 * np.sin(2 * np.pi * t / 260)))
+    r = run_simulation(_paths(), wave, _cfg(label="g", risk=RISK_TWO, regime_filter=True))
+    blob = json.dumps({"equity": [round(float(x), 4) for x in r.equity],
+                       "trades": [[tr.ticker, tr.entry_date, tr.exit_date, round(tr.entry_price, 6), tr.quantity,
+                                   tr.reason] for tr in r.trades],
+                       "events": r.events}, ensure_ascii=False, default=str)
+    assert len(r.trades) == 8 and sum(e["kind"] == "lock" and "국면" in e["text"] for e in r.events) == 11
+    assert hashlib.sha256(blob.encode()).hexdigest() == "86d36327e6460cd956ff0507b2d2c00068d8c74c1a5638fab585fa39e28599f7"
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import regime_release_grid
+
+
+@pytest.mark.unit
+def test_the_index_only_table_weighs_each_day_by_the_closes_before_it():
+    """docs/12 §5-4: the weight of day k is decided from closes up to day k-1 — the +12% jump's own day still holds
+    nothing under the releases, the day after holds the index."""
+    days = pd.bdate_range("2023-01-02", periods=300)
+    path = 3000 * np.exp(-0.002 * np.arange(len(days)))
+    path[250:] *= 1.12                                            # still ~20% under the 200-day average
+    closes = pd.Series(path, index=days)
+    for rule in ("ma50", "low_rebound"):
+        w = regime_release_grid.index_weights(closes, True, rule)
+        assert w.loc[days[249]] == 0.0 and w.loc[days[250]] == 0.0      # the jump day: decided on the close before it
+        assert w.loc[days[251]] == 1.0
+    assert regime_release_grid.index_weights(closes, True, None).loc[days[251]] == 0.0
+    assert regime_release_grid.index_weights(closes, True, "half").loc[days[251]] == 0.5
+    assert regime_release_grid.index_weights(closes, False, None).loc[days[251]] == 1.0

@@ -20,6 +20,8 @@ import pandas as pd
 
 from agent_trading_core.config import MARKETS
 from agent_trading_core.risk import (
+    REGIME_RELEASES,
+    RELEASE_HALF_SCALE,
     ExitSignal,
     Position,
     Protections,
@@ -29,6 +31,7 @@ from agent_trading_core.risk import (
     daily_loss_blocks,
     drawdown_scale,
     regime_on,
+    regime_released,
     size_targets,
 )
 from agent_trading_core.screening import ScreenConfig, screen, us_preset
@@ -66,8 +69,11 @@ class SimConfig:
     risk: RiskConfig | None = None       # None → no hard rules: equal weight, fully invested, exits only on Sell/Underweight
     regime_filter: bool = False          # needs risk
     market: str = "KRX"                  # config.MARKETS key: sell tax, sell-side regulatory fees, benchmark name
+    regime_release: str | None = None    # docs/12, needs regime_filter: risk.REGIME_RELEASES; None = the filter as is
 
     def __post_init__(self) -> None:
+        if self.regime_release is not None and (self.regime_release not in REGIME_RELEASES or not self.regime_filter):
+            raise ValueError(f"regime_release {self.regime_release!r}: one of {REGIME_RELEASES}, with regime_filter")
         mkt = MARKETS[self.market]
         if self.sell_tax is None:
             self.sell_tax = mkt["sell_tax"]
@@ -354,7 +360,12 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
                 if g:
                     locks.append(g)
                 if cfg.regime_filter and not regime_on(idx.loc[:date], risk):
-                    locks.append(f"국면 필터: {mkt['benchmark_name_ko']} 종가가 {risk.regime_ma_days}일선 아래, 신규 매수 없음")
+                    if regime_released(idx.loc[:date], cfg.regime_release):
+                        if cfg.regime_release == "half":
+                            weights = {t: w * RELEASE_HALF_SCALE for t, w in weights.items()}
+                        overrides.insert(0, f"국면 해제({cfg.regime_release}): {risk.regime_ma_days}일선 아래지만 신규 매수 허용")
+                    else:
+                        locks.append(f"국면 필터: {mkt['benchmark_name_ko']} 종가가 {risk.regime_ma_days}일선 아래, 신규 매수 없음")
             new = []
             for t, w in weights.items():
                 if t in positions or t in pending_sells:
