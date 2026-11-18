@@ -302,7 +302,6 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .xseg.expired, .xsw.expired { background: var(--app-fg-3); }
 .xseg.exit_signal, .xsw.exit_signal { background: var(--app-gauge); }
 .xseg.force, .xsw.force { background: var(--app-forced); }
-.xseg.agent_sell, .xsw.agent_sell { background: repeating-linear-gradient(135deg, var(--app-fg-3) 0 3px, var(--app-surface) 3px 6px); }
 .xseg, .xsw { background: var(--app-review); }
 .xlegend { list-style: none; margin: 0.8rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 1.6rem; }
 .xlegend li { display: flex; gap: 0.6rem; align-items: center; }
@@ -413,6 +412,105 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .review-badges { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
 .review-line { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin: 0.6rem 0; font-size: var(--app-fs-body); }
 .tag.review-src { color: var(--app-fg); background: var(--app-surface); border-style: dashed; }
-.tag.sell-reason { color: var(--app-fg); }
-.tag.sell-reason.thesis_broken, .tag.sell-reason.hard_rule { color: var(--app-fail); background: var(--app-fail-bg); border-color: var(--app-fail-line); }
 .tag.fail-tag { color: var(--app-fail); background: var(--app-fail-bg); border-color: var(--app-fail-line); }
+
+/* 결정 카드 v0.8 (mockup DecisionCard "확정 사항"): six slots of fixed height while folded — head 80 · prices 94 ·
+   execution 84 · body 148 · evidence 76 · buttons — so the same element sits at the same height on every card of a row,
+   whatever its text; open, the heights become minimums and every cut line shows in full. Cards are at least 340px
+   (3 across at 1440, 2 at 1024); under 860px, where the rail sits on top, one across (the mockup at 768).
+   src/components/decisionCard.test.tsx holds the slot rules. Mockup hex where no DS token is close, as above. */
+.dc-grid { display: grid; gap: 1.4rem; grid-template-columns: repeat(auto-fill, minmax(34rem, 1fr)); align-items: start; }
+.dc-grid > * { min-width: 0; }
+@media (max-width: 860px) { .dc-grid { grid-template-columns: minmax(0, 1fr); } }
+.dc { --dc-agent: var(--app-gauge); --dc-agent-bg: #eef3f8; --dc-agent-line: #bcd0e0; --dc-sell: var(--app-chart-line); --dc-sell-bg: var(--app-chart-area);
+  --dc-sell-line: #9db8e3; --dc-teal: #1b6b66; --dc-teal-bg: #e3f2f1; --dc-pass-line: #cfe6d7; --dc-warn-tint: #fffbf2; --dc-warn-line: #efd9a8;
+  border: 1px solid var(--app-line); border-radius: var(--bv-radius-200); background: var(--app-surface); padding: 1.6rem 1.8rem;
+  display: flex; flex-direction: column; gap: 1rem; min-width: 0; font-size: var(--app-fs-body); line-height: 1.5; }
+.dc .c1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dc a.c1 { display: block; }
+.dc.open .c1 { white-space: normal; overflow: visible; }
+/* the price and execution cells stay one line open too (the mockup's fixed cells): the whole sentence is below them */
+.dc.open .dc-price .c1, .dc.open .dc-exec-cells .c1 { white-space: nowrap; overflow: hidden; }
+.dc .lb { font-size: var(--app-fs-small); color: var(--app-fg-3); font-weight: var(--bv-font-weight-semibold); }
+.dc .lb.up { color: var(--app-up); }
+.dc .lb.down { color: var(--app-down); }
+.dc .lb.fail { color: var(--app-fail-strong); }
+.dc .small { font-size: var(--app-fs-small); }
+.dc-head { height: 8rem; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
+.dc.open .dc-head { height: auto; min-height: 8rem; gap: 0.6rem; }
+.dc-l1 { display: flex; gap: 0.8rem; align-items: center; min-width: 0; }
+.dc-name { font-size: var(--app-fs-sub); font-weight: 700; color: var(--app-fg); text-decoration: none; }
+.dc-l2 { display: flex; gap: 0.6rem; align-items: center; overflow: hidden; }
+.dc-l3 { display: flex; justify-content: space-between; gap: 0.8rem; font-size: var(--app-fs-small); color: var(--app-fg-3); }
+.dc-l3 b { color: var(--app-fg); }
+.kind, .act, .rc, .src-tag, .xs { display: inline-block; font-size: var(--app-fs-small); font-weight: var(--bv-font-weight-semibold); line-height: 1.7;
+  border: 1px solid transparent; white-space: nowrap; }
+.kind, .rc, .src-tag { padding: 0.1rem 0.8rem; border-radius: var(--bv-radius-100); }
+.act, .xs { padding: 0.1rem 0.9rem; border-radius: var(--bv-radius-500); }
+.kind.agent { background: var(--dc-agent-bg); color: var(--dc-agent); border-color: var(--dc-agent-line); }
+.kind.rule { background: var(--app-surface-2); color: var(--app-fg-2); border-color: var(--app-line); }
+.kind.human { background: var(--app-surface); color: var(--app-fg-2); border-color: var(--app-line); border-style: dashed; }
+.act { background: var(--app-hold-bg); color: var(--app-fg-2); }
+.dc-price { height: 9.4rem; overflow: hidden; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, 4.4rem); gap: 0.6rem; }
+.dc-price .pc { background: var(--app-surface-2); border-radius: var(--bv-radius-150); padding: 0.3rem 1rem; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
+.dc-price .pv { font-size: var(--app-fs-sub); font-weight: 700; }
+.dc-price .sub { font-size: var(--app-fs-small); font-weight: var(--bv-font-weight-semibold); color: var(--app-fg-3); }
+.dc-price .sub.up { color: var(--app-up); }
+.dc-price .sub.down { color: var(--app-down); }
+.dc-exec { box-sizing: border-box; height: 8.4rem; border-radius: var(--bv-radius-150); padding: 0.8rem 1.2rem; display: flex; flex-direction: column; gap: 0.4rem;
+  overflow: hidden; background: var(--app-surface-2); border: 1px solid var(--app-line); }
+.dc.open .dc-exec { height: auto; min-height: 8.4rem; }
+.dc-exec.filled { background: var(--app-pass-tint); border-color: var(--dc-pass-line); }
+.dc-exec.blocked { background: var(--dc-warn-tint); border-color: var(--dc-warn-line); }
+.dc-exec.exception { background: var(--app-fail-tint); border-color: var(--app-fail-line); }
+.dc-exec.open { background: var(--dc-sell-bg); border-color: var(--dc-sell-line); }
+.dc-exec-top { display: flex; justify-content: space-between; gap: 0.8rem; align-items: center; }
+.xs.filled { background: var(--app-pass-bg); color: var(--app-pass-strong); }
+.xs.blocked { background: var(--app-warn-bg); color: var(--app-warn); border-color: var(--app-warn-line); }
+.xs.exception { background: var(--app-surface); color: var(--app-fail-strong); border: 1px dashed var(--app-fail); }
+.xs.open { background: var(--dc-sell-bg); color: var(--app-down-strong); }
+.xs.none { background: var(--app-hold-bg); color: var(--app-fg-2); }
+.dc-exec-cells { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0.8rem; }
+.dc-exec-cells .v { font-weight: var(--bv-font-weight-semibold); }
+.dc-exec-cells .v.up { color: var(--app-up); }
+.dc-exec-cells .v.down { color: var(--app-down); }
+.dc-exec-cells .v.fail { color: var(--app-fail-strong); }
+.dc-exec-text { font-size: var(--app-fs-small); color: var(--app-fg-2); }
+.dc-body { height: 14.8rem; display: flex; flex-direction: column; gap: 0.6rem; overflow: hidden; }
+.dc.open .dc-body { height: auto; min-height: 14.8rem; }
+.dc-body-hd { display: flex; gap: 0.6rem; align-items: center; height: 2.4rem; overflow: hidden; flex: none; }
+.dc-sum { margin: 0; height: 6.3rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; flex: none; }
+.dc.open .dc-sum { height: auto; min-height: 6.3rem; display: block; -webkit-line-clamp: none; }
+.dc-row { min-height: 2.1rem; flex: none; }
+.dc-row b.up { color: var(--app-up); }
+.dc-row b.down { color: var(--app-down); }
+.rc.main { background: var(--dc-sell-bg); color: var(--dc-sell); border-color: var(--dc-sell-bg); }
+.rc.sub { background: var(--app-surface); color: var(--dc-sell); border-color: var(--dc-sell-line); }
+.rc.hard, .rc.met { background: var(--app-warn-bg); color: var(--app-warn); border-color: var(--app-warn-line); }
+.rc.rule { background: var(--app-hold-bg); color: var(--app-fg); border-color: var(--app-hold-bg); }
+.rc.more, .rc.unmet { background: var(--app-surface); color: var(--app-fg-3); border-color: var(--app-line); }
+.rc.date { background: var(--app-hold-bg); color: var(--app-fg); }
+.dc-memo { display: flex; flex-direction: column; gap: 1rem; background: var(--app-surface-2); border: 1px solid var(--app-line); border-radius: var(--bv-radius-150); padding: 1.2rem 1.4rem; }
+.dc-memo section { display: flex; flex-direction: column; gap: 0.4rem; }
+.dc-memo p { margin: 0; white-space: pre-line; }
+.dc-memo p.pre { white-space: pre-wrap; color: var(--app-fg-2); }
+.dc-memo ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.5rem; }
+.dc-memo li { display: flex; gap: 0.8rem; align-items: baseline; }
+.dc-chips { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+/* content-box as the mockup: 76 of rows under its 8px top padding and rule (85 in all) */
+.dc-ev { box-sizing: content-box; height: 7.6rem; display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--app-line); padding-top: 0.8rem; overflow: hidden; }
+.dc.open .dc-ev { height: auto; min-height: 7.6rem; }
+.dc-ev-row { display: grid; grid-template-columns: 7.2rem minmax(0, 1fr) auto; gap: 0.8rem; align-items: start; min-height: 2.2rem; }
+.src-tag { text-align: center; }
+.src-tag.market { background: var(--dc-agent-bg); color: var(--dc-agent); }
+.src-tag.portfolio { background: var(--app-pass-bg); color: var(--app-pass-strong); }
+.src-tag.news { background: var(--app-warn-bg); color: var(--app-warn); }
+.src-tag.fundamentals { background: var(--dc-teal-bg); color: var(--dc-teal); }
+.src-tag.memory { background: var(--app-hold-bg); color: var(--app-fg-2); }
+.src-tag.other { background: var(--app-surface); color: var(--app-fg-2); border-color: var(--app-line); }
+.dc-xa { display: flex; flex-direction: column; gap: 0.6rem; border-top: 1px solid var(--app-line); padding-top: 0.8rem; }
+.dc-xa-btns { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; }
+.dc-xa-btns > button { flex: 1 1 0; min-width: 0; }
+.dc-foot { display: flex; gap: 0.8rem; align-items: center; justify-content: space-between; }
+/* v0.8 §2-3: in the 청산 사유 분포 the agent sale is a blue bar of its own, apart from the rules (was striped grey) */
+.xseg.agent_sell, .xsw.agent_sell { background: var(--app-down); }

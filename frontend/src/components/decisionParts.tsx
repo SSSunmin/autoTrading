@@ -48,24 +48,24 @@ export function Interventions({ ivs }: { ivs: Intervention[] }) {
   )
 }
 
-/** The exception's buttons (REVIEW: 재실행 · 보유로 처리 · 무시; an order: 처리 → 다음 세션 재시도 · 무시), each opening
+/** The exception's buttons (REVIEW: 재실행 · 보유로 처리 · 무시; an order: 다음 세션 재시도 · 무시), each opening
  *  the confirm modal. Nothing to act on until the executor has written the item's order. */
 export function ExceptionButtons({ item, tokenRequired }: { item: ExceptionItem; tokenRequired: boolean }) {
   const [open, setOpen] = useState<ModalVariant | null>(null)
   const [opened, setOpened] = useState(0)
   const show = (v: ModalVariant) => { setOpened((n) => n + 1); setOpen(v) }
-  const off = item.order_id == null
-  const title = off ? '실행기가 이 결정을 아직 처리하지 않았습니다' : undefined
+  const title = item.order_id == null ? '실행기가 이 결정을 아직 처리하지 않았습니다' : undefined
+  const off = item.kind !== 'review' && item.order_id == null      // an order exception the executor has not written yet
   return (
     <>
       {item.pending_action_ko && <AgentChip variant="new">{item.pending_action_ko}</AgentChip>}
-      {item.kind === 'review' ? item.actions.length > 0 ? item.actions.map((a) => (
-        <AgentButton key={a.action} variant={a.action === 'dismiss' ? 'ghost' : 'secondary'} disabled={!a.available}
-          title={a.available ? undefined : `상한 ${a.limit}회 도달`} onClick={() => show(modalVariant(item, a.action))}>
+      {/* one button per action (v0.8 mockup: an order exception too — 다음 세션 재시도 · 무시, each opening its modal) */}
+      {item.actions.length > 0 ? item.actions.map((a) => (
+        <AgentButton key={a.action} variant={a.action === 'dismiss' || a.action === 'dismiss_order' ? 'ghost' : 'secondary'} disabled={!a.available || off}
+          title={off ? title : a.available ? undefined : `상한 ${a.limit}회 도달`} onClick={() => show(item.kind === 'review' ? modalVariant(item, a.action) : 'order')}>
           {a.label_ko}{a.used != null && a.used > 0 ? ` ${a.used}/${a.limit}` : ''}
         </AgentButton>
-      )) : <AgentButton variant="secondary" disabled title={title}>재실행 · 보유로 처리 · 무시</AgentButton>
-        : <AgentButton variant="secondary" disabled={off} title={title} onClick={() => show('order')}>처리 (다음 세션 재시도 · 무시)</AgentButton>}
+      )) : <AgentButton variant="secondary" disabled title={title}>{item.kind === 'review' ? '재실행 · 보유로 처리 · 무시' : '다음 세션 재시도 · 무시'}</AgentButton>}
       {open && <ExceptionModal key={opened} item={item} variant={open} tokenRequired={tokenRequired} onClose={() => setOpen(null)} />}
     </>
   )
