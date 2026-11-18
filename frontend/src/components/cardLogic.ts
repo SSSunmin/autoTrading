@@ -1,6 +1,6 @@
 import { pct } from '../api/client'
 import type { Decision, Evidence, Order } from '../api/types'
-import { orderWords, sellSplit } from './decisionLogic'
+import { orderWords, sellSplit, splitInterventions } from './decisionLogic'
 
 /** The decision card's six fixed slots (mockup v0.8 DecisionCard "확정 사항"): what each slot holds, worked out apart
  *  from the component so the tests read the rules directly. A slot always has the same number of rows; a missing value
@@ -196,7 +196,8 @@ export function bodySlot(d: Pick<Decision, 'card' | 'thesis' | 'settings' | 'ord
   }
   const reason = typeof d.settings.exit_reason === 'string' ? d.settings.exit_reason : null
   if (reason) {
-    return { label: '규칙 사유', chips: [{ text: exitKo[reason] ?? reason, cls: 'rule' }], sum: k.text,
+    // the parser's own heading, when the text had one, is its only place on the card (review 1R #2)
+    return { label: k.label ?? '규칙 사유', chips: [{ text: exitKo[reason] ?? reason, cls: 'rule' }], sum: k.text,
       rows: [{ label: '규칙', text: d.orders.flatMap((o) => o.rules_applied).join(' · ') || reason, tone: '' },
         { label: '주문', text: d.orders[0] ? orderWords(d.orders[0]) : NONE, tone: '' }] }
   }
@@ -205,38 +206,54 @@ export function bodySlot(d: Pick<Decision, 'card' | 'thesis' | 'settings' | 'ord
 
 export interface Section { label: string; tone?: Tone; text?: string; items?: { chip?: string; chipCls?: string; text: string; sub?: string }[]; pre?: boolean }
 
-/** The open card's fields under Korean headings (mockup §1-2): a memo's 사업 · 논지 · ▲ 강세 · ▼ 약세 · 밸류에이션 · 촉매
- *  (date chips) · 무효화 조건 · 청산 계획 · 기간; a review's 판정 사유 · 무효화 점검 (해당 / 해당 없음) · 축소 목표 비중;
- *  then any field the parser did not use, and — when it did not read every field — the whole text (원문 전체). Rating,
+/** The open card's fields under Korean headings (mockup §1-2), less what the slots above already show in full once open
+ *  (card-dedupe, 2026-11-18 — the user saw the same text twice): a memo's 사업 · 하락 시 가격 · 밸류에이션 · 촉매 (date
+ *  chips) · 무효화 조건 · 청산 계획 · 기간 (논지 · 강세 · 약세 are ④); a review's 무효화 점검 (해당 / 해당 없음) (판정 사유 and
+ *  the 목표 line are ④, 수정 목표가 is ②); a REVIEW's and a rule exit's text is ④ alone. Then any field the parser did not
+ *  use, and — when it did not read every field — the whole text (원문 전체), unless ④ shows that very text. Rating,
  *  conviction, prices and the weight stay in the head and the price slot. */
 export function sections(d: Pick<Decision, 'card' | 'thesis'>, money: (v: number | null | undefined) => string): Section[] {
   const k = d.card
   const out: Section[] = []
   const text = (label: string, t: string | null | undefined, tn?: Tone) => { if (t) out.push({ label, text: t, tone: tn }) }
   if (k.kind === 'memo') {
-    text('사업', k.business); text('논지', k.thesis); text('▲ 강세', k.bull, 'up')
-    text('▼ 약세', [k.bear, k.downside != null ? `하락 시 가격 ${money(k.downside)}` : null].filter(Boolean).join('\n'), 'down')
+    text('사업', k.business)
+    text('하락 시 가격', k.downside != null ? money(k.downside) : null, 'down')
     text('밸류에이션', k.valuation)
     if (k.catalysts.length) out.push({ label: '촉매', items: k.catalysts.map((c) => ({ chip: c.date ?? undefined, chipCls: 'date', text: c.event })) })
     if (k.invalidation.length) out.push({ label: '무효화 조건', items: k.invalidation.map((t) => ({ text: t })) })
     text('청산 계획 · 기간', [k.exit_plan, k.horizon].filter(Boolean).join(' · '))
-  } else if (k.kind === 'review') {
-    text('판정 사유', k.reasoning)
-    if (k.checks.length) {
-      out.push({ label: '무효화 점검', items: k.checks.map((c) => ({ chip: c.met ? '해당' : '해당 없음', chipCls: c.met ? 'met' : 'unmet', text: c.condition, sub: c.evidence ?? undefined })) })
-    }
-    if (k.action === 'Trim') text('축소 목표 비중', k.trim_to_pct != null ? `${k.trim_to_pct.toFixed(1)}%` : NONE)
-    if (k.revised_target != null) text('수정 목표가', money(k.revised_target))
-  } else if (k.kind === 'raw') {
-    text('사유', k.reason)
-    // the model's text whole as the server cut it (review 1R #1); without it the record's whole text, below
-    if (k.raw != null) out.push({ label: '원문 전체', text: k.raw, pre: true })
-  } else {
-    text(k.label ?? '내용', k.text)
+  } else if (k.kind === 'review' && k.checks.length) {
+    out.push({ label: '무효화 점검', items: k.checks.map((c) => ({ chip: c.met ? '해당' : '해당 없음', chipCls: c.met ? 'met' : 'unmet', text: c.condition, sub: c.evidence ?? undefined })) })
   }
   for (const x of k.extra) out.push({ label: x.label ?? '기타', text: x.text })
-  if (!k.complete) out.push({ label: '원문 전체', text: d.thesis, pre: true })
+  // ④'s text on a REVIEW is the model's whole text, or the record whole when the server cut none (review 1R #1)
+  const inBody = k.kind === 'raw' ? k.raw ?? d.thesis : k.kind === 'text' ? k.text : null
+  if (!k.complete && d.thesis !== inBody) out.push({ label: '원문 전체', text: d.thesis, pre: true })
   return out
+}
+
+/** The open card's order lines under ③: each order's sentence (side and shares, fill price, amount, reason) and its
+ *  처리됨 chip, less each piece ③'s cells (the card's own order), ④'s rows (a rule exit's first order) or the order's
+ *  잠금 lines under its 원안 vs 최종 grid (a halt's reason is its lock note, measured on KB금융 · 셀트리온) already say —
+ *  an order whose every piece is said has no line. A piece is said when a cell or row holds it as whole words, digit
+ *  grouping aside ("매수 23주" in "매수 23주 미체결", "매도 1400주" in "부분 매도 1,400주" — ③ groups, orderWords not). */
+export function execLines(d: Pick<Decision, 'orders'>, exec: ExecSlot, body: BodySlot, money: (v: number | null | undefined) => string,
+  actionKo: Record<string, string> = {}): { id: string; text: string; done: string | null }[] {
+  const main = mainOrder(d)
+  return d.orders.flatMap((x) => {
+    // ④ names an order only on a rule exit (its 주문 row, the first order); a memo's bull/bear is no order (review 1R #1)
+    const ruleRow = body.rows.find((r) => r.label === '주문' && body.chips.some((c) => c.cls === 'rule'))
+    const shown = [...(x === main ? exec.cells.map((c) => c.value) : []), ...(ruleRow && x === d.orders[0] ? ruleRow.text.split(' · ') : []),
+      ...splitInterventions(x.plan?.interventions ?? []).locks.map((i) => i.note)]       // the open card's 잠금 line under its grid
+    const words = (s: string) => ` ${s.replaceAll(',', '')} `
+    const said = (p: string) => shown.some((v) => words(v).includes(words(p)))
+    const fill = x.filled_price != null ? [money(x.filled_price), money(x.amount)] : []
+    const text = [...orderWords(x).split(' · '), ...fill, x.reason].filter((p) => p && !said(p)).join(' · ')
+    const act = x.exception_resolved && x.exception_action ? actionKo[x.exception_action] ?? x.exception_action : null
+    const done = act && !said(act) ? `처리됨 · ${act}` : null
+    return text || done ? [{ id: x.order_id, text, done }] : []
+  })
 }
 
 /** ⑤ 증거: the count, the first two (all on the open card) and "+n건" for the rest. */
