@@ -20,7 +20,7 @@ const MEMO = check({ trade_date: '2026-06-01', kind: 'memo', verdict: 'memo', ve
   action: undefined, reasoning: undefined, thesis: 'HBM 공급 부족', price: 10000, target: 14000, downside: 8500, horizon: '6-12 months',
   exit_plan: '목표가 절반 매도', checks: [{ condition: '영업이익률 12% 미만', met: null, evidence: null }] })
 const TRIM = check({ trade_date: '2026-06-05', verdict: 'trim', verdict_ko: '축소', met: 1, action: 'Trim', trim_to_pct: 2,
-  rating: 'Underweight', reasons: ['thesis_broken'], reasons_ko: ['논지 깨짐'],
+  rating: 'Underweight', reasons: ['thesis_broken'], reasons_ko: ['논지 훼손'],
   checks: [{ condition: '영업이익률 12% 미만', met: true, evidence: '11%' }, { condition: 'HBM 40% 아래', met: false, evidence: '52%' }] })
 const EXIT = check({ trade_date: '2026-06-08', verdict: 'exit', verdict_ko: '청산', met: 2, action: 'Exit', rating: 'Sell' })
 

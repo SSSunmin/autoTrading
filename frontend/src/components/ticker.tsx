@@ -79,7 +79,7 @@ export function ThesisPanel({ checks, market }: { checks: ThesisCheck[]; market:
   const last = latestReview(checks)
   const badge = last && verdictBadge(last)
   return (
-    <AgentSectionPanel title="논지 점검" description="투자 메모의 논지 깨짐 조건과 보유 중 매도 검토 결과를 기록 그대로 시간순으로 보여 줍니다">
+    <AgentSectionPanel title="논지 점검" description="투자 메모의 무효화 조건과 보유 중 매도 검토 결과를 기록 그대로 시간순으로 보여 줍니다">
       {last && badge ? (
         <div className="thesis-verdict"><RatingBadge rating={badge.rating} label={badge.label} />
           <span className="muted">{last.trade_date} 검토 · {metLine(last)}</span></div>

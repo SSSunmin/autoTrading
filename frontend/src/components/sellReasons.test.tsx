@@ -8,13 +8,13 @@ import { DecisionCard } from './DecisionCard'
 import { ReviewBadges, TickerFacts } from './ticker'
 import { earningsLine, reviewOrderLine, SELL_REASONS } from './tickerLogic'
 
-// the server's labels (krx_names.SELL_REASON_KO), written out by hand
+// the server's labels (krx_names.SELL_REASON_KO, the v0.8 words since sell-label-unify), written out by hand
 const KO: Record<string, string> = {
-  target_reached: '목표가 도달', thesis_broken: '논지 깨짐', better_alternative: '더 좋은 대안', overweight: '비중 초과',
-  catalyst_gone: '촉매 소멸', would_not_rebuy: '재매수 테스트 실패', hard_rule: '하드룰 발동',
+  target_reached: '목표가 도달', thesis_broken: '논지 훼손', better_alternative: '더 나은 대안', overweight: '비중 과다',
+  catalyst_gone: '촉매 소멸', would_not_rebuy: '다시 사지 않음', hard_rule: '하드 룰',
 }
 const review = (over: Partial<SellReviewInfo>): SellReviewInfo => ({
-  action: 'Trim', verdict: 'trim', verdict_ko: '축소', reasons: ['thesis_broken', 'overweight'], reasons_ko: ['논지 깨짐', '비중 초과'],
+  action: 'Trim', verdict: 'trim', verdict_ko: '축소', reasons: ['thesis_broken', 'overweight'], reasons_ko: ['논지 훼손', '비중 과다'],
   trim_to_pct: 10, met: 1, total: 2, ...over,
 })
 const order = (o: Partial<Order>): Order => ({
@@ -36,7 +36,7 @@ describe('sell reason badges', () => {
     const out = renderToStaticMarkup(<ReviewBadges r={r} />)
     const chips = [...out.matchAll(/<span class="rc (\w+)">([^<]+)<\/span>/g)].map((m) => `${m[1]}:${m[2]}`)
     expect(chips).toEqual(['hard:하드 룰', 'sub:논지 훼손', 'sub:목표가 도달', 'sub:촉매 소멸', 'sub:더 나은 대안', 'sub:비중 과다', 'sub:다시 사지 않음'])
-    expect(Object.keys(REASON_KO).sort()).toEqual([...SELL_REASONS].sort())
+    expect(REASON_KO).toEqual(KO)                                       // the cards say what the server says
     // a table cell (positions): the main reason and "+n"
     const cell = renderToStaticMarkup(<ReviewBadges r={review({})} max={1} />)
     expect(cell).toContain('<span class="rc main">논지 훼손</span><span class="rc more">+1</span>')
