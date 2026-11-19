@@ -7,6 +7,8 @@ import { useApi } from '../hooks/useApi'
 import { useLabels } from '../hooks/useLabels'
 import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded, RuleCell, TickerCell } from '../components/common'
+import { Tip } from '../components/Tip'
+import { firstTerms } from '../glossary'
 import type { Candidate, ScreenDetail as ScreenDetailT } from '../api/types'
 
 /** 2-B: the funnel plus the ticker × rule matrix. Clicking a stage filters to the tickers that rule rejected. */
@@ -37,6 +39,7 @@ function Detail({ s, stage, setStage, filter, setFilter, q, setQ, ruleDesc, onTi
   q: string; setQ: (v: string) => void; ruleDesc: Record<string, string>; onTicker: (t: string) => void
 }) {
   const prev = (i: number) => (i === 0 ? s.universe_size : s.stage_counts[i - 1])
+  const tips = firstTerms(s.rules)
   const rows = useMemo(() => {
     let c: Candidate[] = s.candidates
     if (stage != null) { const rule = s.rules[stage]; c = c.filter((x) => x.filters.some((f) => f.rule === rule && !f.passed)) }
@@ -48,7 +51,7 @@ function Detail({ s, stage, setStage, filter, setFilter, q, setQ, ruleDesc, onTi
 
   return (
     <>
-      <h1 className="page-title">{s.universe} · <span className="num">{s.as_of}</span></h1>
+      <h1 className="page-title">{s.universe}<Tip k="universe" /> · <span className="num">{s.as_of}</span></h1>
       <p className="page-sub"><span className="num">{s.universe_size} → {s.selected_count}</span> 종목. 단계를 누르면 그 규칙에서 탈락한 종목만 표에 남습니다.</p>
 
       <div className="funnel" role="group" aria-label="선별 깔때기">
@@ -77,7 +80,7 @@ function Detail({ s, stage, setStage, filter, setFilter, q, setQ, ruleDesc, onTi
             <thead>
               <tr>
                 <th>선정</th><th className="r">순위</th><th>종목</th><th className="r">점수</th>
-                {s.rules.map((r, i) => <th key={r} title={ruleDesc[r]}>{s.rules_ko[i]}</th>)}
+                {s.rules.map((r, i) => <th key={r} title={ruleDesc[r]}>{s.rules_ko[i]}{tips[r] && <Tip k={tips[r]} />}</th>)}
               </tr>
             </thead>
             <tbody>

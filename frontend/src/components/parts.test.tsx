@@ -8,7 +8,9 @@ import { TickerCell } from './common'
 import { AsOfStamp, ExitReasonBadge, LimitGauge, PageHeader, ProtectionsChip, RegimeBadge, RiskGauges, SourceBadge } from './parts'
 import { gaugeState, tickerCellParts } from './partsLogic'
 
-const html = (el: ReactElement, url = '/') => renderToStaticMarkup(<MemoryRouter initialEntries={[url]}>{el}</MemoryRouter>)
+/** the markup without the terms' ⓘ (glossary-tips; tested in glossary.test.tsx) */
+const noTips = (s: string) => s.replace(/<span class="_root[^"]*"><button type="button" class="tip"[\s\S]*?<\/button><\/span>/g, '').replace(/<span class="tip-term">([^<]*)<\/span>/g, '$1')
+const html = (el: ReactElement, url = '/') => noTips(renderToStaticMarkup(<MemoryRouter initialEntries={[url]}>{el}</MemoryRouter>))
 const EXIT_KO = { stop_loss: '손절', trailing: '트레일링', expired: '기간 만료', exit_signal: '등급 하향', force: '정지 청산' }
 
 describe('gaugeState', () => {

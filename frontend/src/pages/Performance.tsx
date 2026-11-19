@@ -9,6 +9,8 @@ import { AlphaBar, Loaded, Pct, RatingBadge, TickerCell } from '../components/co
 import { SourceBadge } from '../components/decisionParts'
 import { RatingBars, SeriesCharts, SettlementTable } from '../components/perfCharts'
 import { LoopPanel, PeriodControl, PeriodNote, TrialBadge } from '../components/loopScoring'
+import { Tip } from '../components/Tip'
+import { asText } from '../glossary'
 import { type Period, seriesParams, shownSeries } from '../components/loopScoringLogic'
 import type { Market, PaperSummary, SimMetrics } from '../api/types'
 
@@ -61,9 +63,9 @@ export default function Performance() {
         {tab === 'compare' && <Compare />}
         {tab === 'decisions' && <Loaded state={perf}>{(p) => (
           <>
-            <p className="page-sub"><SourceBadge d={{ source_kind: 'baseline', source_kind_ko: '규칙 베이스라인' }} /> 실행 <b className="num">{p.run_id}</b>: {p.universe.length}종목 × {p.dates.length}일 = {p.cells_run}셀. 규칙 전용 베이스라인이라 에이전트가 더하는 알파를 재는 기준선입니다.</p>
+            <p className="page-sub"><SourceBadge d={{ source_kind: 'baseline', source_kind_ko: '규칙 베이스라인' }} /><Tip k="baseline" /> 실행 <b className="num">{p.run_id}</b>: {p.universe.length}종목 × {p.dates.length}일 = {p.cells_run}셀. 규칙 전용 베이스라인이라 에이전트가 더하는 알파를 재는 기준선입니다.</p>
             <Grid columns={6} gap="1.4rem">
-              <AgentKpiCard label="정산 완료" value={p.resolved} />
+              <AgentKpiCard label={asText(<>정산 완료<Tip k="settlement" /></>)} value={p.resolved} />
               <AgentKpiCard label="정산 대기" value={p.pending} />
               <AgentKpiCard label="정산 실패" value={p.settlement.failed} delta={p.settlement.by_reason.filter((r) => r.count).map((r) => `${r.label_ko} ${r.count}`).join(' · ') || undefined} />
               <AgentKpiCard label="미채점 (REVIEW)" value={p.unscored} />
@@ -134,17 +136,17 @@ function Portfolio({ p, bench }: { p: PaperSummary; bench: string }) {
         1차 지표는 수익이 아니라 <b>최대 드로다운과 회복</b>입니다. 규칙 전용(LLM 없음).
       </p>
       <Grid columns={4} gap="1.4rem">
-        <AgentKpiCard label={`${bench} 최대 드로다운`} value={pct(b.max_drawdown)} delta={`${b.dd_peak} → ${b.dd_trough}${b.dd_recovery ? '' : ' · 미회복'}`} direction="down" />
-        <AgentKpiCard label="하드 룰 끔" value={pct(off.metrics.max_drawdown)} delta={`수익 ${pct(off.metrics.total_return)} · 노출 ${(off.mean_exposure * 100).toFixed(0)}%`} direction="down" />
+        <AgentKpiCard label={asText(<>{bench} 최대 드로다운<Tip k="max_drawdown" /></>)} value={pct(b.max_drawdown)} delta={`${b.dd_peak} → ${b.dd_trough}${b.dd_recovery ? '' : ' · 미회복'}`} direction="down" />
+        <AgentKpiCard label={asText(<>하드 룰 끔<Tip k="hard_rule" /></>)} value={pct(off.metrics.max_drawdown)} delta={`수익 ${pct(off.metrics.total_return)} · 노출 ${(off.mean_exposure * 100).toFixed(0)}%`} direction="down" />
         <AgentKpiCard label="하드 룰 켬" value={pct(on.metrics.max_drawdown)} delta={`수익 ${pct(on.metrics.total_return)} · 노출 ${(on.mean_exposure * 100).toFixed(0)}%`} />
-        <AgentKpiCard label="하드 룰 + 국면 필터" value={pct(p.variants.rules_on_regime.metrics.max_drawdown)}
+        <AgentKpiCard label={asText(<>하드 룰 + 국면 필터<Tip k="regime" /></>)} value={pct(p.variants.rules_on_regime.metrics.max_drawdown)}
           delta={`수익 ${pct(p.variants.rules_on_regime.metrics.total_return)} · 노출 ${(p.variants.rules_on_regime.mean_exposure * 100).toFixed(0)}%`} />
       </Grid>
 
       <div className="section">
-        <AgentSectionPanel title="변형 비교" description={`결정은 종가, 체결은 다음날 시가(갭은 손절을 그대로 뚫음). ${p.market === 'US' ? '수수료 0·매도 시 SEC fee·TAF·슬리피지' : '수수료 0.015%·거래세 0.20%·슬리피지 0.05%'}`}>
+        <AgentSectionPanel title="변형 비교" description={asText(<>결정은 종가, 체결은 다음날 시가(갭은 손절을 그대로 뚫음). {p.market === 'US' ? '수수료 0·매도 시 SEC fee·TAF·슬리피지' : '수수료 0.015%·거래세 0.20%·슬리피지 0.05%'}<Tip k="slippage" /></>)}>
           <div className="matrix"><table>
-            <thead><tr><th>변형</th><th className="r">수익</th><th className="r">CAGR</th><th className="r">최대 드로다운</th><th className="r">최악의 날</th><th className="r">변동성</th><th className="r">거래</th><th>청산 사유</th><th className="r">평균 노출</th></tr></thead>
+            <thead><tr><th>변형</th><th className="r">수익</th><th className="r">CAGR<Tip k="cagr" /></th><th className="r">최대 드로다운</th><th className="r">최악의 날</th><th className="r">변동성<Tip k="volatility" /></th><th className="r">거래</th><th>청산 사유</th><th className="r">평균 노출<Tip k="exposure" /></th></tr></thead>
             <tbody>
               <tr><td><b>{bench}</b> <span className="muted">매수 보유</span></td><td className="r"><Pct value={b.total_return} /></td><td className="r"><Pct value={b.cagr} /></td>
                 <DdCell m={b} /><td className="r"><Pct value={b.worst_day} /><div className="muted num">{b.worst_day_date}</div></td><td className="r num">{pct(b.volatility, 0)}</td><td className="r">–</td><td>–</td><td className="r num">100%</td></tr>
@@ -164,7 +166,7 @@ function Portfolio({ p, bench }: { p: PaperSummary; bench: string }) {
       <div className="section">
         <AgentSectionPanel title="급락 구간별" description="각 구간은 그 구간 시작일부터 측정. 수익 / 구간 내 최대 드로다운">
           <div className="matrix"><table>
-            <thead><tr><th>구간</th><th>기간</th><th className="r">{bench}</th>{VARIANTS.map((k) => <th key={k} className="r">{p.variants[k]?.label_ko}</th>)}</tr></thead>
+            <thead><tr><th>구간</th><th>기간</th><th className="r">{bench}<Tip k="benchmark" /></th>{VARIANTS.map((k) => <th key={k} className="r">{p.variants[k]?.label_ko}</th>)}</tr></thead>
             <tbody>{windows.map((w) => (
               <tr key={w}><td><b>{w}</b></td><td className="num muted">{p.windows[w][0]} ~ {p.windows[w][1]}</td>
                 <td className="r"><Pct value={p.benchmark.windows[w]?.return} /> <span className="muted">/</span> <Pct value={p.benchmark.windows[w]?.max_drawdown} /></td>
@@ -195,7 +197,7 @@ function Portfolio({ p, bench }: { p: PaperSummary; bench: string }) {
       </div>
 
       <div className="section">
-        <AgentSectionPanel title="모의투자 통과 기준" description="같은 자동 루프를 모의로 돌려 전 기간 충족해야 실거래로 전환. 기준값은 config.PAPER_TRADING">
+        <AgentSectionPanel title={asText(<>모의투자 통과 기준<Tip k="paper" /></>)} description="같은 자동 루프를 모의로 돌려 전 기간 충족해야 실거래로 전환. 기준값은 config.PAPER_TRADING">
           <div className="matrix"><table><tbody>
             {p.criteria.map((c) => <tr key={c.id}><td>{c.label_ko} <span className="muted num">{c.id}</span></td><td className="r num">{typeof c.value === 'number' && Math.abs(c.value) < 1 && c.value !== 0 ? pct(c.value, 0) : String(c.value)}</td></tr>)}
           </tbody></table></div>
@@ -217,7 +219,7 @@ function Compare() {
       <Loaded state={us}>{(u) => (
         <AgentSectionPanel title="국내 2차 ↔ 미국 3차" description={`같은 규칙·변형. 국내 ${k.start} ~ ${k.end} · ${k.universe.length}종목, 미국 ${u.start} ~ ${u.end} · ${u.universe.length}종목. 기간과 통화가 달라 비율만 나란히 놓습니다`}>
           <div className="matrix"><table>
-            <thead><tr><th>변형</th><th className="r">최대 드로다운 국내</th><th className="r">미국</th><th className="r">수익 국내</th><th className="r">미국</th>
+            <thead><tr><th>변형</th><th className="r wrap"><Tip k="max_drawdown" term="최대 드로다운" /> 국내</th><th className="r">미국</th><th className="r">수익 국내</th><th className="r">미국</th>
               <th className="r">거래 국내</th><th className="r">미국</th><th>청산 사유 국내</th><th>미국</th></tr></thead>
             <tbody>
               <tr><td><b>지수</b> <span className="muted">매수 보유</span></td>

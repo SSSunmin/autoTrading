@@ -4,6 +4,8 @@ import { money } from '../api/client'
 import type { Market, SellReviewInfo, ThesisCheck, TickerDetail, TickerHolding } from '../api/types'
 import { reasonChips } from './cardLogic'
 import { Pct, RatingBadge } from './common'
+import { Tip } from './Tip'
+import { asText } from '../glossary'
 import { earningsLine, latestReview, metLine, verdictBadge } from './tickerLogic'
 
 /** Header facts: sector and exchange from files, the holding in one line, the earnings date as a reference only. */
@@ -79,7 +81,7 @@ export function ThesisPanel({ checks, market }: { checks: ThesisCheck[]; market:
   const last = latestReview(checks)
   const badge = last && verdictBadge(last)
   return (
-    <AgentSectionPanel title="논지 점검" description="투자 메모의 무효화 조건과 보유 중 매도 검토 결과를 기록 그대로 시간순으로 보여 줍니다">
+    <AgentSectionPanel title={asText(<>논지 점검<Tip k="thesis" /></>)} description={asText(<>투자 메모의 무효화 조건<Tip k="invalidation" />과 보유 중 매도 검토 결과를 기록 그대로 시간순으로 보여 줍니다</>)}>
       {last && badge ? (
         <div className="thesis-verdict"><RatingBadge rating={badge.rating} label={badge.label} />
           <span className="muted">{last.trade_date} 검토 · {metLine(last)}</span></div>
@@ -98,15 +100,15 @@ export function HoldingPanel({ h, market }: { h: TickerHolding | null; market: M
       <div className="matrix"><table className="holding-table">
         <tbody>
           <tr><th>수량</th><td className="r num">{h.quantity}주{h.partial_sold > 0 && <span className="muted"> · 부분 매도 {h.partial_sold}주</span>}</td></tr>
-          <tr><th>평단 / 현재가</th><td className="r num">{money(h.avg_price, market)} / {money(h.last_price, market)}</td></tr>
+          <tr><th>평단<Tip k="avg_price" /> / 현재가</th><td className="r num">{money(h.avg_price, market)} / {money(h.last_price, market)}</td></tr>
           <tr><th>평가액</th><td className="r num">{money(h.market_value, market)}</td></tr>
-          <tr><th>미실현 손익</th><td className="r"><span className={`num ${h.unrealized == null ? '' : h.unrealized > 0 ? 'up' : h.unrealized < 0 ? 'down' : ''}`}>{money(h.unrealized, market)}</span> <Pct value={h.unrealized_pct} /></td></tr>
-          <tr><th>손절선</th><td className="r num">{money(h.stop_price, market)}</td></tr>
-          <tr><th>트레일링 고점</th><td className="r num">{money(h.trailing_high, market)}{h.trailing_active ? ` → ${money(h.trailing_stop_price, market)}` : ''}</td></tr>
-          <tr><th>보유일 · 만료</th><td className="r num">{h.holding_days}일 · {h.expiry_date ?? '–'}</td></tr>
+          <tr><th>미실현 손익<Tip k="unrealized" /></th><td className="r"><span className={`num ${h.unrealized == null ? '' : h.unrealized > 0 ? 'up' : h.unrealized < 0 ? 'down' : ''}`}>{money(h.unrealized, market)}</span> <Pct value={h.unrealized_pct} /></td></tr>
+          <tr><th>손절선<Tip k="stop_loss" /></th><td className="r num">{money(h.stop_price, market)}</td></tr>
+          <tr><th>트레일링 고점<Tip k="trailing" /></th><td className="r num">{money(h.trailing_high, market)}{h.trailing_active ? ` → ${money(h.trailing_stop_price, market)}` : ''}</td></tr>
+          <tr><th>보유일 · 만료<Tip k="expiry" /></th><td className="r num">{h.holding_days}일 · {h.expiry_date ?? '–'}</td></tr>
         </tbody>
       </table></div>
-      <h3 className="sub-title">부분 매도 이력</h3>
+      <h3 className="sub-title">부분 매도 이력<Tip k="trim" /></h3>
       {h.partial_sales.length ? (
         <div className="matrix"><table>
           <thead><tr><th>체결일</th><th className="r">수량</th><th className="r">체결가</th></tr></thead>

@@ -10,6 +10,12 @@ import { Pct, RatingBadge } from './common'
 import { actionWord, bodySlot, confidenceText, evidenceSlot, execLines, execSlot, kindTag, mainOrder, priceCells, ratingPill, sections, sourceTag } from './cardLogic'
 import { ExceptionButtons, Interventions, PlanGrid } from './decisionParts'
 import { FillTime } from './risk'
+import { Tip } from './Tip'
+import type { Term } from '../glossary'
+
+/** the card's labels a term's ⓘ goes beside (glossary-tips) */
+const TERM: Record<string, Term> = { 비중: 'weight', 손절가: 'stop_loss', 손절선: 'stop_loss', 논지: 'thesis', 촉매: 'catalyst',
+  '무효화 조건': 'invalidation', '무효화 점검': 'invalidation' }
 
 /** One decision as the v0.8 card (mockup DecisionCard): six slots of fixed height — ① head (name · ticker / who and what
  *  kind · rating · action / decision day · confidence), ② prices (four cells), ③ the execution state (badge, time, three
@@ -18,9 +24,10 @@ import { FillTime } from './risk'
  *  every cut line in full, the memo's other fields under Korean headings (each text once — card-dedupe), every piece of
  *  evidence. An exception still on the
  *  queue adds its action row above the buttons (below every slot). ``showPlan``: the 하드룰 개입 tab shows the 원안 vs
- *  최종 grid without opening. ``defaultOpen``: start open (the tests render both states without a DOM). */
-export function DecisionCard({ d, exception, tokenRequired = false, showPlan = false, defaultOpen = false }: {
-  d: Decision; exception?: ExceptionItem; tokenRequired?: boolean; showPlan?: boolean; defaultOpen?: boolean
+ *  최종 grid without opening. ``defaultOpen``: start open (the tests render both states without a DOM). ``tips``: the
+ *  terms' ⓘ on the folded slots — the first card of a list only (once a screen); an open card's headings always have theirs. */
+export function DecisionCard({ d, exception, tokenRequired = false, showPlan = false, defaultOpen = false, tips = false }: {
+  d: Decision; exception?: ExceptionItem; tokenRequired?: boolean; showPlan?: boolean; defaultOpen?: boolean; tips?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const to = useMarketPath()
@@ -31,6 +38,7 @@ export function DecisionCard({ d, exception, tokenRequired = false, showPlan = f
   const exec = execSlot(d, amt, { exceptionKind: labels?.exception_kind_ko, action: labels?.exception_action_ko })
   const body = bodySlot(d, open, labels?.exit_reason_ko)
   const ev = evidenceSlot(d.evidence, open)
+  const tip = (label: string) => tips && TERM[label] && <Tip k={TERM[label]} />
   const o = mainOrder(d)
   const plans = d.orders.filter((x) => x.plan && x.plan.interventions.length > 0)
   const detail = `/tickers/${encodeURIComponent(d.ticker)}`
@@ -49,19 +57,19 @@ export function DecisionCard({ d, exception, tokenRequired = false, showPlan = f
         </div>
         <div className="dc-l2">
           <span className={`kind ${kind.cls}`}>{kind.label}</span>
-          <RatingBadge rating={pill.rating} label={pill.label} />
+          <RatingBadge rating={pill.rating} label={pill.label} />{tips && <Tip k="rating" />}
           <span className="act">{actionWord(d)}</span>
         </div>
         <div className="dc-l3">
           <span>결정 <span className="num">{d.trade_date} {d.market === 'US' ? 'ET' : 'KST'}</span></span>
-          <span>확신도 <b className="num">{confidenceText(d.confidence)}</b></span>
+          <span>확신도{tips && <Tip k="confidence" />} <b className="num">{confidenceText(d.confidence)}</b></span>
         </div>
       </header>
 
       <div className="dc-price">
         {priceCells(d, amt).map((c) => (
           <div key={c.label} className="pc">
-            <div className="lb c1">{c.label}</div>
+            <div className="lb c1">{c.label}{tip(c.label)}</div>
             <div className="c1"><b className="pv num">{c.value}</b> {c.sub && <span className={`sub ${c.tone}`}>{c.sub}</span>}</div>
           </div>
         ))}
@@ -92,7 +100,7 @@ export function DecisionCard({ d, exception, tokenRequired = false, showPlan = f
 
       <div className="dc-body">
         <div className="dc-body-hd">
-          <span className="lb">{body.label}</span>
+          <span className="lb">{body.label}{tip(body.label)}</span>
           {body.chips.map((c) => <span key={c.text} className={`rc ${c.cls}`}>{c.text}</span>)}
         </div>
         <p className="dc-sum">{body.sum}</p>
@@ -105,7 +113,7 @@ export function DecisionCard({ d, exception, tokenRequired = false, showPlan = f
         <div className="dc-memo">
           {sections(d, amt).map((s) => (
             <section key={s.label}>
-              <div className={`lb ${s.tone ?? ''}`}>{s.label}</div>
+              <div className={`lb ${s.tone ?? ''}`}>{s.label}{TERM[s.label] && <Tip k={TERM[s.label]} />}</div>
               {s.text != null && <p className={s.pre ? 'pre' : undefined}>{s.text}</p>}
               {s.items && (
                 <ul>{s.items.map((i, n) => (
@@ -118,7 +126,7 @@ export function DecisionCard({ d, exception, tokenRequired = false, showPlan = f
             <section><div className="lb">에이전트가 적은 개입</div>
               <div className="dc-chips">{d.hard_rule_overrides.map((x) => <AgentChip key={x} variant="hot">{x}</AgentChip>)}</div></section>
           )}
-          <section><div className="lb">5일 정산</div>
+          <section><div className="lb">5일 정산<Tip k="settlement" /></div>
             <p>{d.outcome == null ? '기록 없음' : d.outcome.pending ? '정산 대기' : <>실현 <Pct value={d.outcome.raw_return} /> · 알파 <Pct value={d.outcome.alpha} /></>}</p></section>
         </div>
       )}

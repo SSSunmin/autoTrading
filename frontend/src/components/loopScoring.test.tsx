@@ -6,7 +6,9 @@ import type { LoopColumn, LoopScoring } from '../api/types'
 import { LoopPanel, PeriodNote, TrialBadge } from './loopScoring'
 import { loopRows, pendingText, periodFrom, ratingsText, recordedText, seriesParams, shownSeries, trialBadge } from './loopScoringLogic'
 
-const html = (el: ReactElement) => renderToStaticMarkup(el)
+/** the markup without the terms' ⓘ (glossary-tips; tested in glossary.test.tsx) */
+const noTips = (s: string) => s.replace(/<span class="_root[^"]*"><button type="button" class="tip"[\s\S]*?<\/button><\/span>/g, '').replace(/<span class="tip-term">([^<]*)<\/span>/g, '$1')
+const html = (el: ReactElement) => noTips(renderToStaticMarkup(el))
 
 // the server's columns, written out by hand (no values worked out here)
 const col = (o: Partial<LoopColumn>): LoopColumn => ({

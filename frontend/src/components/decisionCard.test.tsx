@@ -35,8 +35,10 @@ const dec = (d: Partial<Decision> = {}): Decision => ({
   has_intervention: false, market: 'US', outcome: null, orders: [], review: null, card: MEMO,
   price_ctx: { close: 400, avg_price: null, stop_loss_pct: -0.08, realized: {} }, ...d,
 })
+/** the markup without the terms' ⓘ (glossary-tips; tested in glossary.test.tsx) */
+const noTips = (s: string) => s.replace(/<span class="_root[^"]*"><button type="button" class="tip"[\s\S]*?<\/button><\/span>/g, '').replace(/<span class="tip-term">([^<]*)<\/span>/g, '$1')
 const html = (d: Decision, defaultOpen = false) =>
-  renderToStaticMarkup(<MemoryRouter initialEntries={['/decisions?market=US']}><DecisionCard d={d} defaultOpen={defaultOpen} /></MemoryRouter>)
+  noTips(renderToStaticMarkup(<MemoryRouter initialEntries={['/decisions?market=US']}><DecisionCard d={d} defaultOpen={defaultOpen} /></MemoryRouter>))
 const slots = (out: string) => [...out.matchAll(/class="(dc-(?:head|price|exec|body|memo|ev|xa|foot))[ "]/g)].map((m) => m[1])
 const css = readFileSync(join(__dirname, '..', 'app.css'), 'utf8')
 

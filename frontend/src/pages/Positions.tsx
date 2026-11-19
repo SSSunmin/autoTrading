@@ -9,6 +9,8 @@ import { Loaded, Pct, TickerCell } from '../components/common'
 import { AsOfStamp, ExitReasonBadge, PageHeader, RegimeBadge, RiskGauges } from '../components/parts'
 import { ReviewBadges } from '../components/ticker'
 import { EventList, ExitBar, ProtectionCards } from '../components/risk'
+import { Tip } from '../components/Tip'
+import { asText } from '../glossary'
 
 /** 5: the paper book replayed from the orders log — holdings with their stop line, trailing high and expiry,
  *  the risk limits, the four Protections, and how positions were closed. Rule verdicts are shown, not acted on. */
@@ -35,8 +37,8 @@ export default function Positions() {
                 action={<AsOfStamp asOf={b.as_of} />}>
                 {b.positions.length === 0 ? <p className="muted">보유 종목이 없습니다.</p> : (
                   <div className="matrix"><table>
-                    <thead><tr><th>종목</th><th className="r">수량</th><th className="r">평단</th><th className="r">현재가</th><th className="r">미실현</th><th className="r">비중</th>
-                      <th className="r">손절선</th><th className="r">손절까지</th><th className="r">트레일링 고점</th><th className="r">보유일</th><th>만료일</th><th>룰 판정</th><th>에이전트 매도 검토</th></tr></thead>
+                    <thead><tr><th>종목</th><th className="r">수량</th><th className="r">평단<Tip k="avg_price" /></th><th className="r">현재가</th><th className="r">미실현<Tip k="unrealized" /></th><th className="r">비중<Tip k="weight" /></th>
+                      <th className="r">손절선<Tip k="stop_loss" /></th><th className="r">손절까지</th><th className="r">트레일링 고점<Tip k="trailing" /></th><th className="r">보유일</th><th>만료일<Tip k="expiry" /></th><th>룰 판정</th><th>에이전트 매도 검토</th></tr></thead>
                     <tbody>{b.positions.map((r) => (
                       <tr key={r.ticker} className="click" onClick={() => navigate(to(`/tickers/${encodeURIComponent(r.ticker)}`))}>
                         <td><TickerCell ticker={r.ticker} name={r.name} /></td>
@@ -58,9 +60,9 @@ export default function Positions() {
             <div className="cards section">
               <AgentSectionPanel title="리스크 게이지" description={`피크 ${amt(b.peak)} · 실현 손익 ${amt(b.realized_pnl)}(자본 ${amt(b.capital)}${b.capital !== b.initial_cash ? ` · 시작 ${amt(b.initial_cash)} + 입출금` : ''})`}
                 action={<AsOfStamp asOf={b.as_of} />}>
-                <RiskGauges p={b} amt={amt} />
+                <RiskGauges p={b} amt={amt} tipped={['weight']} />
               </AgentSectionPanel>
-              <AgentSectionPanel title="Protections" description="StoplossGuard · MaxDrawdown · Cooldown · LowProfit 상태와 해제일"
+              <AgentSectionPanel title={asText(<Tip k="protections" term="Protections" />)} description="StoplossGuard · MaxDrawdown · Cooldown · LowProfit 상태와 해제일"
                 action={<RegimeBadge on={b.regime_on} gap={b.regime_gap} index={info?.benchmark_name_ko ?? '지수'} days={b.limits.regime_ma_days} />}>
                 <ProtectionCards items={b.protections} />
               </AgentSectionPanel>

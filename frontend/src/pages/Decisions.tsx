@@ -9,6 +9,7 @@ import { useMarket } from '../hooks/useMarket'
 import { useStateTick, useTradingState } from '../hooks/useTradingState'
 import { Loaded, TickerCell } from '../components/common'
 import { DecisionCard } from '../components/DecisionCard'
+import { Tip } from '../components/Tip'
 import { ExceptionButtons } from '../components/decisionParts'
 import { ReviewBadges } from '../components/ticker'
 
@@ -50,8 +51,9 @@ export default function Decisions() {
   const nExc = exceptions.data?.length ?? 0
   const items = exceptions.data ?? []
   const token = mode.data?.admin_token_required ?? false
-  const card = (d: Decision, showPlan = false) => (
-    <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} exception={exceptionOf(d, items)} tokenRequired={token} showPlan={showPlan} />
+  // the first card of a tab carries the terms' ⓘ (glossary-tips: once a screen)
+  const card = (d: Decision, i: number, showPlan = false) => (
+    <DecisionCard key={d.ticker + d.trade_date + d.source} d={d} exception={exceptionOf(d, items)} tokenRequired={token} showPlan={showPlan} tips={i === 0} />
   )
   // the queue item's own card: the decision it belongs to (its REVIEW, or the decision whose order it is)
   const decisionOf = (x: ExceptionItem) => rows.find((d) => exceptionOf(d, [x]) === x)
@@ -61,8 +63,9 @@ export default function Decisions() {
     <>
       <h1 className="page-title">결정·실행</h1>
       <p className="page-sub">
-        에이전트가 무엇을 결정했고, 룰이 무엇을 바꾸거나 막았고, 실제로 무엇이 체결됐는지.
-        {mode.data?.mode === 'manual' ? ' 수동 승인 모드라 주문 전에 승인 단계가 있습니다.' : ' 자동 모드라 승인 단계는 없고, 사람이 봐야 할 것은 예외 큐에만 올라옵니다.'}
+        에이전트가 무엇을 결정했고, 하드 룰<Tip k="hard_rule" />이 무엇을 바꾸거나 막았고, 실제로 무엇이 체결됐는지.
+        {mode.data?.mode === 'manual' ? ' 수동 승인 모드라 주문 전에 승인 단계가 있습니다. 사람이 봐야 할 예외는 예외 큐' : ' 자동 모드라 승인 단계는 없고, 사람이 봐야 할 것은 예외 큐'}
+        <Tip k="exception_queue" />{mode.data?.mode === 'manual' ? '에 올라옵니다.' : '에만 올라옵니다.'}
       </p>
       <div className="toolbar">
         <AgentSelect label={`결정일 (${market === 'US' ? '미국 거래일, 뉴욕 날짜' : '국내 거래일'})`} value={day ?? ''} onChange={(e) => setPicked({ market, date: e.target.value })}
@@ -81,7 +84,7 @@ export default function Decisions() {
       <div className="section">
         {tab === 'all' && (
           <Loaded state={all} empty="이 날짜의 결정이 없습니다">
-            {() => <div className="dc-grid">{rows.map((d) => card(d))}</div>}
+            {() => <div className="dc-grid">{rows.map((d, i) => card(d, i))}</div>}
           </Loaded>
         )}
 
@@ -90,10 +93,10 @@ export default function Decisions() {
             emptyDescription="모든 결정의 등급을 읽을 수 있었고 거부된 주문도 없습니다(처리한 예외는 빠집니다). REVIEW·자동 실행 한도 초과·벤더 장애가 생기면 여기에 올라옵니다.">
             {(items) => (
               <div className="dc-grid">
-                {items.map((x) => {
+                {items.map((x, i) => {
                   const d = decisionOf(x)
                   // this item's own card and buttons: a decision with two exceptions is two cards, each its own (review 1R #4)
-                  if (d) return <DecisionCard key={x.kind + x.ticker + (x.ref ?? x.order_id ?? '')} d={d} exception={x} tokenRequired={token} />
+                  if (d) return <DecisionCard key={x.kind + x.ticker + (x.ref ?? x.order_id ?? '')} d={d} exception={x} tokenRequired={token} tips={i === 0} />
                   return (
                     <article key={x.kind + x.ticker + (x.ref ?? '')} className="card">
                       <div className="hd">
@@ -120,7 +123,7 @@ export default function Decisions() {
             {() => reviews.length === 0 ? (
               <AgentEmptyState title="매도 검토가 없습니다" description="이 결정일에는 매도 검토가 없습니다. 보유 종목이 있어야 검토가 열리고, 결정일마다 보유 종목 하나에 카드 한 장이 쌓입니다." />
             ) : (
-              <div className="dc-grid">{reviews.map((d) => card(d))}</div>
+              <div className="dc-grid">{reviews.map((d, i) => card(d, i))}</div>
             )}
           </Loaded>
         )}
@@ -130,7 +133,7 @@ export default function Decisions() {
             {() => overrides.length === 0 ? (
               <AgentEmptyState title="하드룰 개입이 없습니다" description="이 날짜에 하드 룰이 비중·수량을 줄이거나 매수를 막은 주문이 없습니다. 개입이 있으면 원안(에이전트)과 최종(룰 적용 후)이 나란히 표시됩니다." />
             ) : (
-              <div className="dc-grid">{overrides.map((d) => card(d, true))}</div>
+              <div className="dc-grid">{overrides.map((d, i) => card(d, i, true))}</div>
             )}
           </Loaded>
         )}

@@ -7,6 +7,11 @@ import type { Market, PaperExpectedRow, PaperProgress, PaperViolation, TradingSt
 import { areaPolygon, CHART, diffText, drawdownChart, modalReady, PILL_CLASS, polyline, verdictTone } from '../pages/paperLogic'
 import { useWidth } from '../hooks/useWidth'
 import { ExitReasonBadge } from './parts'
+import { Tip } from './Tip'
+import type { Term } from '../glossary'
+
+/** the criteria whose term gets its ⓘ (glossary-tips) */
+const TERM: Record<string, Term> = { max_drawdown: 'max_drawdown', max_daily_loss_breaches: 'daily_loss', max_review_rate: 'rating' }
 
 /** Screen 8 parts (docs/02 v0.7 §11-1, mockup Paper · PaperUS · PaperGo · PaperGoUS). Every verdict, count and
  *  value comes from /api/paper/progress; these only lay them out. `day` writes a market date (US: "… ET"). */
@@ -33,7 +38,7 @@ export function Scorecard({ p }: { p: PaperProgress }) {
       <thead><tr><th>기준</th><th className="r">기준값</th><th className="r">현재값</th><th>판정</th><th>남은 기간 · 메모</th></tr></thead>
       <tbody>{p.criteria.map((c) => (
         <tr key={c.id} className={c.status === 'unmet' ? 'row-unmet' : undefined}>
-          <td><b>{c.label_ko}</b> <span className="muted mono">{c.id}</span></td>
+          <td><b>{c.label_ko}</b>{TERM[c.id] && <Tip k={TERM[c.id]} />} <span className="muted mono">{c.id}</span></td>
           <td className="r num">{c.threshold_ko}</td>
           <td className="r num"><b>{c.value_ko}</b></td>
           <td><span className={PILL_CLASS[c.status]}>{c.status_ko}</span></td>

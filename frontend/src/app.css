@@ -113,6 +113,8 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .matrix tr.click { cursor: pointer; }
 .matrix tr.click:hover td { background: var(--app-surface-2); }
 .matrix .wrap { white-space: normal; max-width: 40ch; }
+/* a header that may wrap (glossary-tips: an ⓘ made the 국내 ↔ 미국 table scroll at 1024) breaks between words only */
+.matrix th.wrap { word-break: keep-all; }
 
 .cards { display: grid; gap: 1.4rem; grid-template-columns: repeat(auto-fit, minmax(32rem, 1fr)); }
 .card { border: 1px solid var(--app-line); border-radius: var(--bv-radius-200); background: var(--app-surface); padding: 1.2rem 1.4rem; display: grid; gap: 0.8rem; }
@@ -518,3 +520,11 @@ body { margin: 0; background: var(--bv-bg); color: var(--app-fg); font-family: v
 .dc-foot { display: flex; gap: 0.8rem; align-items: center; justify-content: space-between; }
 /* v0.8 §2-3: in the 청산 사유 분포 the agent sale is a blue bar of its own, apart from the grey rules (above) */
 .xseg.agent_sell, .xsw.agent_sell { background: var(--app-down); }
+/* glossary-tips: ⓘ beside a term — a 16px icon with 4px padding (a 24px target), its padding pulled back by the margin so
+   a header or KPI line keeps its height; the DS white tooltip opens on hover and focus */
+.tip { display: inline-flex; align-items: center; padding: 0.4rem; margin: -0.4rem 0 -0.4rem 0.1rem; vertical-align: middle; border: 0; border-radius: 50%; background: none; color: var(--app-fg-3); cursor: help; line-height: 0; }
+.tip-term { white-space: nowrap; }
+.tip:hover { color: var(--app-fg); }
+.tip:focus-visible { outline: 2px solid var(--app-gauge); outline-offset: 0; color: var(--app-fg); }
+.tip-title { display: block; margin-bottom: 0.4rem; font-size: var(--app-fs-body); font-weight: var(--bv-font-weight-semibold); color: var(--app-fg); }
+.tip-text { display: block; font-size: var(--app-fs-small); color: var(--app-fg-2); word-break: keep-all; white-space: normal; text-align: left; }
