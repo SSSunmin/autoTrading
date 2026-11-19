@@ -11,6 +11,8 @@ import { ExecStatus, Loaded, ModeBadge, Pct, RatingBadge, TickerCell } from '../
 import { AsOfStamp, PageHeader, RegimeBadge, RiskGauges } from '../components/parts'
 import { ExceptionButtons } from '../components/decisionParts'
 import { FillTime, HaltBand, HaltedChip } from '../components/risk'
+import { Tip } from '../components/Tip'
+import { asText, type Term } from '../glossary'
 
 /** 1 (v0.3): portfolio state, what ran automatically today, and the exceptions a human must look at.
  *  The two market cards (/api/markets) are the one place both books show side by side, each in its own currency
@@ -40,19 +42,19 @@ export default function Home() {
   const flow = markets.data?.find((m) => m.market === market)?.flow ?? null
   const halted = b && !b.mode.running ? b.mode : null
   const nearStop = b?.positions.filter((r) => r.near_stop) ?? []
-  const kpis = [
+  const kpis: { label: string; value: string; delta: string; tip?: Term }[] = [
     { label: '평가 금액', value: b ? amt(b.equity) : '–', delta: b ? `현금 + 보유 평가액 · ${b.as_of} 종가` : '현금 + 보유 평가액' },
-    { label: '오늘 실현 손익', value: b ? amt(b.realized_today) : '–', delta: b ? `누적 ${amt(b.realized_pnl)} · 체결가 기준` : '당일 체결 기준' },
-    { label: '미실현 손익', value: b ? amt(b.unrealized_pnl) : '–', delta: '보유 평단 대비' },
-    { label: '드로다운', value: b ? pct(b.drawdown) : '–', delta: b ? `피크 대비 · 한도 ${pct(b.limits.dd_halve, 0)} 축소 / ${pct(b.limits.dd_stop, 0)} 정지` : '피크 대비' },
-    { label: '그로스 노출 · 현금', value: b ? `${pct(b.gross_exposure).replace('+', '')} · ${amt(b.cash)}` : '–', delta: '포트폴리오 대비' },
+    { label: '오늘 실현 손익', tip: 'realized', value: b ? amt(b.realized_today) : '–', delta: b ? `누적 ${amt(b.realized_pnl)} · 체결가 기준` : '당일 체결 기준' },
+    { label: '미실현 손익', tip: 'unrealized', value: b ? amt(b.unrealized_pnl) : '–', delta: '보유 평단 대비' },
+    { label: '드로다운', tip: 'drawdown', value: b ? pct(b.drawdown) : '–', delta: b ? `피크 대비 · 한도 ${pct(b.limits.dd_halve, 0)} 축소 / ${pct(b.limits.dd_stop, 0)} 정지` : '피크 대비' },
+    { label: '그로스 노출 · 현금', tip: 'gross', value: b ? `${pct(b.gross_exposure).replace('+', '')} · ${amt(b.cash)}` : '–', delta: '포트폴리오 대비' },
     { label: '오늘 주문 금액', value: b ? `매수 ${amt(b.today_buy_amount)} · 매도 ${amt(b.today_sell_amount)}` : '–',
       delta: b ? `일일 상한 ${amt(b.limits.auto_daily_order_cap)}의 ${pct(b.today_buy_cap_used).replace('+', '')}(매수만) · ${b.today_session ?? '다음 거래일'} 시가` : '일일 상한은 매수만' },
   ]
 
   const orderTable = (rows: Order[]) => (
     <div className="matrix"><table>
-      <thead><tr><th>체결 시각</th><th>종목</th><th>방향</th><th className="r">수량</th><th className="r">체결가</th><th className="r">금액</th><th>상태</th><th>사유 · 적용 룰</th></tr></thead>
+      <thead><tr><th>체결 시각</th><th>종목</th><th>방향</th><th className="r">수량</th><th className="r">체결가<Tip k="open_fill" /></th><th className="r">금액</th><th>상태</th><th>사유 · 적용 룰</th></tr></thead>
       <tbody>{halted && b && <HaltRows state={halted} held={b.positions.length} signals={b.positions.filter((r) => r.exit_signal).length} />}{rows.map((o) => (
         <tr key={o.order_id} className="click" onClick={() => navigate(to(`/tickers/${encodeURIComponent(o.ticker)}`))}>
           <td className="num" title={`주문 기록 ${utc(o.placed_at)}`}><FillTime o={o} market={market} /></td><td><TickerCell ticker={o.ticker} name={o.name} /></td>
@@ -80,7 +82,7 @@ export default function Home() {
 
       <p className="page-sub section"><b>{info?.label_ko ?? market} 장부</b> · 아래는 상단바에서 고른 시장 기준입니다(금액 {info?.currency ?? ""}).</p>
       <Grid gap="1.2rem" className="kpi-grid" style={{ gridTemplateColumns: 'var(--kpi-cols)' }}>
-        {kpis.map((k) => <AgentKpiCard key={k.label} label={k.label} value={k.value} delta={book.error ?? k.delta} />)}
+        {kpis.map((k) => <AgentKpiCard key={k.label} label={k.tip ? asText(<>{k.label}<Tip k={k.tip} /></>) : k.label} value={k.value} delta={book.error ?? k.delta} />)}
       </Grid>
 
       {flow && <FlowCards flow={flow} asOf={b?.as_of} to={to} />}
@@ -113,10 +115,10 @@ export default function Home() {
         <AgentSectionPanel title="리스크 한도" description="검은 선은 한도, 빨간 선은 드로다운 정지. 한도를 넘으면 신규 주문을 멈추고 예외 큐로 알립니다"
           action={<span className="toolbar" style={{ marginBottom: 0 }}><AsOfStamp asOf={b?.as_of} /><Link to={to('/positions')}>포지션·리스크 →</Link></span>}>
           <Loaded state={book}>
-            {(p) => <RiskGauges p={p} amt={amt} />}
+            {(p) => <RiskGauges p={p} amt={amt} tipped={['drawdown', 'gross']} />}
           </Loaded>
         </AgentSectionPanel>
-        <AgentSectionPanel title="Protections · 손절 근접" description="4종 상태와 손절선 근접 종목 수"
+        <AgentSectionPanel title={asText(<><Tip k="protections" term="Protections" /> · <Tip k="stop_loss" term="손절 근접" /></>)} description="4종 상태와 손절선 근접 종목 수"
           action={b ? <RegimeBadge on={b.regime_on} gap={b.regime_gap} index={info?.benchmark_name_ko ?? '지수'} days={b.limits.regime_ma_days} /> : undefined}>
           <Loaded state={book}>
             {(p) => (
@@ -134,11 +136,11 @@ export default function Home() {
       </div>
 
       <div className="section">
-        <AgentSectionPanel title="최근 정산" description={perf.data ? `실측 · ${perf.data.holding} · ${info?.benchmark_name_ko ?? '지수'} 대비` : undefined} action={<Link to={to('/performance')}>등급별 성과·알파 추이 →</Link>}>
+        <AgentSectionPanel title={asText(<>최근 정산<Tip k="settlement" /></>)} description={perf.data ? `실측 · ${perf.data.holding} · ${info?.benchmark_name_ko ?? '지수'} 대비` : undefined} action={<Link to={to('/performance')}>등급별 성과·알파 추이 →</Link>}>
           <Loaded state={perf}>
             {(p) => (
               <div className="matrix"><table>
-                <thead><tr><th>종목</th><th>결정일</th><th>등급</th><th className="r">실현</th><th className="r">알파</th><th>정산일</th></tr></thead>
+                <thead><tr><th>종목</th><th>결정일</th><th>등급<Tip k="rating" /></th><th className="r">실현</th><th className="r">알파<Tip k="alpha" /></th><th>정산일</th></tr></thead>
                 <tbody>{p.reflections.slice(0, 5).map((r) => (
                   <tr key={r.ticker + r.date} className="click" onClick={() => navigate(to(`/tickers/${encodeURIComponent(r.ticker)}`))}>
                     <td><TickerCell ticker={r.ticker} name={r.name} /></td><td className="num">{r.date}</td>

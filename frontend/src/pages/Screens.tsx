@@ -9,6 +9,7 @@ import { useApi } from '../hooks/useApi'
 import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded } from '../components/common'
 import { PageHeader } from '../components/parts'
+import { Tip } from '../components/Tip'
 
 const PERIODS = [{ value: 'all', label: '전체' }, { value: '8', label: '최근 8주' }, { value: '4', label: '최근 4주' }]
 
@@ -45,7 +46,7 @@ function ScreenList({ market }: { market: Market }) {
           {(list) => list.length === 0 ? <AgentEmptyState title={empty.title} description={empty.description} /> : (
             <div className="matrix">
               <table>
-                <thead><tr><th>실행 ID</th><th>기준일</th><th>유니버스</th><th className="r">크기</th><th className="r">통과</th><th className="r">규칙 수</th><th>깔때기</th><th>실행 시각</th></tr></thead>
+                <thead><tr><th>실행 ID</th><th>기준일</th><th>유니버스<Tip k="universe" /></th><th className="r">크기</th><th className="r">통과</th><th className="r">규칙 수</th><th>깔때기</th><th>실행 시각</th></tr></thead>
                 <tbody>
                   {list.map((s) => (
                     <tr key={s.run_id} className="click" onClick={() => navigate(to(`/screens/${encodeURIComponent(s.run_id)}`))}>

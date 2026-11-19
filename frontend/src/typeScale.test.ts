@@ -102,7 +102,26 @@ describe('type scale — five sizes, none under 12px (the screens had 13 sizes a
   })
 })
 
+/** a plain `<button>` (not a DS one, so no `size` to check) whose class is not one of the two allowed: ``tip`` — the
+ *  ⓘ beside a term (glossary-tips, approved 2026-11-19 by the control tower: a 24×24 target, WCAG 2.5.8's minimum, the
+ *  usual form for an icon inside a line of text) — and ``stage`` — the screening funnel's stages, each a card of text */
+const RAW_BUTTON_CLASS = /^className=(?:"tip"|\{`stage[ `])/
+export function rawButtons(files: { path: string; text: string }[]) {
+  return files.flatMap(({ path, text }) => [...text.matchAll(/<button\b/g)]
+    .map((m) => ({ m, tag: openingTag(text, m.index ?? 0) }))
+    .filter(({ tag }) => !RAW_BUTTON_CLASS.test(tag.match(/className=(?:"[^"]*"|\{`[^`]*`\})/)?.[0] ?? ''))
+    .map(({ m, tag }) => `${path}:${line(text, m.index ?? 0)} ${tag.slice(0, 60)}`))
+}
+
 describe('buttons and the controls beside them — never the smallest DS size (the user: "버튼은 가장 작은 걸로는 안 했으면")', () => {
+  it('has a plain <button> only for the ⓘ (tip) and the funnel stages (stage) — any other is a DS button with its size checked', () => {
+    expect(tsx.some((f) => f.text.includes('className="tip"'))).toBe(true)
+    expect(rawButtons(tsx)).toEqual([])
+    const probe = [{ path: 'x.tsx', text: '<button type="button" className="tip" />\n<button className={`stage ${a}`}>s</button>\n'
+      + '<button type="button" onClick={go}>x</button> <button className="tiny">y</button> <button className="tipx" />' }]
+    expect(rawButtons(probe).map((s) => s.split(' ')[0])).toEqual(['x.tsx:3', 'x.tsx:3', 'x.tsx:3'])
+  })
+
   it('uses no small button, segmented control, field or select anywhere in src/', () => {
     for (const c of ['<AgentButton', '<AgentSegmentedControl', '<AgentTextField', '<AgentTextarea', '<AgentSelect']) {
       expect(tsx.some((f) => f.text.includes(c))).toBe(true)

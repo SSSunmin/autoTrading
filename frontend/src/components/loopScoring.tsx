@@ -3,6 +3,11 @@ import { AgentSegmentedControl } from '@bv-ds/ui'
 import type { LoopScoring } from '../api/types'
 import { type Cell, loopRows, type Period, PERIODS, recordedText, trialBadge } from './loopScoringLogic'
 import { sharePct, signPct, tone } from './perfLogic'
+import { Tip } from './Tip'
+import type { Term } from '../glossary'
+
+/** the rows (and a definition) whose term gets its ⓘ (glossary-tips) */
+const TERM: Record<string, Term> = { '등급 분포': 'rating', '정산 완료': 'settlement', '매수 쪽 평균 알파': 'alpha', '방향 적중률': 'hit_rate', '벤치마크 대비': 'benchmark' }
 
 /** 모의 루프 채점 (loop-scoring): the model's and the rule's daily-loop decisions side by side, settled five
  *  sessions on (the trial report's definition). Every figure is the server's; rising red, falling blue. */
@@ -32,7 +37,8 @@ export function LoopPanel({ l }: { l: LoopScoring }) {
       <div className="matrix"><table className="loop-t">
         <thead><tr><th>항목</th>{cols.map((k) => <th key={k} className="r">{l.columns[k]!.label_ko}</th>)}<th>정의</th></tr></thead>
         <tbody>{loopRows(l.columns).map((r) => (
-          <tr key={r.label}><td>{r.label}</td>{r.cells.map((c, i) => c && <CellView key={i} c={c} />)}<td className="muted">{r.note ?? ''}</td></tr>
+          <tr key={r.label}><td>{r.label}{TERM[r.label] && <Tip k={TERM[r.label]} />}</td>{r.cells.map((c, i) => c && <CellView key={i} c={c} />)}
+            <td className="muted">{r.note ?? ''}{r.note && TERM[r.note] && <Tip k={TERM[r.note]} />}</td></tr>
         ))}</tbody>
       </table></div>
       <p className="loop-line">같은 결정일 · 같은 종목에서 규칙 판단과 일치 <b className="num">{a.agree}/{a.compared}</b>

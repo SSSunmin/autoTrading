@@ -9,6 +9,7 @@ import { useMarket, useMarketPath } from '../hooks/useMarket'
 import { Loaded, Pct, RatingBadge, RuleCell, TickerCell } from '../components/common'
 import { DecisionCard } from '../components/DecisionCard'
 import { HoldingPanel, ThesisPanel, TickerFacts } from '../components/ticker'
+import { Tip } from '../components/Tip'
 import { bandTiles, TICKER_TABS } from '../components/tickerLogic'
 import type { TickerDetail } from '../api/types'
 
@@ -60,7 +61,7 @@ function Body({ d, tab, setTab }: { d: TickerDetail; tab: string; setTab: (t: st
                   <span className={`tl ${t.rating}`}>{t.code}</span><span className="tl-d">{t.md}</span>
                 </span>))}
             </div>
-            {d.decisions.length ? <div className="cards">{d.decisions.map((x) => <DecisionCard key={`${x.trade_date}-${x.source}`} d={x} />)}</div>
+            {d.decisions.length ? <div className="cards">{d.decisions.map((x) => <DecisionCard key={`${x.trade_date}-${x.source}`} d={x} tips={x === d.decisions[0]} />)}</div>
               : <AgentEmptyState title="보유 외 결정이 없습니다" description="투자 메모(사업 요약 → 논지 → 불/베어 → 밸류에이션 → 촉매 → 무효화 조건 → 등급·비중 → 매도 계획)는 LLM 에이전트가 연결되면 같은 순서로 표시됩니다." />}
           </>
         )}
@@ -84,7 +85,7 @@ function Body({ d, tab, setTab }: { d: TickerDetail; tab: string; setTab: (t: st
         {tab === 'outcomes' && (
           <AgentSectionPanel title="결과·교훈" description="보유기간이 지난 결정의 실현수익·알파와 반성">
             <div className="matrix"><table>
-              <thead><tr><th>결정일</th><th>등급</th><th className="r">실현</th><th className="r">알파</th><th>보유</th><th>정산일</th><th>교훈</th></tr></thead>
+              <thead><tr><th>결정일</th><th>등급<Tip k="rating" /></th><th className="r">실현<Tip k="realized" /></th><th className="r">알파<Tip k="alpha" /></th><th>보유</th><th>정산일<Tip k="settlement" /></th><th>교훈</th></tr></thead>
               <tbody>{d.outcomes.map((o) => (
                 <tr key={o.trade_date}><td className="num">{o.trade_date}</td><td><RatingBadge rating={o.rating} label={o.rating_ko} /></td>
                   <td className="r">{o.pending ? <RatingBadge rating="pending" label="대기" /> : <Pct value={o.raw_return} />}</td>

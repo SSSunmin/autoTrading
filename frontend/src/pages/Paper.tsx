@@ -11,6 +11,8 @@ import { useStateTick, useTradingState } from '../hooks/useTradingState'
 import { Loaded } from '../components/common'
 import { DrawdownSvg, ExpectedTable, PaperGo, Scorecard, VerdictBanner, ViolationList } from '../components/paper'
 import { PageHeader } from '../components/parts'
+import { Tip } from '../components/Tip'
+import { asText } from '../glossary'
 import { switchState } from './paperLogic'
 
 /** 8: the paper-trading gate (docs/02 v0.7 §11-1). The server judges the six criteria (/api/paper/progress) and the
@@ -39,7 +41,7 @@ function PaperScreen({ market }: { market: Market }) {
   const o = otherGate.data
   return (
     <>
-      <PageHeader title={`모의투자 검증 · ${market === 'US' ? '미국' : '국내'}`}
+      <PageHeader title={<>모의투자<Tip k="paper" /> 검증 · {market === 'US' ? '미국' : '국내'}</>}
         description={`실거래 전환 게이트. 같은 자동 루프를 모의로 돌려 통과 기준 6개(config.PAPER_TRADING)를 전 기간 충족해야 이 시장만 실거래로 넘어갑니다. 판정은 서버가 하고, 기대 대비 표는 참고용입니다.`}
         updated={gate.data?.as_of ? `${day(gate.data.as_of)} 장 마감 기준` : undefined} />
       <Loaded state={gate}>
@@ -50,7 +52,7 @@ function PaperScreen({ market }: { market: Market }) {
               <Scorecard p={p} />
             </AgentSectionPanel>
             <div className="paper-2">
-              <AgentSectionPanel title={`드로다운 (${p.market_ko} 모의 기간)`}
+              <AgentSectionPanel title={asText(<>드로다운<Tip k="drawdown" /> ({p.market_ko} 모의 기간)</>)}
                 description={p.drawdown ? `현재 ${pct(p.drawdown.current)} · 최저 ${pct(p.drawdown.min)} · 기준 ${pct(p.limits.max_drawdown, 0)}` : '기록 없음'}>
                 <DrawdownSvg p={p} day={day} />
                 <p className="muted">검은 점선은 통과 기준이자 하드 룰 반감선, 빨간 점선은 하드 룰 정지선입니다. 장 마감 평가액 기준{p.started ? `(${day(p.start)} → ${day(p.as_of)}, ${p.series.length}거래일)` : ''}.</p>

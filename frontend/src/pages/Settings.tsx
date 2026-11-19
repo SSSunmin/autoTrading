@@ -10,6 +10,8 @@ import { ResumeButton } from '../components/risk'
 import { CapitalPanel } from '../components/capital'
 import { ACCOUNTS, axesMode, EXECUTIONS, modeAxes } from '../components/capitalLogic'
 import { fallbackLine } from '../components/perfLogic'
+import { Tip } from '../components/Tip'
+import { asText, firstTerms } from '../glossary'
 
 const MODE_DESC: Record<Mode, string> = {
   paper: '같은 자동 루프를 실제 주문 없이 돌림. 실거래 전환 전 검증 기간.',
@@ -34,7 +36,7 @@ export default function Settings() {
       <p className="page-sub">선별·하드룰·실행 규칙의 현재 파라미터와 모든 변경 기록. 조회는 전원, 긴급 정지는 운영자, 재가동·모드 변경·규칙 변경은 관리자만 할 수 있고, 변경은 지워지지 않는 기록으로 남습니다.</p>
       {notice && <div className="section"><AgentAlert tone="success" title="재가동">{notice}</AgentAlert></div>}
       <Loaded state={rules}>
-        {(r) => (
+        {(r) => { const tips = firstTerms([...r.screen_rules, ...r.risk_rules, ...r.auto_rules].map((x) => x.id)); return (
           <div className="stack-gap">
             <ModePanel key={r.market_code} market={r.market_code} state={r.mode} onChanged={reload} />
             <CapitalPanel market={r.market_code} />
@@ -44,22 +46,22 @@ export default function Settings() {
                 <thead><tr><th>규칙</th><th>설명</th><th className="r">국내</th><th className="r">미국</th><th>레이어</th><th>마지막 변경</th></tr></thead>
                 <tbody>
                   {r.screen_rules.map((x) => (
-                    <tr key={x.id}><td><b>{x.label_ko}</b> <span className="muted num">{x.id}</span></td><td className="wrap">{x.description_ko}</td>
+                    <tr key={x.id}><td><b>{x.label_ko}</b>{tips[x.id] && <Tip k={tips[x.id]} />} <span className="muted num">{x.id}</span></td><td className="wrap">{x.description_ko}</td>
                       {MARKETS.map((m) => <td key={m} className="r num">{paramsFor(x.id, r.screen_params_by_market[m])}</td>)}<td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
                   ))}
                   {r.risk_rules.map((x) => (
-                    <tr key={x.id}><td><b>{x.label_ko}</b> <span className="muted num">{x.id}</span></td><td className="wrap muted">하드룰 · 청산은 손절 → 트레일링 → 기간 만료 순, 가드는 포트폴리오 드로다운 기준</td>
-                      <td className="r num" colSpan={2}>{fmtRule(x.id, x.value)} <span className="muted">· 두 시장 같음</span></td><td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
+                    <tr key={x.id}><td><b>{x.label_ko}</b>{tips[x.id] && <Tip k={tips[x.id]} />} <span className="muted num">{x.id}</span></td><td className="wrap muted">하드룰 · 청산은 손절 → 트레일링 → 기간 만료 순, 가드는 포트폴리오 드로다운 기준</td>
+                      <td className="r num" colSpan={2}>{fmtRule(x.id, x.value)} <span className="muted">· 두 시장 같음</span></td><td>{x.layer_ko}{x === r.risk_rules[0] && <Tip k="hard_rule" />}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
                   ))}
                   {r.auto_rules.map((x) => (
-                    <tr key={x.id}><td><b>{x.label_ko}</b> <span className="muted num">{x.id}</span></td><td className="wrap muted">한도를 넘으면 주문을 축소·차단하고 예외 큐에 기록</td>
+                    <tr key={x.id}><td><b>{x.label_ko}</b>{tips[x.id] && <Tip k={tips[x.id]} />} <span className="muted num">{x.id}</span></td><td className="wrap muted">한도를 넘으면 주문을 축소·차단하고 예외 큐에 기록</td>
                       {autoCells(x, r)}<td>{x.layer_ko}</td><td className="muted">{lastChange(x.id, r.change_history)}</td></tr>
                   ))}
                 </tbody>
               </table></div>
             </AgentSectionPanel>
 
-            <AgentSectionPanel title="모의투자 통과 기준" description="전 기간 충족 시에만 실거래 전환(관리자). 2차 실측(성과·백테스트 화면)의 드로다운보다 보수적으로 잡았습니다">
+            <AgentSectionPanel title={asText(<>모의투자 통과 기준<Tip k="paper" /></>)} description="전 기간 충족 시에만 실거래 전환(관리자). 2차 실측(성과·백테스트 화면)의 드로다운보다 보수적으로 잡았습니다">
               <div className="matrix"><table><tbody>
                 {r.paper_criteria.map((c) => <tr key={c.id}><td>{c.label_ko} <span className="muted num">{c.id}</span></td><td className="r num">{fmtRule(c.id, c.value)}</td></tr>)}
               </tbody></table></div>
@@ -93,7 +95,7 @@ export default function Settings() {
               )}
             </AgentSectionPanel>
           </div>
-        )}
+        ) }}
       </Loaded>
     </>
   )

@@ -4,6 +4,7 @@ import { money } from '../api/client'
 import type { Market, PerformanceSeries, RatingBar, SeriesRow, Settlement } from '../api/types'
 import { useWidth } from '../hooks/useWidth'
 import { AlphaBar, RatingBadge } from './common'
+import { Tip } from './Tip'
 import { afterLeave, areaPath, linePath, nearestIndex, PC, scale, sharePct, signPct, stepIndex, tickLabel, tone, type Scale } from './perfLogic'
 
 /** Performance 6-A · 6-B (docs/10 §3 stage 6). Every number comes from /api/performance/series and /api/performance;
@@ -46,7 +47,7 @@ function Marker({ s, w, i, points, label }: { s: Scale; w: number; i: number | n
 }
 
 interface ChartProps {
-  title: string
+  title: ReactNode
   /** the svg's measured width (useWidth): the viewBox is drawn in px */
   box: readonly [RefObject<SVGSVGElement | null>, number]
   rows: SeriesRow[]
@@ -106,7 +107,7 @@ export function DrawdownChart({ s: series, sel, onSel, day }: { s: PerformanceSe
   const low = Math.min(...dd)
   const at = sel == null ? null : rows[sel]
   return (
-    <Chart title="드로다운 — NAV의 누적 최고 대비" box={box} rows={rows} sel={sel} onSel={onSel}
+    <Chart title={<>드로다운<Tip k="drawdown" /> — NAV의 누적 최고 대비</>} box={box} rows={rows} sel={sel} onSel={onSel}
       aria={`드로다운 ${day(series.start)} ~ ${day(rows[rows.length - 1].date)}: 최저 ${signPct(low, 2)}, 현재 ${signPct(dd[dd.length - 1], 2)}`}>
       <Axes s={sc} w={box[1]} />
       <path className="dd-area" d={areaPath(dd, sc)} />
@@ -126,7 +127,7 @@ export function ExposureChart({ s: series, sel, onSel, day }: { s: PerformanceSe
   const w = Math.max(1, Math.min(14, ((box[1] - PC.left - PC.right) / Math.max(n, 1)) * 0.7))
   const at = sel == null ? null : rows[sel]
   return (
-    <Chart title="노출 — 보유 평가액 / 평가액" box={box} rows={rows} sel={sel} onSel={onSel}
+    <Chart title={<>노출<Tip k="exposure" /> — 보유 평가액 / 평가액</>} box={box} rows={rows} sel={sel} onSel={onSel}
       aria={`노출 ${day(series.start)} ~ ${day(rows[n - 1].date)}: 현재 ${sharePct(ex[n - 1], 0)}, 최고 ${sharePct(Math.max(...ex), 0)}`}>
       <Axes s={sc} w={box[1]} share />
       {ex.map((v, i) => v > 0 && (
@@ -181,7 +182,7 @@ export function RatingBars({ bars }: { bars: RatingBar[] }) {
   const span = Math.max(1, Math.ceil(top * 100))
   return (
     <div className="matrix"><table>
-      <thead><tr><th>등급</th><th className="r">n</th><th className="r">5일 평균 수익</th><th className="r">평균 알파</th><th className="r">방향 적중률</th>
+      <thead><tr><th>등급<Tip k="rating" /></th><th className="r">n</th><th className="r">5일 평균 수익</th><th className="r">평균 알파<Tip k="alpha" /></th><th className="r">방향 적중률<Tip k="hit_rate" /></th>
         <th style={{ width: '34%' }}>평균 알파 (±{span}% 스케일)</th></tr></thead>
       <tbody>{bars.map((b) => (
         <tr key={b.rating}>

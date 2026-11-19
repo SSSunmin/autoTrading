@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom'
 import { pct, utc } from '../api/client'
 import { kst } from '../api/marketTime'
 import type { Health, Positions } from '../api/types'
+import type { Term } from '../glossary'
+import { Tip } from './Tip'
 import { EXIT_REASONS, failureBand, gaugeMagnitude, gaugeState, sectorGauges, SOURCE_KO, type Source } from './partsLogic'
 
 /** v0.6 common parts (docs/10 §3 단계 1), on the mockup's markup and app.css tokens. Values are the server's; these
@@ -11,8 +13,8 @@ import { EXIT_REASONS, failureBand, gaugeMagnitude, gaugeState, sectorGauges, SO
 
 /** One row of the mockup's limit gauge: bar, black limit line, red stop line, "value / limit · stop". The scale is
  *  1.25× the furthest line so a breach still shows past it. */
-export function LimitGauge({ label, value, limit, stop, fmt = (v) => pct(v), note }: {
-  label: string; value: number | null; limit: number; stop?: number; fmt?: (v: number) => string; note?: string
+export function LimitGauge({ label, value, limit, stop, fmt = (v) => pct(v), note, tip }: {
+  label: string; value: number | null; limit: number; stop?: number; fmt?: (v: number) => string; note?: string; tip?: Term
 }) {
   const state = gaugeState(value, limit)
   const max = 1.25 * Math.max(Math.abs(limit), Math.abs(stop ?? 0))
@@ -23,7 +25,7 @@ export function LimitGauge({ label, value, limit, stop, fmt = (v) => pct(v), not
   const aria = `${label} ${valText}, 한도 ${fmt(limit)}${stop == null ? '' : `, 정지 ${fmt(stop)}`}${state === 'over' ? ', 한도 초과' : state === 'near' ? ', 한도 근접' : ''}`
   return (
     <div className={`gauge ${state}`} title={note}>
-      <span className="lbl">{label}</span>
+      <span className="lbl">{tip ? <Tip k={tip} term={label} /> : label}</span>
       <div className="track" role="img" aria-label={aria}>
         <div className="fill" style={{ width: at(fill) }} />
         <div className="line" style={{ left: at(limit) }} />
@@ -36,23 +38,25 @@ export function LimitGauge({ label, value, limit, stop, fmt = (v) => pct(v), not
 
 /** The book's limits as gauges (screens 1 · 5): drawdown with the −20% stop, the day's loss, the largest holding,
  *  gross exposure, the session's buys against the daily cap, then the three largest sectors against the sector cap
- *  (the executor sizes buys under it) and the 미분류 sum, which has no cap. */
-export function RiskGauges({ p, amt }: { p: Positions; amt: (v: number | null | undefined) => string }) {
+ *  (the executor sizes buys under it) and the 미분류 sum, which has no cap. Each term's ⓘ but those ``tipped`` above
+ *  on the same screen (glossary-tips: once a screen). */
+export function RiskGauges({ p, amt, tipped = [] }: { p: Positions; amt: (v: number | null | undefined) => string; tipped?: Term[] }) {
+  const tip = (k: Term) => (tipped.includes(k) ? undefined : k)
   const frac = (v: number) => pct(v).replace('+', '')
   const top = p.positions.find((r) => r.ticker === p.max_position_ticker)
   const sectors = sectorGauges(p)
   return (
     <div className="gauges">
-      <LimitGauge label="드로다운" value={p.drawdown} limit={p.limits.dd_halve} stop={p.limits.dd_stop}
+      <LimitGauge label="드로다운" value={p.drawdown} limit={p.limits.dd_halve} stop={p.limits.dd_stop} tip={tip('drawdown')}
         note="한도부터 신규 비중 절반, 정지선에서 전량 청산 후 시스템 정지(관리자 재가동)" />
-      <LimitGauge label="일일 손실" value={p.day_return} limit={p.limits.daily_loss_limit} note="넘으면 그날 세션 정지, 다음 거래일 자동 해제" />
-      <LimitGauge label="종목 최대" value={p.max_position_weight} limit={p.limits.max_position_pct} fmt={frac}
+      <LimitGauge label="일일 손실" value={p.day_return} limit={p.limits.daily_loss_limit} tip={tip('daily_loss')} note="넘으면 그날 세션 정지, 다음 거래일 자동 해제" />
+      <LimitGauge label="종목 최대" value={p.max_position_weight} limit={p.limits.max_position_pct} fmt={frac} tip={tip('weight')}
         note={top ? `가장 큰 보유: ${top.name ?? top.ticker}` : '보유 없음'} />
-      <LimitGauge label="그로스 노출" value={p.gross_exposure} limit={p.limits.max_gross_pct} fmt={frac} />
+      <LimitGauge label="그로스 노출" value={p.gross_exposure} limit={p.limits.max_gross_pct} fmt={frac} tip={tip('gross')} />
       <LimitGauge label="오늘 매수 금액" value={p.today_buy_amount} limit={p.limits.auto_daily_order_cap} fmt={amt}
         note={`일일 상한은 매수만(매도는 위험 축소) · ${p.today_session ?? '다음 거래일'} 시가 체결분`} />
-      {sectors.capped.map((g) => (
-        <LimitGauge key={g.label} label={g.label} value={g.value} limit={p.limits.max_sector_pct} fmt={frac}
+      {sectors.capped.map((g, i) => (
+        <LimitGauge key={g.label} label={g.label} value={g.value} limit={p.limits.max_sector_pct} fmt={frac} tip={i === 0 ? tip('sector') : undefined}
           note="섹터 파일(data/universe/sectors.csv) 기준 · 신규 매수는 섹터 한도 안에서만" />
       ))}
       {sectors.unclassified != null && (
@@ -96,7 +100,7 @@ export function RegimeBadge({ on, gap, index, days }: { on: boolean | null; gap:
   const cls = on == null ? 'none' : on ? 'on' : 'off'
   const text = on == null ? '○ 국면 필터 꺼짐' : on ? '● 국면 · 위험 자산 매수 가능' : '● 국면 · 신규 매수 없음'
   const where = gap == null ? `${index} ${days}일선 데이터 부족` : `${index} ${days}일선 대비 ${pct(gap)}`
-  return <span className={`regime ${cls}`}>{text} <span className="tnum">· {where}</span></span>
+  return <span className={`regime ${cls}`}><Tip k="regime" term={text} /> <span className="tnum">· {where}</span></span>
 }
 
 /** "as-of YYYY-MM-DD" at a card's top right; amber when it is not the page's reference date (docs/02 §4). */
@@ -116,7 +120,7 @@ export function SourceBadge({ source }: { source: Source }) {
 
 /** Page head: title, one line of what the page answers, and at the right when it was read and from what. */
 export function PageHeader({ title, description, updated, source = 'measured', children }: {
-  title: string; description: string; updated?: string; source?: Source; children?: ReactNode
+  title: ReactNode; description: string; updated?: string; source?: Source; children?: ReactNode
 }) {
   return (
     <div className="page-head">
