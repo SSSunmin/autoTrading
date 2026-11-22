@@ -34,7 +34,7 @@ export const GLOSSARY = {
   drawdown: { title: '드로다운', text: (r) => '지금까지 가장 높았던 평가액(고점)에서 얼마나 내려와 있는지를 퍼센트로 보여 줍니다. 고점에 있으면 드로다운이 없고, 마이너스가 클수록 고점에서 많이 잃은 상태입니다.'
     + say(r, ['dd_halve', 'dd_stop'], (h, s) => `이 앱은 ${p0(h)}가 되면 새로 사는 비중을 절반으로 줄이고, ${p0(s)}가 되면 전부 팔고 매매를 멈춥니다.`) },
   max_drawdown: { title: '최대 드로다운', text: (r) => '기간 중 고점에서 가장 깊게 떨어졌던 폭입니다. 그 기간에 겪은 최악의 하락이라 위험을 재는 첫 번째 지표로 씁니다.'
-    + say(r, ['paper_max_drawdown'], (x) => `모의투자는 이 값이 ${p0(x)}보다 나빠지면 통과하지 못합니다.`) },
+    + say(r, ['paper_max_drawdown'], (x) => `모의투자는 이 값이 ${p0(x)}이거나 그보다 나쁘면 통과하지 못합니다.`) },
   gross: { title: '그로스 노출', text: (r) => '가진 주식의 평가액이 전체 자산(현금 포함)에서 차지하는 비율입니다. 현금 없이 전부 주식이면 꽉 찬 상태이고, 낮을수록 현금이 많습니다.'
     + say(r, ['max_gross_pct'], (x) => `이 앱의 상한은 ${p0(x)}입니다.`) },
   exposure: { title: '노출', text: () => '자산 중 주식에 들어가 있는 비율입니다. 평균 노출은 기간 내내 이 비율의 평균이라, 낮으면 그만큼 현금으로 쉬어 간 날이 많았다는 뜻입니다.' },
@@ -45,7 +45,7 @@ export const GLOSSARY = {
   trailing: { title: '트레일링 스톱', text: (r) => '오른 종목의 이익을 지키는 매도 규칙입니다. 보유 중 가장 높았던 가격(트레일링 고점)을 따라 기준선이 올라가고, 그 고점에서 일정 폭 떨어지면 팝니다.'
     + say(r, ['trailing_activate_pct', 'trailing_pct'], (a, w) => `이 앱은 ${p0(a)} 이상 오르면 켜지고, 고점에서 ${p0(w)} 떨어지면 팝니다.`) },
   expiry: { title: '기간 만료', text: (r) => '정해 둔 보유 기간이 끝나면 수익과 상관없이 파는 규칙입니다. 만료일은 그 날짜입니다.'
-    + say(r, ['max_holding_days'], (d) => `이 앱은 ${d}거래일을 넘기지 않습니다.`) },
+    + say(r, ['max_holding_days'], (d) => `이 앱은 산 날부터 ${d}거래일이 되면 팝니다(다음 날 시가에 체결).`) },
   protections: { title: 'Protections · 보호 장치', text: (r) => '신규 매수를 잠시 막는 안전장치 네 가지입니다. StoplossGuard(손절이 잦으면 전체 잠금) · MaxDrawdown(고점에서 크게 떨어지면 비중을 줄이거나 멈춤) · Cooldown(판 종목은 한동안 다시 안 삼) · LowProfit(손실이 이어진 종목 잠금)입니다.'
     + say(r, ['stoploss_guard_lookback_days', 'stoploss_guard_n', 'stoploss_guard_lock_days'], (l, n, d) => `예: 최근 ${l}거래일에 손절이 ${n}번 이상이면 ${d}거래일 동안 잠급니다.`) },
   cooldown: { title: 'Cooldown · 쿨다운', text: (r) => '판 종목을 곧바로 다시 사지 않도록 기다리게 하는 규칙입니다. 팔자마자 되사는 실수를 막습니다.'
@@ -68,12 +68,12 @@ export const GLOSSARY = {
   realized: { title: '실현 손익', text: () => '이미 팔아서 확정된 이익이나 손실입니다. 판 가격과 산 가격의 차이로 계산합니다.' },
   unrealized: { title: '미실현 손익', text: () => '아직 팔지 않은 주식의 지금 가격 기준 이익이나 손실입니다. 팔기 전까지는 가격에 따라 계속 바뀝니다.' },
   avg_price: { title: '평단 · 평균 단가', text: () => '여러 번 나눠 산 주식의 평균 매수 가격입니다. 현재가가 평단보다 높으면 이익, 낮으면 손실입니다.' },
-  daily_loss: { title: '일일 손실 한도', text: (r) => '하루 동안 자산이 줄어도 되는 최대 폭입니다. 넘으면 새로 사는 것을 멈춰 손실이 하루에 몰리지 않게 합니다.'
+  daily_loss: { title: '일일 손실 한도', text: (r) => '하루 동안 자산이 줄어도 되는 최대 폭입니다. 이 폭에 닿으면 새로 사는 것을 멈춰 손실이 하루에 몰리지 않게 합니다.'
     // the risk limit (next session's buys) and the auto halt (that market's loop, exits kept) are one sentence when
-    // they are the same value (review 1R #1: "-2% … -2%" read as two steps)
+    // they are the same value (review 1R #1: "-2% … -2%" read as two steps); both are `≤ limit` on the server, so "이상"
     + say(r, ['daily_loss_limit', 'auto_daily_loss_limit'], (x, a) => (x === a
-      ? `이 앱은 하루 ${p0(x)}보다 많이 잃으면 그 시장의 새 매수를 멈추고 다음 거래일에 풉니다.`
-      : `이 앱은 하루 ${p0(x)}보다 많이 잃으면 다음 거래일 새 매수를 멈추고, ${p0(a)}보다 많이 잃으면 그 시장의 자동 실행을 정지합니다(다음 거래일에 풀림).`)
+      ? `이 앱은 하루 ${p0(x)} 이상 잃으면 그 시장의 새 매수를 멈추고 다음 거래일에 풉니다.`
+      : `이 앱은 하루 ${p0(x)} 이상 잃으면 다음 거래일 새 매수를 멈추고, ${p0(a)} 이상 잃으면 그 시장의 자동 실행을 정지합니다(다음 거래일에 풀림).`)
       + ' 가진 종목의 손절 · 트레일링 매도는 계속합니다.') },
   exception_queue: { title: '예외 큐', text: () => '자동으로 처리하지 못해 사람이 봐야 하는 일만 모아 둔 목록입니다. 등급을 못 읽은 결정, 한도에 걸린 주문, 데이터 장애 같은 것이 올라옵니다.' },
   paper: { title: '모의투자', text: (r) => '실제 돈 없이 가상의 계좌로 똑같이 매매해 보는 것입니다. 기준을 다 통과해야 실제 계좌로 바꿀 수 있습니다.'
