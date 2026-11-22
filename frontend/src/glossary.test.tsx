@@ -65,14 +65,14 @@ describe('glossary — each entry used, readable, its numbers from the server', 
     const r = rulesOf(settings(), 'KRX')
     const t = (k: Term) => GLOSSARY[k].text(r)
     expect(t('drawdown')).toContain('이 앱은 -13%가 되면 새로 사는 비중을 절반으로 줄이고, -27%가 되면 전부 팔고 매매를 멈춥니다.')
-    expect(t('max_drawdown')).toContain('-16%보다 나빠지면')
+    expect(t('max_drawdown')).toContain('-16%이거나 그보다 나쁘면')      // the server: dd > -16% passes, so -16% fails
     expect(t('gross')).toContain('93%')
     expect(t('stop_loss')).toContain('산 가격 대비 -7%에서')
     expect(t('trailing')).toContain('11% 이상 오르면 켜지고, 고점에서 6% 떨어지면')
-    expect(t('expiry')).toContain('17거래일')
+    expect(t('expiry')).toContain('산 날부터 17거래일이 되면 팝니다(다음 날 시가에 체결).')   // `>=` that day, filled next open
     expect(t('sector')).toContain('23%')
     expect(t('weight')).toContain('9%')
-    expect(t('daily_loss')).toContain('하루 -3%보다 많이 잃으면 다음 거래일 새 매수를 멈추고, -4%보다 많이 잃으면 그 시장의 자동 실행을 정지합니다(다음 거래일에 풀림). 가진 종목의 손절 · 트레일링 매도는 계속합니다.')
+    expect(t('daily_loss')).toContain('하루 -3% 이상 잃으면 다음 거래일 새 매수를 멈추고, -4% 이상 잃으면 그 시장의 자동 실행을 정지합니다(다음 거래일에 풀림). 가진 종목의 손절 · 트레일링 매도는 계속합니다.')
     expect(t('regime')).toContain('지수(코스피200)')
     expect(t('regime')).toContain('최근 150거래일')
     expect(t('cooldown')).toContain('4거래일')
@@ -82,13 +82,15 @@ describe('glossary — each entry used, readable, its numbers from the server', 
     expect(t('paper')).toContain('최소 7주')
     expect(t('alpha')).toContain('벤치마크 코스피200')
     const us = rulesOf(settings(), 'US')
-    expect(GLOSSARY.daily_loss.text(us)).toContain('-5%보다 많이 잃으면 그 시장의 자동 실행')
+    expect(GLOSSARY.daily_loss.text(us)).toContain('-5% 이상 잃으면 그 시장의 자동 실행')
     // the same value twice (the defaults: -2% / -2%) is one step, not two (review 1R #1)
     const same = settings()
     same.auto_by_market.KRX.auto_daily_loss_limit = -0.03
     const one = GLOSSARY.daily_loss.text(rulesOf(same, 'KRX'))
-    expect(one).toContain('이 앱은 하루 -3%보다 많이 잃으면 그 시장의 새 매수를 멈추고 다음 거래일에 풉니다. 가진 종목의 손절 · 트레일링 매도는 계속합니다.')
+    expect(one).toContain('이 앱은 하루 -3% 이상 잃으면 그 시장의 새 매수를 멈추고 다음 거래일에 풉니다. 가진 종목의 손절 · 트레일링 매도는 계속합니다.')
     expect(one.match(/-3%/g)).toHaveLength(1)
+    // the boundary is in: the server blocks at `≤ limit` (risk.daily_loss_blocks, execution._auto_halt) — tip-daily-loss
+    expect(keys.filter((k) => /보다 많이 잃|보다 나빠지/.test(GLOSSARY[k].text(r) + GLOSSARY[k].text(null)))).toEqual([])
     expect(GLOSSARY.regime.text(us)).toContain('지수(S&P 500)')
     expect(GLOSSARY.rating.text(us)).not.toContain('비중축소는 보유')     // a value the market does not have: its sentence left out
   })
