@@ -137,7 +137,7 @@ def test_a_sell_review_maps_to_sell_underweight_or_hold_with_its_first_reason():
     assert (r.rating, r.action, r.sell_reason) == ("Sell", "Sell", "thesis_broken") and r.thesis.startswith("**Rating**: Sell")
     _, r = run(action="Trim", trim_to_pct=3, reasons=["overweight", "thesis_broken"])
     assert (r.rating, r.action, r.sell_reason, r.position_sizing) == ("Underweight", "Sell", "overweight", "trim to 3% of equity")
-    assert "전량 매도" in r.thesis
+    assert "비중 3%까지 줄이는 부분 매도" in r.thesis and "전량" not in r.thesis
     _, r = run(action="Hold", reasons=[], checks=[{"condition": "c", "met": False, "evidence": "e"}])
     assert (r.rating, r.action, r.sell_reason) == ("Hold", "Hold", None)
     # a met invalidation without thesis_broken breaks the schema: REVIEW, not the Hold it asked for
@@ -188,3 +188,15 @@ def test_a_memo_off_the_snapshot_close_and_a_hard_rule_reason_are_reviews():
     hard = json.dumps(review(reasons=["hard_rule", "thesis_broken"]))
     out = agent.review_holding("AAPL", snap("AAPL"), "", "", client=FakeClient(lambda kw: message(hard)))
     assert out.output is None and out.review.startswith("schema: hard_rule") and record(out).action == "Sell"
+
+
+@pytest.mark.unit
+def test_the_system_prompt_tells_the_partial_sells_the_executor_makes():
+    """The share an Underweight sells comes from AUTO_EXECUTION (the executor's own value), never a number of its own;
+    no line says the executor sells everything on a Trim."""
+    from agent_trading_core.config import AUTO_EXECUTION
+
+    line = next(x for x in agent.SYSTEM_PROMPT.splitlines() if "주문이 되는 방식" in x)
+    assert f"Underweight → 보유 중이면 보유 수량의 {AUTO_EXECUTION['underweight_sell_fraction']:.0%} 매도" in line
+    assert "Trim은 trim_to_pct 비중까지만 줄이는 부분 매도" in line and "Sell → 보유 중이면 전량 매도" in line
+    assert "부분 매도를 하지 않" not in agent.system_prompt() and "Trim도 보유 전량" not in agent.system_prompt()

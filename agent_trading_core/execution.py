@@ -625,7 +625,7 @@ def _auto_halt(audit: AuditLog, date: str, equity: float, prev: float | None, da
         return False
     buys = open_orders(audit, keep_sells=True)
     audit.record_operation(OperationRecord(
-        kind="halt", operator="system", role="auto", reason=f"일일 손실 한도 초과: {day_ret:+.2%} (한도 {limit:+.0%})",
+        kind="halt", operator="system", role="auto", reason=f"일일 손실 한도 도달: {day_ret:+.2%} (한도 {limit:+.0%})",
         target="daily_loss", market=cfg.market, scope=cfg.market, before={"running": True, "equity_prev": prev},
         after={"running": False, "keep_exits": True, "date": date, "day_return": day_ret, "equity": equity,
                "open_orders_cancelled": [o.order_id for o in buys]}))

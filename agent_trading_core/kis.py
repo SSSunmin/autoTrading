@@ -54,7 +54,12 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 
-from agent_trading_core.errors import NoMarketDataError, VendorNotConfiguredError, VendorUnavailableError
+from agent_trading_core.errors import (
+    NoMarketDataError,
+    VendorNetworkError,
+    VendorNotConfiguredError,
+    VendorUnavailableError,
+)
 from agent_trading_core.files import locked, replace_file
 from agent_trading_core.symbols import kis_us_symbol, safe_ticker_component
 
@@ -213,7 +218,7 @@ class KisClient:
                 "grant_type": "client_credentials", "appkey": self.creds["appkey"],
                 "appsecret": self.creds["appsecret"]}, timeout=10)
         except requests.RequestException as e:
-            raise VendorUnavailableError(f"KIS 토큰 요청 실패: {type(e).__name__}") from None
+            raise _request_error(f"KIS 토큰 요청 실패: {type(e).__name__}", e) from None
         body = _json(r)
         if r.status_code != 200 or "access_token" not in body:
             # the body carries only an error code and message, never the key
@@ -251,7 +256,7 @@ class KisClient:
             try:
                 r = self.session.get(f"{self.base}{path}", params=params, timeout=10, headers=headers)
             except requests.RequestException as e:   # no URL or header in the message
-                raise VendorUnavailableError(f"KIS {tr_id} 요청 실패: {type(e).__name__}") from None
+                raise _request_error(f"KIS {tr_id} 요청 실패: {type(e).__name__}", e) from None
             body = _json(r)
             if body.get("msg_cd") in TOKEN_ERRORS and not reissued:
                 self._token, reissued = None, True    # revoked or expired early: one new token, then the call again
@@ -331,6 +336,13 @@ def _json(r) -> dict:
         return r.json()
     except ValueError:
         return {}
+
+
+def _request_error(text: str, e: Exception) -> VendorUnavailableError:
+    """A request with no answer — the connection (refused, reset, the name not resolved) or a timeout — is a
+    ``VendorNetworkError``, which the scheduler asks again; any other request error is ``VendorUnavailableError``."""
+    no_answer = isinstance(e, requests.ConnectionError | requests.Timeout)
+    return (VendorNetworkError if no_answer else VendorUnavailableError)(text)
 
 
 def market_of(symbol: str) -> str:

@@ -168,11 +168,13 @@ MEMORY_SOURCE_KO = {"agent": "매니저", "human": "사람"}   # memory_text: ev
 
 def memory_text(ticker: str, day: str, decisions: list[DecisionRecord], closed=(), n: int = 5) -> str:
     """The ticker's last decisions before ``day`` and its closed trades (``execution.ClosedTrade``): what was decided
-    and how it ended."""
+    and how it ended — a partial sell (``full`` False: Underweight · Trim, the rest still held) as 부분 매도 with its
+    shares, never as 청산."""
     past = [d for d in decisions if d.ticker == ticker and d.trade_date < day][-n:]
     lines = [f"- {d.trade_date} {d.rating} ({MEMORY_SOURCE_KO.get(decision_source(d), '규칙')}): "
              + " ".join(d.thesis.split())[:200] for d in past]
-    lines += [f"- 청산 {c.entry_date}→{c.exit_date} {c.pnl_pct:+.1%} ({c.reason})" for c in closed if c.ticker == ticker]
+    lines += [(f"- 청산 {c.entry_date}→{c.exit_date}" if c.full else f"- 부분 매도 {c.quantity}주 {c.entry_date}→{c.exit_date}")
+              + f" {c.pnl_pct:+.1%} ({c.reason})" for c in closed if c.ticker == ticker]
     return "\n".join(lines) or "지난 결정 없음."
 
 

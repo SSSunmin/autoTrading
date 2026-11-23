@@ -11,6 +11,7 @@ import re
 import signal
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -19,7 +20,7 @@ import pytest
 from agent_trading_core import kis
 from agent_trading_core import scheduler as sched
 from agent_trading_core.audit import AuditLog, OperationRecord, latest_orders, market_audit
-from agent_trading_core.errors import NoMarketDataError, VendorUnavailableError
+from agent_trading_core.errors import NoMarketDataError, VendorNetworkError, VendorUnavailableError
 
 _spec = importlib.util.spec_from_file_location("daily_loop", Path(__file__).resolve().parents[1] / "scripts" / "daily_loop.py")
 dl = importlib.util.module_from_spec(_spec)
@@ -102,6 +103,8 @@ def cached(data, ticker, day, col="Close"):
 def _offline(monkeypatch):
     # baseline_krx.name_of reads the Yahoo profile of a name the Korean table lacks: never asked in a test
     monkeypatch.setitem(dl.screen_day.__globals__, "name_of", lambda t: None)
+    # the scheduler's weekly job is a yfinance child process: a test gives its own
+    monkeypatch.setattr(sched, "refresh_earnings", lambda data, stop: pytest.fail("refresh_earnings called"))
 
 
 def _lines(data: Path, market="KRX") -> dict[str, int]:
@@ -562,3 +565,185 @@ def test_a_paid_answer_that_cannot_be_recorded_or_kept_is_a_review_and_the_stage
     assert all(d.rating == "REVIEW" and "record: ValueError: bad record" in d.thesis and d.settings["raw"] is None
                for d in decisions)
     assert all(o.exception_kind == "review" for o in latest_orders(audit.orders()).values())
+
+
+REFRESH_EARNINGS = sched.refresh_earnings     # the real one: the autouse fixture puts a guard in its place
+NO_ANSWER = VendorNetworkError("KIS HHDFS76240000 요청 실패: ConnectionError")
+
+
+def _wake_after_sleep(client, data, start: datetime, n: int, error=NO_ANSWER, markets=("US",)):
+    """The scheduler started at ``start`` (the US decide of 08-04 due) while the first ``n`` daily calls fail with
+    ``error`` (2026-11-19: ConnectionError 2 s after the PC woke); it stops 30 minutes in. (runs, printed lines, the
+    fake time of the first answered call)."""
+    clock, stop, answered, left = [start], [], [], [n]
+    def flaky(real):
+        def call(*a):
+            if left[0]:
+                left[0] -= 1
+                raise error
+            answered.append(clock[0])
+            return real(*a)
+        return call
+
+    for name in ("index_daily", "stock_daily", "us_index_daily"):
+        setattr(client, name, flaky(getattr(client, name)))
+
+    def sleep(seconds):
+        assert 0 < seconds <= sched.NAP
+        clock[0] += timedelta(seconds=seconds)
+        if clock[0] >= start + timedelta(minutes=30):
+            stop.append("test")
+
+    sched.serve(dl, list(markets), data, client, stop, clock=lambda: clock[0], sleep=sleep)
+    return market_audit(data / "audit", "US").runs(), answered[:1]
+
+
+@pytest.mark.unit
+def test_a_call_with_no_answer_is_asked_again_minutes_later_and_the_stage_records_once(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sched, "weekly", lambda *a, **k: None)
+    client = _market(market="US", today="2026-08-04")
+    runs, answered = _wake_after_sleep(client, tmp_path, at("2026-08-05", "06:10"), 1)
+    assert [(r.stage, r.trade_date, r.status) for r in runs] == [("decide", "2026-08-04", "ok")]
+    assert answered == [at("2026-08-05", "06:12")]                       # NET_WAIT after the failed call
+    out = capsys.readouterr().out
+    assert out.count("네트워크 오류") == 1 and "2분 뒤 다시 (1/3)" in out
+
+
+@pytest.mark.unit
+def test_a_network_down_past_the_retries_fails_the_stage_once_and_the_hourly_retry_takes_over(tmp_path, monkeypatch,
+                                                                                                capsys):
+    monkeypatch.setattr(sched, "weekly", lambda *a, **k: None)
+    client = _market(market="US", today="2026-08-04")
+    runs, _ = _wake_after_sleep(client, tmp_path, at("2026-08-05", "06:10"), 10**6)
+    assert [(r.stage, r.status) for r in runs] == [("decide", "failed")]  # one record, after three tries
+    assert "ConnectionError" in runs[0].error and "갱신 실패" in runs[0].error
+    out = capsys.readouterr().out
+    assert [line.split("(")[-1] for line in out.splitlines() if "네트워크 오류" in line] == ["1/3)", "2/3)", "3/3)"]
+    assert "다음 깨어남 2026-08-05 07:16 KST" in out                     # failed at 06:16, then RETRY as before
+
+
+@pytest.mark.unit
+def test_an_answer_that_refused_is_not_asked_again(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sched, "weekly", lambda *a, **k: None)
+    client = _market(market="US", today="2026-08-04")
+    refused = VendorUnavailableError("KIS HHDFS76240000 실패: HTTP 500 EGW00123 서버 오류")
+    runs, _ = _wake_after_sleep(client, tmp_path, at("2026-08-05", "06:10"), 10**6, error=refused)
+    assert [(r.stage, r.status) for r in runs] == [("decide", "failed")] and "HTTP 500" in runs[0].error
+    out = capsys.readouterr().out
+    assert "네트워크 오류" not in out and "다음 깨어남 2026-08-05 07:10 KST" in out    # no wait before the record
+
+
+@pytest.mark.unit
+def test_the_weekly_earnings_refresh_is_planned_apart_from_the_stages():
+    now = at("2026-11-23", "08:00")
+    assert sched.weekly_plan(["KRX", "US"], now, 2) == [(at("2026-11-28", "10:00"), "US", "earnings"),
+                                                         (at("2026-12-05", "10:00"), "US", "earnings")]
+    assert sched.weekly_plan(["KRX"], now, 2) == []                       # US dates only
+    # plan · next_wake (the backend's next run and retry) list stages only
+    assert all(s in ("fill", "decide") for _, _, s in sched.plan(dl, ["KRX", "US"], now, 40))
+    assert sched.weekly_slot("US", at("2026-11-28", "09:59")) == at("2026-11-21", "10:00")
+    assert sched.weekly_slot("US", at("2026-11-28", "10:00")) == at("2026-11-28", "10:00")
+
+
+@pytest.mark.unit
+def test_the_weekly_refresh_runs_once_per_week_and_a_week_in_the_file_is_not_run_again(tmp_path):
+    ran, done = [], {}
+    run = lambda data, stop: ran.append(data) or "ok"
+    sched.weekly(["KRX", "US"], tmp_path, at("2026-11-28", "09:59"), done, [], run)   # no file: last week's, caught up
+    sched.weekly(["KRX", "US"], tmp_path, at("2026-11-28", "09:59"), done, [], run)
+    sched.weekly(["KRX", "US"], tmp_path, at("2026-11-28", "10:00"), done, [], run)   # this week's time
+    sched.weekly(["KRX", "US"], tmp_path, at("2026-11-30", "09:05"), done, [], run)
+    assert len(ran) == 2 and ran[0] == tmp_path
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / sched.EARNINGS_FILE).write_text(
+        '{"AAPL": {"date": "2027-01-28", "fetched": "2026-11-21"}, "MSFT": {"date": null, "failed": "2026-11-28"}}',
+        encoding="utf-8")
+    fresh = {}                                                            # a restart: the file says this week ran
+    sched.weekly(["US"], tmp_path, at("2026-11-28", "12:00"), fresh, [], run)
+    assert len(ran) == 2 and fresh == {"US": at("2026-11-28", "10:00")}
+    sched.weekly(["US"], tmp_path, at("2026-11-28", "12:00"), {}, ["stop"], run)    # a stop: nothing starts
+    assert len(ran) == 2
+
+
+@pytest.mark.unit
+def test_a_failed_weekly_refresh_is_printed_after_the_stages_and_stops_none(tmp_path, monkeypatch, capsys):
+    client = _market()
+    client.today = "2026-08-08"
+    order = []
+    monkeypatch.setattr(sched, "refresh_earnings",
+                        lambda data, stop: order.append(len(market_audit(data / "audit", "KRX").runs()))
+                        or "failed(exit 1) · x")
+    stop = []
+    sched.serve(dl, ["KRX", "US"], tmp_path, client, stop, clock=lambda: at("2026-08-08", "10:30"),
+                sleep=lambda s: stop.append("test"))
+    out = capsys.readouterr().out
+    runs = market_audit(tmp_path / "audit", "KRX").runs()
+    assert order == [len(runs)] and len(runs) == 2                        # after Friday's fill · decide catch-up
+    assert "US earnings 2026-08-08: failed(exit 1) · x" in out
+    assert "다음 깨어남" in out                                             # the loop goes on
+
+
+class Child:
+    """A fake ``subprocess.Popen``: done after ``ticks`` one-second waits (None: never), with ``code`` and ``out``."""
+
+    made: ClassVar[list] = []
+
+    def __init__(self, cmd, ticks=0, code=0, out="", stop=None, **kw):
+        self.cmd, self.ticks, self.returncode, self.out, self.killed = cmd, ticks, code, out, False
+        self.stop, self.waits = stop, 0  # stop: a list, the signal arrives during the first wait
+        Child.made.append(self)
+
+    def communicate(self, timeout=None):
+        import subprocess
+
+        if self.killed or self.ticks == 0:
+            return self.out, ""
+        self.waits += 1
+        if self.ticks is not None:
+            self.ticks -= 1
+        if self.stop is not None:
+            self.stop.append("SIGTERM")
+        raise subprocess.TimeoutExpired(self.cmd, timeout)
+
+    def kill(self):
+        self.killed = True
+
+
+@pytest.mark.unit
+def test_the_refresh_child_process_failing_hanging_or_stopped_is_one_line(tmp_path, monkeypatch):
+    def child(**kw):
+        monkeypatch.setattr(sched.subprocess, "Popen", lambda cmd, **k: Child(cmd, **kw))
+
+    child(ticks=3, out='{"calls": 40}\n')                                # done after three one-second waits
+    assert REFRESH_EARNINGS(tmp_path) == 'ok · {"calls": 40}'
+    assert Child.made[-1].cmd[-2:] == ["--cache-dir", str(tmp_path / "cache")] and not Child.made[-1].killed
+    child(code=1, out='{"failed": 2}\n')
+    assert REFRESH_EARNINGS(tmp_path) == 'failed(exit 1) · {"failed": 2}'
+    child(ticks=None)                                                     # hangs: killed at WEEKLY_TIMEOUT
+    assert REFRESH_EARNINGS(tmp_path) == f"failed — 시간 초과({sched.WEEKLY_TIMEOUT}초)" and Child.made[-1].killed
+    stop = []
+    child(ticks=None, stop=stop)
+    assert REFRESH_EARNINGS(tmp_path, stop) == "중단 — 종료 신호" and Child.made[-1].killed
+    assert Child.made[-1].waits == 1                                      # a stop: killed after that wait, not at the timeout
+    monkeypatch.setattr(sched.subprocess, "Popen", lambda cmd, **k: (_ for _ in ()).throw(FileNotFoundError("python")))
+    assert REFRESH_EARNINGS(tmp_path).startswith("failed — FileNotFoundError")
+
+
+@pytest.mark.unit
+def test_an_earnings_file_of_an_unexpected_shape_is_rewritten_and_an_error_stops_no_wake(tmp_path, monkeypatch, capsys):
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / sched.EARNINGS_FILE).write_text(
+        '{"AAPL": {"fetched": 20261121}, "MSFT": {"fetched": "2026-11-21"}}', encoding="utf-8")
+    monkeypatch.setattr(sched, "refresh_earnings", lambda data, stop: "ok · 다시 씀")
+    stop = []
+    sched.serve(dl, ["US"], tmp_path, _market(market="US"), stop, clock=lambda: at("2026-11-28", "12:00"),
+                sleep=lambda s: stop.append("test"))
+    out = capsys.readouterr().out                   # a date of another type: the script runs and rewrites the file
+    assert "US earnings 2026-11-28: ok · 다시 씀" in out and "주 1회 오류" not in out
+    # whatever else the weekly job raises is printed and the loop goes on
+    monkeypatch.setattr(sched, "earnings_day", lambda data: (_ for _ in ()).throw(RuntimeError("뜻밖의 오류")))
+    stop = []
+    sched.serve(dl, ["US"], tmp_path, _market(market="US"), stop, clock=lambda: at("2026-11-28", "12:00"),
+                sleep=lambda s: stop.append("test"))
+    out = capsys.readouterr().out
+    assert "주 1회 오류 — RuntimeError: 뜻밖의 오류" in out and "다음 깨어남" in out

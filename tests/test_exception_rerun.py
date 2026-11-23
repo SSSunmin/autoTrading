@@ -312,6 +312,17 @@ def test_the_memory_names_a_persons_decision_and_keeps_the_rest_as_they_were():
         "- 2026-08-03 Hold (사람): Hold 근거", "- 2026-08-03 Sell (규칙): Sell 근거"]
 
 
+@pytest.mark.unit
+def test_the_memory_tells_a_partial_sell_from_a_close():
+    from agent_trading_core.execution import ClosedTrade
+
+    closed = [ClosedTrade("A.KS", "2026-07-01", "2026-07-20", 5, 100.0, 110.0, "exit_signal", full=False),
+              ClosedTrade("A.KS", "2026-07-01", "2026-08-03", 5, 100.0, 90.0, "stop_loss"),
+              ClosedTrade("B.KS", "2026-07-01", "2026-08-03", 5, 100.0, 90.0, "stop_loss")]
+    assert dl.memory_text("A.KS", D1, [], closed).splitlines() == [
+        "- 부분 매도 5주 2026-07-01→2026-07-20 +10.0% (exit_signal)", "- 청산 2026-07-01→2026-08-03 -10.0% (stop_loss)"]
+
+
 @pytest.mark.parametrize("cause", ["no_key", "cap"])
 @pytest.mark.unit
 def test_the_days_rule_stand_in_for_the_ticker_is_no_answer_the_rerun_waits(reviewed, monkeypatch, cause):

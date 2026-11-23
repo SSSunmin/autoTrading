@@ -189,3 +189,65 @@ def test_the_index_only_table_weighs_each_day_by_the_closes_before_it():
     assert regime_release_grid.index_weights(closes, True, None).loc[days[251]] == 0.0
     assert regime_release_grid.index_weights(closes, True, "half").loc[days[251]] == 0.5
     assert regime_release_grid.index_weights(closes, False, None).loc[days[251]] == 1.0
+
+
+def _fading():
+    """Seven names on steady drifts and FADE, which leads until 2024-06 and then drifts down: from 2025-01 its
+    momentum ranks sixth of eight — Underweight (n_ranked 8: ranks 5-6) at every rebalance while it is held."""
+    t = np.arange(len(DATES))
+    wob = 1 + 0.02 * np.sin(2 * np.pi * t / 7)
+    k = np.searchsorted(DATES, pd.Timestamp("2024-06-03"))
+    frames = {f"{n}.KS": _frame(10000 * np.exp(d * t) * wob)
+              for n, d in zip("ABCDEGH", (0.0010, 0.0008, 0.0006, 0.0004, 0.0002, -0.0002, -0.0004))}
+    frames["FADE.KS"] = _frame(10000 * np.exp(np.cumsum(np.where(t < k, 0.0020, -0.0001))) * wob)
+    return frames
+
+
+SCREEN8 = ScreenConfig(dollar_volume_top_n=8, top_k=8, sector_max=8, volatility_min=0.0, volatility_max=5.0,
+                       range_stability_min=0.0)
+
+
+def _digest(r) -> str:
+    blob = json.dumps({"equity": [round(float(x), 4) for x in r.equity],
+                       "trades": [[tr.ticker, tr.entry_date, tr.exit_date, round(tr.entry_price, 6), tr.quantity,
+                                   tr.reason] for tr in r.trades],
+                       "events": r.events}, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+@pytest.mark.unit
+def test_an_underweight_sells_the_executors_share_of_the_position_each_time():
+    """execution._sell_size: an Underweight sells underweight_sell_fraction (0.5) of the shares held, rounded down,
+    at least one; the last share goes as a full exit. Each partial sell fills at the next open and keeps the rest."""
+    r = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u"))
+    fade = [t for t in r.trades if t.ticker == "FADE.KS"]
+    left = sum(t.quantity for t in fade)
+    for t in fade[:-1]:
+        assert not t.full and t.quantity == int(left * 0.5) and t.reason == "exit_signal"
+        left -= t.quantity
+    assert fade[-1].full and fade[-1].quantity == left == 1 and len(fade) == 12
+    assert sum("부분 매도" in e["text"] for e in r.events) == 11
+    opens = _fading()["FADE.KS"].set_index("Date")["Open"]
+    assert all(t.exit_price == pytest.approx(opens[pd.Timestamp(t.exit_date)] * (1 - 0.0005)) for t in fade)
+    # the whole position at once (1.0): one full exit of every share
+    whole = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u", underweight_sell_fraction=1.0))
+    assert [(t.ticker, t.quantity, t.full) for t in whole.trades] == [("FADE.KS", sum(t.quantity for t in fade), True)]
+
+
+@pytest.mark.unit
+def test_a_whole_underweight_sale_runs_as_the_backtests_before_partial_sells():
+    """underweight_sell_fraction 1.0 hashes to the digests develop 25311d5 (before the option) gave on the fading
+    fixture, rules off and on (measured 2026-11-23): the old numbers of docs/09 · 11 · 12 reproduce with it."""
+    for risk, n, digest in ((None, 1, "f735003c2deb0b92efd4716c9d0d7731e89f1d932b4b4120d2591feb1ad1f5f1"),
+                            (RISK_TWO, 24, "42978511e2eae3309019f11374165f1b31b186123474b0824002f4f75c2f4e15")):
+        r = run_simulation(_fading(), _index(), SimConfig(start="2025-01-02", end="2025-09-05", screen=SCREEN8,
+                                                          label="on" if risk else "off", risk=risk,
+                                                          underweight_sell_fraction=1.0))
+        assert len(r.trades) == n and _digest(r) == digest
+
+
+@pytest.mark.unit
+def test_the_underweight_share_is_a_fraction_of_the_position():
+    for bad in (0.0, -0.5, 1.5):
+        with pytest.raises(ValueError, match="underweight_sell_fraction"):
+            _cfg(underweight_sell_fraction=bad)

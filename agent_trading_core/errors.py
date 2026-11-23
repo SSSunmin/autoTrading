@@ -8,6 +8,7 @@ these (or a thin vendor-named subclass) and needs no new ``except`` clause.
     VendorError
     ├── NoMarketDataError          no usable rows (empty result OR stale data)
     ├── VendorUnavailableError     throttled or failed request -> skip to next vendor
+    │   └── VendorNetworkError     no answer at all (connection, name resolution, timeout) -> may ask again
     └── VendorNotConfiguredError   missing API key/config -> vendor unavailable
 
 The number of types is the number of distinct router reactions, not the number
@@ -47,6 +48,14 @@ class VendorUnavailableError(VendorError):
     """A vendor could not answer: it throttled or failed the request.
 
     Says nothing about the instrument; the router skips to the next vendor.
+    """
+
+
+class VendorNetworkError(VendorUnavailableError):
+    """The request got no answer: the connection failed (refused, reset, the name not resolved) or timed out.
+
+    Often over in minutes (a host just back from sleep), unlike an answer that refused: the scheduler waits and asks
+    again (``scheduler.Patient``); everyone else treats it as ``VendorUnavailableError``.
     """
 
 

@@ -181,7 +181,7 @@ def test_a_daily_loss_past_the_limit_halts_the_loop_once_and_keeps_exits_running
     (halt,) = audit.operations()
     assert (halt.kind, halt.operator, halt.role, halt.target) == ("halt", "system", "auto", "daily_loss")
     assert halt.after["keep_exits"] is True and halt.after["date"] == "2026-06-04"
-    assert halt.after["day_return"] == pytest.approx(-0.03, abs=0.002) and "일일 손실 한도 초과" in halt.reason
+    assert halt.after["day_return"] == pytest.approx(-0.03, abs=0.002) and "일일 손실 한도 도달" in halt.reason
     state = trading_state(audit.operations())
     assert state["running"] is False and state["halted_by"] == "system"
 
