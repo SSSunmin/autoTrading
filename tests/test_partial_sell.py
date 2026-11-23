@@ -1,10 +1,12 @@
 """Partial sells (feature/partial-sell): a sell review's Trim sells down to its target weight, a memo's Underweight
-sells half the holding, Sell / Exit and the rule exits sell it all. The rest keeps its entry, average price, stop line
-and trailing high; only a full close locks the name (Cooldown). Numbers worked out by hand here."""
+sells AUTO_EXECUTION's share of the holding — the whole of it since 2026-11-23 (fix/uw-full, docs/13), half before:
+the half tests set 0.5 (``half``) — Sell / Exit and the rule exits sell it all. The rest keeps its entry, average
+price, stop line and trailing high; only a full close locks the name (Cooldown). Numbers worked out by hand here."""
 
 import pytest
 
 from agent_trading_core.audit import AuditLog, DecisionRecord, trim_target
+from agent_trading_core.config import AUTO_EXECUTION
 from agent_trading_core.execution import _sell_size, execute_date, positions_view
 from tests.test_execution import RISK, SLIP, _decide, _flat, _frame, _held, _prices
 
@@ -15,6 +17,12 @@ CASH = 100_000_000 - 999 * BUY_PX * 1.00015          # 90,003,505.75 after the b
 @pytest.fixture
 def audit(tmp_path):
     return AuditLog(tmp_path / "audit")
+
+
+@pytest.fixture
+def half(monkeypatch):
+    """A memo's Underweight sells half the holding, the setting from 2026-11-16 to 11-23."""
+    monkeypatch.setitem(AUTO_EXECUTION, "underweight_sell_fraction", 0.5)
 
 
 def _trim(audit, ticker, date, pct):
@@ -56,6 +64,8 @@ def test_sell_size_by_hand():
     assert _sell_size(999, None, 0.5, None, 0.0, "KRX") == (499, "Underweight 보유의 50% 매도 (999주 → 500주)")
     assert _sell_size(3, None, 0.5, None, 0.0, "KRX")[0] == 1
     assert _sell_size(100, None, 0.29, None, 0.0, "KRX")[0] == 29            # 100 × 0.29 = 28.999999999999996
+    # a whole-holding Underweight's words: _place orders it as a Sell instead
+    # (test_an_underweight_of_one_share_sells_that_share)
     assert _sell_size(1, None, 0.5, None, 0.0, "KRX") == (1, "Underweight 보유 1주 전량 매도 (1주 보유)")
 
 
@@ -109,7 +119,7 @@ def test_a_trim_to_zero_and_a_sell_close_the_whole_holding(audit):
 
 
 @pytest.mark.unit
-def test_an_underweight_sells_half_rounded_down(audit):
+def test_an_underweight_sells_half_rounded_down(audit, half):
     prices = _prices(A_KS=_flat())
     _held(audit, prices)
     _decide(audit, "A.KS", "2026-06-02", "Underweight")
@@ -122,18 +132,18 @@ def test_an_underweight_sells_half_rounded_down(audit):
 
 
 @pytest.mark.unit
-def test_an_underweight_of_one_share_sells_that_share(audit):
+def test_an_underweight_of_one_share_sells_that_share(audit, half):
     # 10% of 100M at 6,003,900 a share (with slippage and commission) is one share
     prices = _prices(A_KS=_flat(6_000_000))
     assert _held(audit, prices).filled_quantity == 1
     _decide(audit, "A.KS", "2026-06-02", "Underweight")
     (o,) = execute_date(audit, "2026-06-02", prices, risk=RISK)
-    assert (o.quantity, o.filled_quantity) == (1, 1) and "보유 1주 전량 매도" in o.reason
+    assert (o.quantity, o.filled_quantity, o.plan) == (1, 1, None) and o.reason.startswith("모의 주문: 보유 1주 전량 매도")
     assert positions_view(audit.orders(), prices, as_of="2026-06-04", risk=RISK)["positions"] == []
 
 
 @pytest.mark.unit
-def test_the_rest_keeps_its_entry_price_trailing_high_and_stop(audit):
+def test_the_rest_keeps_its_entry_price_trailing_high_and_stop(audit, half):
     # +15% close on 06-02 turns the trailing on; the Trim fills at the 06-04 open; 06-04 closes inside the band
     a = _frame({"2026-06-01": (10_000, 10_000), "2026-06-02": (10_000, 11_500), "2026-06-04": (11_400, 11_400),
                 "2026-06-05": (11_400, 11_400), "2026-06-08": (11_400, 11_400)})
@@ -154,7 +164,7 @@ def test_the_rest_keeps_its_entry_price_trailing_high_and_stop(audit):
 
 
 @pytest.mark.unit
-def test_a_stop_loss_after_a_partial_sell_sells_the_rest_at_the_original_stop_line(audit):
+def test_a_stop_loss_after_a_partial_sell_sells_the_rest_at_the_original_stop_line(audit, half):
     # stop line 10,005 × 0.92 = 9,204.6; 06-05 closes at 9,100 → rule exit, filled at the 06-08 open
     a = _frame({"2026-06-01": (10_000, 10_000), "2026-06-02": (10_000, 10_000), "2026-06-04": (10_000, 9_900),
                 "2026-06-05": (9_500, 9_100), "2026-06-08": (9_000, 9_000)})
@@ -172,7 +182,7 @@ def test_a_stop_loss_after_a_partial_sell_sells_the_rest_at_the_original_stop_li
 
 
 @pytest.mark.unit
-def test_a_partial_sell_locks_nothing_and_the_full_close_after_it_does(audit):
+def test_a_partial_sell_locks_nothing_and_the_full_close_after_it_does(audit, half):
     prices = _prices(A_KS=_flat())
     _held(audit, prices)
     _decide(audit, "A.KS", "2026-06-02", "Underweight")
@@ -187,3 +197,25 @@ def test_a_partial_sell_locks_nothing_and_the_full_close_after_it_does(audit):
     _decide(audit, "A.KS", "2026-06-05")
     (b,) = execute_date(audit, "2026-06-05", prices, risk=RISK)
     assert b.status == "blocked" and b.rules_applied == ["Cooldown"]
+
+
+@pytest.mark.unit
+def test_an_underweight_at_the_default_sells_the_whole_holding_as_a_sell_does(audit):
+    """fraction 1.0 (the default since 2026-11-23): a memo's Underweight is the order a Sell places — the whole
+    holding, the Sell's words, no plan — and its close is a full one that locks the name (Cooldown), as every
+    Underweight was before partial sells (develop 4bd1181^: SELL_RATINGS = Sell, Underweight)."""
+    assert AUTO_EXECUTION["underweight_sell_fraction"] == 1.0
+    prices = _prices(A_KS=_flat(), B_KS=_flat())
+    _decide(audit, "A.KS", "2026-06-01")
+    _decide(audit, "B.KS", "2026-06-01")
+    execute_date(audit, "2026-06-01", prices, risk=RISK)
+    _decide(audit, "A.KS", "2026-06-02", "Underweight")
+    _decide(audit, "B.KS", "2026-06-02", "Sell")
+    by = {o.ticker: o for o in execute_date(audit, "2026-06-02", prices, risk=RISK)}
+    keep = ("side", "quantity", "status", "reason", "plan", "rules_applied", "filled_quantity", "fill_date", "filled_price")
+    assert {k: getattr(by["A.KS"], k) for k in keep} == {k: getattr(by["B.KS"], k) for k in keep}
+    assert (by["A.KS"].quantity, by["A.KS"].plan) == (999, None)
+    assert by["A.KS"].reason.startswith("모의 주문: 보유 999주 전량 매도 · 다음 거래일 시가 → 모의 체결")
+    view = positions_view(audit.orders(), prices, as_of="2026-06-08", risk=RISK)
+    assert view["positions"] == [] and sorted((c["ticker"], c["full"]) for c in view["closed"]) == [("A.KS", True), ("B.KS", True)]
+    assert _guard(view, "Cooldown")["active"] is True and sorted(x["ticker"] for x in _guard(view, "Cooldown")["tickers"]) == ["A.KS", "B.KS"]

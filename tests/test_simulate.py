@@ -217,9 +217,10 @@ def _digest(r) -> str:
 
 @pytest.mark.unit
 def test_an_underweight_sells_the_executors_share_of_the_position_each_time():
-    """execution._sell_size: an Underweight sells underweight_sell_fraction (0.5) of the shares held, rounded down,
-    at least one; the last share goes as a full exit. Each partial sell fills at the next open and keeps the rest."""
-    r = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u"))
+    """execution._sell_size: an Underweight sells underweight_sell_fraction (0.5 here; the default is 1.0 since
+    2026-11-23) of the shares held, rounded down, at least one; the last share goes as a full exit. Each partial sell
+    fills at the next open and keeps the rest."""
+    r = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u", underweight_sell_fraction=0.5))
     fade = [t for t in r.trades if t.ticker == "FADE.KS"]
     left = sum(t.quantity for t in fade)
     for t in fade[:-1]:
@@ -229,21 +230,23 @@ def test_an_underweight_sells_the_executors_share_of_the_position_each_time():
     assert sum("부분 매도" in e["text"] for e in r.events) == 11
     opens = _fading()["FADE.KS"].set_index("Date")["Open"]
     assert all(t.exit_price == pytest.approx(opens[pd.Timestamp(t.exit_date)] * (1 - 0.0005)) for t in fade)
-    # the whole position at once (1.0): one full exit of every share
-    whole = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u", underweight_sell_fraction=1.0))
+    # the whole position at once (1.0, the default): one full exit of every share
+    whole = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u"))
     assert [(t.ticker, t.quantity, t.full) for t in whole.trades] == [("FADE.KS", sum(t.quantity for t in fade), True)]
 
 
 @pytest.mark.unit
 def test_a_whole_underweight_sale_runs_as_the_backtests_before_partial_sells():
-    """underweight_sell_fraction 1.0 hashes to the digests develop 25311d5 (before the option) gave on the fading
-    fixture, rules off and on (measured 2026-11-23): the old numbers of docs/09 · 11 · 12 reproduce with it."""
+    """underweight_sell_fraction 1.0 — the default since 2026-11-23 (fix/uw-full) — hashes to the digests develop
+    25311d5 (before the option) gave on the fading fixture, rules off and on (measured 2026-11-23): the numbers of
+    docs/09 · 11 · 12 are the default backtest's again."""
+    assert SimConfig(start="2025-01-02", end="2025-09-05").underweight_sell_fraction == 1.0
     for risk, n, digest in ((None, 1, "f735003c2deb0b92efd4716c9d0d7731e89f1d932b4b4120d2591feb1ad1f5f1"),
                             (RISK_TWO, 24, "42978511e2eae3309019f11374165f1b31b186123474b0824002f4f75c2f4e15")):
-        r = run_simulation(_fading(), _index(), SimConfig(start="2025-01-02", end="2025-09-05", screen=SCREEN8,
-                                                          label="on" if risk else "off", risk=risk,
-                                                          underweight_sell_fraction=1.0))
-        assert len(r.trades) == n and _digest(r) == digest
+        for over in ({}, {"underweight_sell_fraction": 1.0}):
+            r = run_simulation(_fading(), _index(), SimConfig(start="2025-01-02", end="2025-09-05", screen=SCREEN8,
+                                                              label="on" if risk else "off", risk=risk, **over))
+            assert len(r.trades) == n and _digest(r) == digest
 
 
 @pytest.mark.unit
@@ -257,19 +260,21 @@ def test_the_underweight_share_is_a_fraction_of_the_position():
 
 @pytest.mark.unit
 def test_no_underweight_rule_runs_as_before_the_option():
-    """underweight_rule None (the default) hashes to what develop 08a75e6 (before the option) gave at the default
+    """underweight_rule None (the default) hashes to what develop 08a75e6 (before the option) gave at its default
     fraction 0.5, rules off and on (measured 2026-11-23): docs/13's rules leave every other run as it was."""
     for risk, n, digest in ((None, 12, "0407c3e270431eeb76789ea9081cf1ad6a70dd2547bfd49ba890280375fb09ef"),
                             (RISK_TWO, 28, "9a490a9ad5f07879dd4e51f65e1b856f93448e62d02daef14427b2976231751e")):
         r = run_simulation(_fading(), _index(), SimConfig(start="2025-01-02", end="2025-09-05", screen=SCREEN8,
-                                                          label="on" if risk else "off", risk=risk))
+                                                          label="on" if risk else "off", risk=risk,
+                                                          underweight_sell_fraction=0.5))
         assert len(r.trades) == n and _digest(r) == digest
 
 
 @pytest.mark.unit
 def test_a_second_underweight_in_a_row_sells_the_rest():
     """twice_full: FADE is Underweight at every rebalance — half at the first, the rest at the next one."""
-    r = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u", underweight_rule="twice_full"))
+    r = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u", underweight_sell_fraction=0.5,
+                                                 underweight_rule="twice_full"))
     fade = [t for t in r.trades if t.ticker == "FADE.KS"]
     assert [t.full for t in fade] == [False, True]
     held = fade[0].quantity + fade[1].quantity
@@ -307,7 +312,8 @@ def test_volatile_days_read_only_the_index_up_to_the_day_before():
 def test_volatile_half_sells_the_fraction_on_volatile_days_only():
     idx = _bumpy_index()
     flags = volatile_days(idx.set_index("Date")["Close"])
-    r = run_simulation(_fading(), idx, _cfg(screen=SCREEN8, label="u", underweight_rule="volatile_half"))
+    r = run_simulation(_fading(), idx, _cfg(screen=SCREEN8, label="u", underweight_sell_fraction=0.5,
+                                            underweight_rule="volatile_half"))
     fade = [t for t in r.trades if t.ticker == "FADE.KS"]
     days = list(r.equity.index)
     decided = [days[days.index(pd.Timestamp(t.exit_date)) - 1] for t in fade]      # the rebalance close before the fill
@@ -324,7 +330,7 @@ def test_the_regret_of_each_underweight_sale_is_the_close_n_sessions_after_the_o
     """docs/13: every Underweight sale (the partial ones and the last share), against the open it filled at; the
     decision day — the session before the fill — sets the volatile flag. A Sell rating's sale is not one."""
     frames, idx = _fading(), _index()
-    r = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u"))
+    r = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u", underweight_sell_fraction=0.5))
     days = r.equity.index
     flags = pd.Series([k % 2 == 0 for k in range(len(days))], index=days)
     rows = uw_fraction_grid.regret(r, frames, 0.0005, flags)
@@ -336,7 +342,7 @@ def test_the_regret_of_each_underweight_sale_is_the_close_n_sessions_after_the_o
         assert row["sold"] == pytest.approx(f.at[days[k], "Open"])
         assert row["after_5"] == pytest.approx(f.at[days[k + 5], "Close"]) and row["after_20"] == pytest.approx(f.at[days[k + 20], "Close"])
         assert row["volatile"] == flags.iloc[k - 1]
-    late = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u", end="2025-03-31"))   # 2025-03-28: 1 session left
+    late = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u", end="2025-03-31", underweight_sell_fraction=0.5))   # 2025-03-28: 1 session left
     assert uw_fraction_grid.regret(late, frames, 0.0005, flags.loc[:"2025-03-31"])[-1]["after_5"] is None
     sold = run_simulation(_paths(), idx, _cfg(label="off"))                                 # DOWN: rated Sell
     assert all("등급 Underweight" in e["text"] for e in sold.events if e["kind"] == "exit"
@@ -373,7 +379,7 @@ def test_volatile_days_for_measuring_are_the_windows_top_third_and_sum_the_daily
 @pytest.mark.unit
 def test_the_cause_table_follows_a_position_from_its_first_partial_sale_to_its_close():
     frames, idx = _fading(), _index()
-    r = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u"))
+    r = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u", underweight_sell_fraction=0.5))
     fade = [t for t in r.trades if t.ticker == "FADE.KS"]
     c = uw_fraction_grid.cause(r, frames, _cfg())
     opens = [t.exit_price / (1 - 0.0005) for t in fade]

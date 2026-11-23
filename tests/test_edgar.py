@@ -2,7 +2,7 @@
 agent.fundamentals_section) with a fake SEC session and fixed answers: the ticker → CIK table, point in time (a
 value or filing filed on or after the decision day is left out, an amendment before it replaces the original), the
 quarters (Q4 = annual − nine months), the tag candidates' order, PER · PBR by hand, the flag off leaving the request
-as it was (fm-v4, no SEC call), the failure kinds as a "재무 데이터 없음" section with the decision still asked and the
+as it was (fm-v6, no SEC call), the failure kinds as a "재무 데이터 없음" section with the decision still asked and the
 reason in the run's notes, the request spacing, and the User-Agent in no exception, section, cache file or log. One
 test replays real answers cut down under tests/fixtures/edgar_aapl/ (AAPL, fetched 2026-11-17 — public filings, no
 User-Agent in them). No network."""
@@ -302,7 +302,7 @@ def test_a_cached_answer_serves_a_day_only_when_fetched_on_or_after_it(tmp_path)
 
 @pytest.mark.unit
 def test_the_flag_off_asks_sec_nothing_and_the_us_request_stays(tmp_path, monkeypatch):
-    assert dl.LLM["fundamentals"] is False and agent.prompt_version() == "fm-v4"
+    assert dl.LLM["fundamentals"] is False and agent.prompt_version() == "fm-v6"
     monkeypatch.setattr(edgar, "EdgarClient", lambda *a, **k: pytest.fail("no SEC client with the flag off"))
     assert agent.fundamentals_section("US", "AAPL", DAY, 1.0, tmp_path) == (None, None)
     assert agent.fundamentals_client("US", tmp_path) is None
@@ -325,7 +325,7 @@ def test_the_flag_on_adds_the_us_section_under_fm_v5(tmp_path, monkeypatch):
     market.today = "2026-08-04"
     r = dl.run_stage("US", "decide", "2026-08-04", tmp_path, market, at("2026-08-04", "16:10"), decider="llm",
                      llm=llm)
-    assert r.status == "ok" and llm.requests and any("fm-v5" in n for n in r.notes)
+    assert r.status == "ok" and llm.requests and any("fm-v7" in n for n in r.notes)
     assert set(seen) == {"EdgarClient"} and len(seen) == len(llm.requests)
     for q in llm.requests:
         text = q["messages"][0]["content"]
@@ -335,7 +335,7 @@ def test_the_flag_on_adds_the_us_section_under_fm_v5(tmp_path, monkeypatch):
     from agent_trading_core.audit import market_audit
 
     d = market_audit(tmp_path / "audit", "US").decisions()
-    assert d and all(x.settings["prompt_version"] == "fm-v5" for x in d)
+    assert d and all(x.settings["prompt_version"] == "fm-v7" for x in d)
     assert "SEC EDGAR" in agent.FUNDAMENTALS_PROMPT and "DART" in agent.FUNDAMENTALS_PROMPT
     assert not re.search(r"\d{4}-\d{2}-\d{2}|\b[A-Z]{2,5}\b(?<!SEC)(?<!DART)(?<!EDGAR)(?<!BPS)(?<!EPS)(?<!PER)(?<!PBR)",
                          agent.FUNDAMENTALS_PROMPT.replace("8-K", ""))

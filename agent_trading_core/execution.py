@@ -19,8 +19,9 @@ One run executes one trading day (docs/02 화면 3 실행 흐름):
 5. each agent decision of the date becomes one order keyed ``paper-<date>-<ticker>``, so a second run writes
    nothing: Buy/Overweight buy names not held, sized by ``risk.size_targets`` under the guards (drawdown,
    daily loss, regime, Protections); Sell sells the whole holding, Underweight part of it (``_sell_size``: a sell
-   review's Trim down to its target weight, a memo's Underweight ``underweight_sell_fraction`` of the shares); Hold
-   places nothing; REVIEW is an exception. A buy over the per-order cap ``auto_order_max`` is shrunk to the most whole shares under it
+   review's Trim down to its target weight, a memo's Underweight ``underweight_sell_fraction`` of the shares — at
+   1.0, the default, all of them: a Sell's order); Hold places nothing; REVIEW is an exception. A buy over the
+   per-order cap ``auto_order_max`` is shrunk to the most whole shares under it
    (docs/10 D1; none left: blocked ``cap_zero``); one past the session's ``auto_daily_order_cap`` is an exception.
    Sells reduce risk and are not capped. Each sized buy keeps its 원안 vs 최종 (``OrderRecord.plan``); a partial-sell
    order its holding before (``proposed``, the whole of it) and the part sold (``final``). A partial sell keeps the
@@ -753,7 +754,8 @@ def _sell_size(held: int, trim: float | None, fraction: float, ref: float | None
     """An Underweight's shares to sell, and the reason's words. ``trim`` (a sell review's Trim, ``audit.trim_target``):
     down to that weight of the decision day's equity at its close — the shares over it, rounded down (0: all; at or
     under it: 0, no order). Else ``fraction`` of the holding rounded down, at least one share. ``ref`` is the close
-    (needed for a Trim only)."""
+    (needed for a Trim only). A memo's Underweight of the whole holding is not placed with these words: ``_place``
+    sends it as a Sell's order."""
     if trim is None:
         qty = int(held * fraction + EPS) or held
         text = f"Underweight 보유의 {fraction:.0%} 매도 ({held}주 → {held - qty}주)" if qty < held \
@@ -845,11 +847,13 @@ def _place(decisions: list[DecisionRecord], date: str, current: dict[str, OrderR
                                        reason="보유 없음 — 매도할 수량이 없습니다 (공매도하지 않음)"))
                 continue
             # risk-reducing: the auto-execution caps limit buys only
-            if d.rating == "Sell":
+            trim = trim_target(d)
+            # a Sell, or a memo's Underweight whose share is the whole holding: the full sale, the order it always was
+            if d.rating == "Sell" or trim is None and _sell_size(held.quantity, None, caps["underweight_sell_fraction"],
+                                                               None, 0.0, cfg.market)[0] == held.quantity:
                 out.append(OrderRecord(**base, side="Sell", quantity=held.quantity, status="open",
                                        reason=f"모의 주문: 보유 {held.quantity}주 전량 매도 · 다음 거래일 시가"))
                 continue
-            trim = trim_target(d)
             if trim is not None and ref is None:
                 out.append(OrderRecord(**base, side="Sell", quantity=0, status="exception",
                                        exception_kind="vendor_unavailable",

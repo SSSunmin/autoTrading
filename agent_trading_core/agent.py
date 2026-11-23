@@ -52,24 +52,33 @@ from agent_trading_core.snapshot import DEFAULT_SNAPSHOT_INDICATORS, _fmt
 from agent_trading_core.structured import validate_text
 
 ROOT = Path(__file__).resolve().parents[1]
-PROMPT_VERSION = "fm-v4"        # bump with any change to SYSTEM_PROMPT or the user message layout
+PROMPT_VERSION = "fm-v6"        # bump with any change to SYSTEM_PROMPT or the user message layout
 # LLM["fundamentals"]: SYSTEM_PROMPT + FUNDAMENTALS_PROMPT, the DART (KRX) and SEC EDGAR (US) sections. fm-v2 was the
 # DART-only prompt, never switched on (no record carries it); its text named the KRX section alone.
-FUNDAMENTALS_PROMPT_VERSION = "fm-v5"
+FUNDAMENTALS_PROMPT_VERSION = "fm-v7"
 # fm-v1 (the 2026-11-16 trial) · fm-v3 said every sell was a full one; fm-v4 · fm-v5 tell the partial sells the
 # executor makes (execution._sell_size): Underweight sells AUTO_EXECUTION["underweight_sell_fraction"] of the
-# holding, a Trim sells down to its trim_to_pct. A changed fraction changes the prompt: bump both then
+# holding (then 50%), a Trim sells down to its trim_to_pct. fm-v6 · fm-v7: the fraction 1.0 (2026-11-23, docs/13) —
+# an Underweight sells the whole holding. A changed fraction changes the prompt: bump both then
 
 # USD per million tokens, claude-opus-5-5 (2026-10 price list): input, output, cache read, 5-minute cache write
 PRICE = {"input_tokens": 4.00, "output_tokens": 20.00, "cache_read_input_tokens": 0.20,
          "cache_creation_input_tokens": 5.00}
 PRICE_TOLERANCE = 0.01       # a memo's current_price may differ this much from the snapshot's latest close
 
+
+def underweight_words(fraction: float) -> str:
+    """What the executor does with a held name's Underweight (execution._sell_size), in the words of the prompt."""
+    return "전량 매도" if fraction >= 1 else f"보유 수량의 {fraction:.0%} 매도(1주 단위 내림, 최소 1주)"
+
+
+_UNDERWEIGHT = underweight_words(AUTO_EXECUTION["underweight_sell_fraction"])
+
 SYSTEM_PROMPT = """당신은 롱온리 주식 재량 운용 펀드매니저다. 이 시스템에서 매수·매도 판단은 당신이 내리고, 당신의 결정은 그대로 주문이 된다(지금은 모의투자 장부). 결정 하나는 투자위원회(IC)에 올리는 문서처럼 쓴다.
 
 ## 운용 환경
 - 리스크팀의 운용 가이드라인(하드 룰)은 실행기가 집행한다: 종목당 비중 상한과 균등 사이징, 손절·트레일링 스톱·보유 기간 만료, 드로다운 단계 축소와 −20% 정지, 일일 손실 정지, 시장 국면 필터, 주문당·일일 주문 금액 상한. 당신은 그 안에서 판단하고, 당신의 비중 권고는 리스크팀 한도로 잘린다. 하드 룰 집행은 당신 몫이 아니므로 매도 사유 hard_rule은 고르지 않는다.
-- 등급이 주문이 되는 방식(매수·매도 모두 다음 거래일 시가 체결): Buy·Overweight → 보유하지 않은 종목이면 매수 주문. Hold → 주문 없음. Sell → 보유 중이면 전량 매도. Underweight → 보유 중이면 보유 수량의 """ + f"{AUTO_EXECUTION['underweight_sell_fraction']:.0%}" + """ 매도(1주 단위 내림, 최소 1주). 매도 검토의 Exit는 보유 전량 매도, Trim은 trim_to_pct 비중까지만 줄이는 부분 매도다: 결정일 종가로 그 비중을 넘는 수량만 팔고(1주 단위 내림), 이미 그 비중 이하면 주문 없음.
+- 등급이 주문이 되는 방식(매수·매도 모두 다음 거래일 시가 체결): Buy·Overweight → 보유하지 않은 종목이면 매수 주문. Hold → 주문 없음. Sell → 보유 중이면 전량 매도. Underweight → 보유 중이면 """ + _UNDERWEIGHT + """. 매도 검토의 Exit는 보유 전량 매도, Trim은 trim_to_pct 비중까지만 줄이는 부분 매도다: 결정일 종가로 그 비중을 넘는 수량만 팔고(1주 단위 내림), 이미 그 비중 이하면 주문 없음.
 
 ## 요청 두 가지
 요청은 사용자 메시지 첫 줄에 적혀 온다.
@@ -354,7 +363,8 @@ def review_holding(ticker: str, snapshot: Snapshot, position: str, memory: str, 
 
 ACTION = {"Buy": "Buy", "Overweight": "Buy", "Hold": "Hold", "Underweight": "Sell", "Sell": "Sell"}
 # Trim is Underweight with position_sizing "trim to X% of equity": the executor sells down to that weight
-# (audit.trim_target); a memo's Underweight, with no target, sells underweight_sell_fraction of the holding
+# (audit.trim_target); a memo's Underweight, with no target, sells underweight_sell_fraction of the holding (all of it
+# at 1.0)
 REVIEW_RATING = {SellAction.HOLD: "Hold", SellAction.TRIM: "Underweight", SellAction.EXIT: "Sell"}
 
 
