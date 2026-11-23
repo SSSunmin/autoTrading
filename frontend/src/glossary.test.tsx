@@ -78,7 +78,13 @@ describe('glossary — each entry used, readable, its numbers from the server', 
     expect(t('cooldown')).toContain('4거래일')
     expect(t('protections')).toContain('최근 9거래일에 손절이 2번 이상이면 6거래일')
     expect(t('protections')).toMatch(/StoplossGuard.*MaxDrawdown.*Cooldown.*LowProfit/)
-    expect(t('rating')).toContain('보유 수량의 40%')
+    expect(t('rating')).toContain('비중축소는 보유 수량의 40%를 팝니다.')
+    // 1.0 (the default since docs/13) is "all of it", not "100%"; below 1 stays a percentage — tip-uw-full
+    const uw = (x: number) => { const s = settings(); s.auto_by_market.KRX.underweight_sell_fraction = x; return GLOSSARY.rating.text(rulesOf(s, 'KRX')) }
+    expect(uw(1)).toContain('비중축소는 보유 전량을 팝니다.')
+    expect(uw(1)).not.toContain('100%')
+    expect(uw(0.5)).toContain('비중축소는 보유 수량의 50%를 팝니다.')
+    expect(uw(0.996)).toContain('비중축소는 보유 수량의 99.6%를 팝니다.')   // rounds to 100% at 0 places (review 1R #1)
     expect(t('paper')).toContain('최소 7주')
     expect(t('alpha')).toContain('벤치마크 코스피200')
     const us = rulesOf(settings(), 'US')
