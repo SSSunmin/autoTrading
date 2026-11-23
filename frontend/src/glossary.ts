@@ -60,7 +60,7 @@ export const GLOSSARY = {
   weight: { title: '비중', text: (r) => '한 종목이 전체 자산에서 차지하는 비율입니다. 한 종목이 망가져도 전체가 크게 다치지 않도록 상한을 둡니다.'
     + say(r, ['max_position_pct'], (x) => `이 앱은 종목당 ${p0(x)}까지 담습니다.`) },
   rating: { title: '등급', text: (r) => '에이전트가 종목마다 매기는 판단입니다. 매수(Buy) · 비중확대(Overweight) · 보유(Hold) · 비중축소(Underweight) · 매도(Sell) 다섯 단계이고, 판단을 못 내리면 검토 필요(REVIEW)로 사람에게 넘깁니다.'
-    + say(r, ['underweight_sell_fraction'], (x) => `비중축소는 보유 수량의 ${p0(x)}를 팝니다.`) },
+    + say(r, ['underweight_sell_fraction'], (x) => (x >= 1 ? '비중축소는 보유 전량을 팝니다.' : `비중축소는 보유 수량의 ${p0(x) === '100%' ? pct(x, 1).replace('+', '') : p0(x)}를 팝니다.`)) },   // 1 = all (docs/13); just under 1 is not "100%"
   trim: { title: '축소(Trim) · 부분 매도', text: () => '보유한 종목을 전부 팔지 않고 일부만 파는 것입니다. 나머지는 처음 산 가격 · 손절선을 그대로 갖고 계속 보유합니다.' },
   momentum: { title: '모멘텀', text: () => '최근 오른 종목이 한동안 더 오르는 경향입니다. 선별은 최근 상승 흐름이 강한 종목(등락 폭을 감안해 점수화)을 앞에 둡니다.' },
   universe: { title: '유니버스', text: () => '선별을 시작하는 후보 종목 전체 목록입니다. 예를 들어 지수에 들어 있는 대형주들이고, 여기서 규칙으로 걸러 살 종목을 고릅니다.' },

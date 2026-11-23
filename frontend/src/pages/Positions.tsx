@@ -42,7 +42,7 @@ export default function Positions() {
                     <tbody>{b.positions.map((r) => (
                       <tr key={r.ticker} className="click" onClick={() => navigate(to(`/tickers/${encodeURIComponent(r.ticker)}`))}>
                         <td><TickerCell ticker={r.ticker} name={r.name} /></td>
-                        <td className="r num">{r.quantity}{r.partial_sold > 0 && <span className="muted" title="부분 매도(Trim · Underweight)로 줄인 수량 — 평단 · 손절선 · 트레일링 고점은 처음 그대로"> · 부분 매도 {r.partial_sold}주</span>}</td><td className="r num">{amt(r.avg_price)}</td><td className="r num">{amt(r.last_price)}</td>
+                        <td className="r num">{r.quantity}{r.partial_sold > 0 && <span className="muted" title="부분 매도로 줄인 수량 — 평단 · 손절선 · 트레일링 고점은 처음 그대로"> · 부분 매도 {r.partial_sold}주</span>}</td><td className="r num">{amt(r.avg_price)}</td><td className="r num">{amt(r.last_price)}</td>
                         <td className="r"><Pct value={r.unrealized_pct} /></td><td className="r num">{pct(r.weight).replace('+', '')}</td>
                         <td className="r num">{amt(r.stop_price)}</td>
                         <td className={`r num ${r.near_stop ? 'alert-t' : ''}`}>{pct(r.stop_gap).replace('+', '')}{r.near_stop ? ' · 근접' : ''}</td>
