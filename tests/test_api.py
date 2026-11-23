@@ -380,7 +380,7 @@ def test_a_rule_exit_is_served_as_its_own_decision_with_its_own_order(tmp_path, 
     monkeypatch.setattr(main, "_clock", lambda: datetime(2026, 6, 4, 20, 0, tzinfo=KST))
     st = c.get("/api/trading/mode").json()
     assert st["running"] is False and st["halted_by"] == "system" and st["halted_by_ko"] == "시스템 자동 정지"
-    assert st["label_ko"].endswith("· 시스템 · 일일 손실 정지") and "일일 손실 한도 초과" in st["halt_reason"]
+    assert st["label_ko"].endswith("· 시스템 · 일일 손실 정지") and "일일 손실 한도 도달" in st["halt_reason"]
     assert st["halt_target"] == "daily_loss" and st["dd_stop"] is False
     assert c.get("/api/labels").json()["decision_source_ko"]["rule"] == "규칙 청산"
     # the agent's own calls can be read without the rule exits, and the health count says which is which

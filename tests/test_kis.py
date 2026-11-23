@@ -16,7 +16,12 @@ import pytest
 import requests
 
 from agent_trading_core import kis
-from agent_trading_core.errors import NoMarketDataError, VendorNotConfiguredError, VendorUnavailableError
+from agent_trading_core.errors import (
+    NoMarketDataError,
+    VendorNetworkError,
+    VendorNotConfiguredError,
+    VendorUnavailableError,
+)
 
 _spec = importlib.util.spec_from_file_location("kis_check", Path(__file__).resolve().parents[1] / "scripts" / "kis_check.py")
 kc = importlib.util.module_from_spec(_spec)
@@ -133,6 +138,31 @@ def test_a_network_failure_is_a_vendor_error_without_the_url_or_key(tmp_path):
     with pytest.raises(VendorUnavailableError, match="ConnectionError") as e:
         _client(tmp_path, Down()).get("/p", "TR", {})
     assert KEY not in str(e.value) and "openapivts" not in str(e.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("error, network", [(requests.ConnectionError, True), (requests.ConnectTimeout, True),
+                                            (requests.ReadTimeout, True), (requests.TooManyRedirects, False),
+                                            (requests.exceptions.InvalidURL, False)])
+def test_a_request_with_no_answer_is_a_network_error_the_scheduler_asks_again(tmp_path, error, network):
+    """Connection (refused, reset, the name not resolved) and timeouts: VendorNetworkError, the call and the token
+    request alike; any other request error stays VendorUnavailableError."""
+    class Down(FakeSession):
+        def get(self, url, params, timeout, headers):
+            raise error("x")
+
+    class NoToken(FakeSession):
+        def post(self, url, json, timeout):
+            raise error("x")
+
+    for i, session in enumerate((Down(), NoToken())):
+        with pytest.raises(VendorUnavailableError) as e:
+            _client(tmp_path / str(i), session).get("/p", "TR", {})
+        assert isinstance(e.value, VendorNetworkError) is network and error.__name__ in str(e.value)
+    # an answer that refused is no network error
+    with pytest.raises(VendorUnavailableError) as e:
+        _client(tmp_path / "r", FakeSession([{"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "x"}] * 2)).get("/p", "TR", {})
+    assert not isinstance(e.value, VendorNetworkError)
 
 
 @pytest.mark.unit

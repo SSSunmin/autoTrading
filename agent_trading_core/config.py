@@ -160,7 +160,7 @@ LLM = {
     "trial_sessions": 5,
     # Financials and filings in a ticker's snapshot (agent.fundamentals_section): DART for KRX (docs/01 §12-8), SEC
     # EDGAR for US (§12-9). False: the user message and PROMPT_VERSION stay as they are; True: the "재무 스냅샷(DART)" ·
-    # "재무 스냅샷(SEC EDGAR)" section and prompt fm-v3.
+    # "재무 스냅샷(SEC EDGAR)" section and prompt agent.FUNDAMENTALS_PROMPT_VERSION.
     "fundamentals": False,
 }
 

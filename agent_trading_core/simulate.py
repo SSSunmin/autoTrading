@@ -7,7 +7,8 @@ the rules off, on, and on plus the regime filter, so the difference is the rules
 
 Mechanics (KRX): decisions are made at the close; fills happen at the *next* open, so gaps count
 against the stops. Sells pay transaction tax; both sides pay commission and slippage. Positions are
-whole shares.
+whole shares. A Sell rating sells the whole position; an Underweight sells ``underweight_sell_fraction``
+of it, whole shares rounded down and at least one — the executor's rule (``execution._sell_size``).
 """
 
 from __future__ import annotations
@@ -18,8 +19,9 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from agent_trading_core.config import MARKETS
+from agent_trading_core.config import AUTO_EXECUTION, MARKETS
 from agent_trading_core.risk import (
+    EPS,
     REGIME_RELEASES,
     RELEASE_HALF_SCALE,
     ExitSignal,
@@ -70,10 +72,15 @@ class SimConfig:
     regime_filter: bool = False          # needs risk
     market: str = "KRX"                  # config.MARKETS key: sell tax, sell-side regulatory fees, benchmark name
     regime_release: str | None = None    # docs/12, needs regime_filter: risk.REGIME_RELEASES; None = the filter as is
+    # an Underweight's share of the position sold, the executor's (AUTO_EXECUTION). 1.0: the whole position, as every
+    # backtest before 2026-11-23 sold it (docs/09 · 11 · 12 numbers)
+    underweight_sell_fraction: float = AUTO_EXECUTION["underweight_sell_fraction"]
 
     def __post_init__(self) -> None:
         if self.regime_release is not None and (self.regime_release not in REGIME_RELEASES or not self.regime_filter):
             raise ValueError(f"regime_release {self.regime_release!r}: one of {REGIME_RELEASES}, with regime_filter")
+        if not 0 < self.underweight_sell_fraction <= 1:
+            raise ValueError(f"underweight_sell_fraction {self.underweight_sell_fraction!r}: in (0, 1]")
         mkt = MARKETS[self.market]
         if self.sell_tax is None:
             self.sell_tax = mkt["sell_tax"]
@@ -94,6 +101,7 @@ class Trade:
     reason: str
     pnl_pct: float
     holding_days: int
+    full: bool = True                    # False: an Underweight's partial sell, the rest still held (no Protections)
 
 
 @dataclass
@@ -211,6 +219,7 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
     cash = cfg.initial_cash
     positions: dict[str, Position] = {}
     pending_sells: dict[str, ExitSignal] = {}
+    pending_trims: dict[str, tuple[int, str]] = {}  # ticker → (shares, rating note): an Underweight's partial sell
     pending_buys: dict[str, float] = {}             # ticker → target value (KRW)
     protections = Protections(risk) if risk else None
     peak = cfg.initial_cash
@@ -264,6 +273,18 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
                 for fired in protections.record(TradeOutcome(t, i, sig.reason, pnl)):
                     event(date, "protection", fired)
         pending_sells.clear()
+        for t, (qty, note) in pending_trims.items():
+            pos = positions.get(t)
+            px = float(opens.at[date, t]) * (1 - cfg.slippage)
+            if pos is None or math.isnan(px):     # as a sell above: no open, no fill
+                continue
+            cash += sell_proceeds(qty, px, cfg)
+            pos.quantity -= qty
+            pnl = px / pos.entry_price - 1
+            trades.append(Trade(t, dates[pos.entry_day].strftime("%Y-%m-%d"), date.strftime("%Y-%m-%d"), pos.entry_price,
+                                px, qty, "exit_signal", pnl, i - pos.entry_day, full=False))
+            event(date, "exit", f"{t} 부분 매도 {qty}주(남은 {pos.quantity}주) {pnl:+.1%}: {note}")
+        pending_trims.clear()
         for t, value in pending_buys.items():
             if t in positions or last_bar[t] < date:
                 continue
@@ -344,9 +365,16 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
             ranked.sort(key=lambda c: c.rank)
             ratings = {c.ticker: rating_for(c.rank, len(ranked)) for c in run.candidates}
             targets = [c.ticker for c in ranked if ratings[c.ticker] in ("Buy", "Overweight")]
-            for t in list(positions):
-                if ratings.get(t) in ("Sell", "Underweight") and t not in pending_sells:
-                    pending_sells[t] = ExitSignal(t, "exit_signal", f"등급 {ratings[t]}: 모멘텀 하위로 내려옴")
+            for t, pos in positions.items():
+                if ratings.get(t) not in ("Sell", "Underweight") or t in pending_sells:
+                    continue
+                note = f"등급 {ratings[t]}: 모멘텀 하위로 내려옴"
+                # the executor's Underweight: the fraction rounded down, at least one share; all of it is a full exit
+                qty = int(pos.quantity * cfg.underweight_sell_fraction + EPS) or pos.quantity
+                if ratings[t] == "Underweight" and qty < pos.quantity:
+                    pending_trims[t] = (qty, note)
+                else:
+                    pending_sells[t] = ExitSignal(t, "exit_signal", note)
             if risk is None:
                 weights = {t: 1.0 / len(targets) for t in targets} if targets else {}
                 overrides: list[str] = []
