@@ -8,7 +8,8 @@ the rules off, on, and on plus the regime filter, so the difference is the rules
 Mechanics (KRX): decisions are made at the close; fills happen at the *next* open, so gaps count
 against the stops. Sells pay transaction tax; both sides pay commission and slippage. Positions are
 whole shares. A Sell rating sells the whole position; an Underweight sells ``underweight_sell_fraction``
-of it, whole shares rounded down and at least one — the executor's rule (``execution._sell_size``).
+of it, whole shares rounded down and at least one — the executor's rule (``execution._sell_size``). Two backtest-only
+rules (docs/13, ``underweight_rule``) sell the whole position instead on some Underweights.
 """
 
 from __future__ import annotations
@@ -56,6 +57,20 @@ def rating_for(rank: int | None, n_ranked: int) -> str:
     return "Hold"
 
 
+UNDERWEIGHT_RULES = ("twice_full", "volatile_half")   # docs/13, backtest only: see SimConfig.underweight_rule
+VOLATILE_DAYS = 20               # "volatile_half": the index's 20-day volatility (std of daily returns) ...
+VOLATILE_TOP = 1 / 3             # ... in the top third of every value seen so far ...
+VOLATILE_HISTORY = 252           # ... once a year of them is there; before it, never volatile
+
+
+def volatile_days(idx: pd.Series) -> pd.Series:
+    """Per index day: was the market volatile as known at that day's open — the 20-day volatility of the returns up to
+    the day before, at or above the 2/3 quantile of all such values up to that day (the index's own past only)."""
+    s = idx.dropna()
+    vol = s.pct_change().rolling(VOLATILE_DAYS).std().shift(1)
+    return (vol >= vol.expanding(VOLATILE_HISTORY).quantile(1 - VOLATILE_TOP)).reindex(idx.index, fill_value=False)
+
+
 @dataclass
 class SimConfig:
     start: str
@@ -75,12 +90,18 @@ class SimConfig:
     # an Underweight's share of the position sold, the executor's (AUTO_EXECUTION). 1.0: the whole position, as every
     # backtest before 2026-11-23 sold it (docs/09 · 11 · 12 numbers)
     underweight_sell_fraction: float = AUTO_EXECUTION["underweight_sell_fraction"]
+    # docs/13, backtest only — when an Underweight sells the whole position instead of the fraction. None: never.
+    # "twice_full": the name was held and rated Underweight at the previous rebalance too. "volatile_half": the
+    # decision day is not volatile (``volatile_days``), so the fraction is sold only on volatile days
+    underweight_rule: str | None = None
 
     def __post_init__(self) -> None:
         if self.regime_release is not None and (self.regime_release not in REGIME_RELEASES or not self.regime_filter):
             raise ValueError(f"regime_release {self.regime_release!r}: one of {REGIME_RELEASES}, with regime_filter")
         if not 0 < self.underweight_sell_fraction <= 1:
             raise ValueError(f"underweight_sell_fraction {self.underweight_sell_fraction!r}: in (0, 1]")
+        if self.underweight_rule is not None and self.underweight_rule not in UNDERWEIGHT_RULES:
+            raise ValueError(f"underweight_rule {self.underweight_rule!r}: one of {UNDERWEIGHT_RULES} or None")
         mkt = MARKETS[self.market]
         if self.sell_tax is None:
             self.sell_tax = mkt["sell_tax"]
@@ -210,6 +231,7 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
     closes = _panel(frames, dates, "Close").ffill()
     opens = _panel(frames, dates, "Open").fillna(closes)
     universe = list(frames)
+    volatile = volatile_days(idx) if cfg.underweight_rule == "volatile_half" else None
     last_bar = {t: f.loc[f["Close"].notna(), "Date"].max() for t, f in frames.items()}
 
     def load(ticker, as_of, cache_dir=None, fill_gaps=True):
@@ -221,6 +243,7 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
     pending_sells: dict[str, ExitSignal] = {}
     pending_trims: dict[str, tuple[int, str]] = {}  # ticker → (shares, rating note): an Underweight's partial sell
     pending_buys: dict[str, float] = {}             # ticker → target value (KRW)
+    underweight_before: set[str] = set()            # held and rated Underweight at the previous rebalance
     protections = Protections(risk) if risk else None
     peak = cfg.initial_cash
     old_peak: float | None = None                   # set while recovering from a stop-out
@@ -370,11 +393,16 @@ def run_simulation(frames: dict[str, pd.DataFrame], index_frame: pd.DataFrame, c
                     continue
                 note = f"등급 {ratings[t]}: 모멘텀 하위로 내려옴"
                 # the executor's Underweight: the fraction rounded down, at least one share; all of it is a full exit
-                qty = int(pos.quantity * cfg.underweight_sell_fraction + EPS) or pos.quantity
+                fraction = cfg.underweight_sell_fraction
+                if (cfg.underweight_rule == "twice_full" and t in underweight_before
+                        or volatile is not None and not volatile[date]):
+                    fraction = 1.0
+                qty = int(pos.quantity * fraction + EPS) or pos.quantity
                 if ratings[t] == "Underweight" and qty < pos.quantity:
                     pending_trims[t] = (qty, note)
                 else:
                     pending_sells[t] = ExitSignal(t, "exit_signal", note)
+            underweight_before = {t for t in positions if ratings.get(t) == "Underweight"}
             if risk is None:
                 weights = {t: 1.0 / len(targets) for t in targets} if targets else {}
                 overrides: list[str] = []
