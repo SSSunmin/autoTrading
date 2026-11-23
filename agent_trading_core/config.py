@@ -113,8 +113,10 @@ AUTO_EXECUTION = {
     "kill_switch_reset": "admin",          # 재가동 권한
     "default_mode": "paper",               # auto | manual | paper
     # Underweight (a memo's 비중 축소, no target weight) sells this share of the holding, whole shares rounded down —
-    # one share held: that share. A sell review's Trim sells down to its trim_to_pct; Sell / Exit sell it all (docs/04)
-    "underweight_sell_fraction": 0.5,
+    # one share held: that share; the whole holding is the full sale a Sell places. A sell review's Trim sells down to
+    # its trim_to_pct; Sell / Exit sell it all (docs/04). 1.0 since 2026-11-23 (user decision on docs/13: the whole
+    # position beat half in most cells); 0.5 from 2026-11-16, kept a setting to be tuned again
+    "underweight_sell_fraction": 1.0,
     "by_market": {
         "KRX": {"auto_daily_order_cap": 100_000_000,   # 일일 주문 금액 상한 (원)
                 "auto_order_max": 30_000_000},         # 주문당 금액 상한 (원)

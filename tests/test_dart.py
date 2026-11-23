@@ -1,7 +1,7 @@
 """DART financials and filings in the LLM snapshot (agent_trading_core/dart.py, agent.fundamentals_section) with a fake
 OpenDART session and fixed answers: the corp-code table, point in time (a report, a correction or a filing received
 on or after the decision day is left out), the quarters (Q4 = annual − Q3 year to date) and PER · PBR by hand, the
-flag off leaving the request as it was (fm-v4, no DART call), the four failure kinds (and a refused key) as a
+flag off leaving the request as it was (fm-v6, no DART call), the four failure kinds (and a refused key) as a
 "재무 데이터 없음" section with the decision still asked and the reason in the run's notes, and the key in no
 exception, section, note, cache file or log. One test replays real answers kept under tests/fixtures/dart_005930/
 (005930, received 2026-11-16 — public filings, no key in them). No network."""
@@ -202,9 +202,9 @@ def test_quarters_debt_ratio_and_per_pbr_by_hand(tmp_path):
 
 @pytest.mark.unit
 def test_the_flag_off_leaves_the_prompt_and_asks_dart_nothing(tmp_path, monkeypatch):
-    assert dl.LLM["fundamentals"] is False and agent.prompt_version() == agent.PROMPT_VERSION == "fm-v4"
-    # fm-v4 is this exact system prompt: a change to it without a version bump turns this red
-    assert hashlib.sha256(agent.system_prompt().encode()).hexdigest() == FM_V4_SHA
+    assert dl.LLM["fundamentals"] is False and agent.prompt_version() == agent.PROMPT_VERSION == "fm-v6"
+    # fm-v6 is this exact system prompt: a change to it without a version bump turns this red
+    assert hashlib.sha256(agent.system_prompt().encode()).hexdigest() == FM_V6_SHA
     monkeypatch.setattr(dart, "DartClient", lambda *a, **k: pytest.fail("no DART client with the flag off"))
     assert agent.fundamentals_section("KRX", "111111.KS", DAY, 1.0, tmp_path) == (None, None)
     llm, market = Capture(), _market()
@@ -213,11 +213,22 @@ def test_the_flag_off_leaves_the_prompt_and_asks_dart_nothing(tmp_path, monkeypa
     assert r.status == "ok" and llm.requests and not any("재무" in n for n in r.notes)
     assert all(q["system"][0]["text"] == agent.SYSTEM_PROMPT for q in llm.requests)
     assert not any("재무 스냅샷" in q["messages"][0]["content"] for q in llm.requests)
-    assert any("fm-v4" in n for n in r.notes)
+    assert any("fm-v6" in n for n in r.notes)
 
 
-# sha256 of SYSTEM_PROMPT fm-v4 (fix/post-trial-core, 2026-11-23: the partial sells, Underweight 50%). fm-v1, the
-# 2026-11-16 trial's prompt (develop fcfca78), was 1c9e39e9e901c2c0afdd21f2edac626a13ca99623f7f0914da6f046697979cb7
+@pytest.mark.unit
+def test_the_prompt_at_half_is_fm_v4_word_for_word():
+    """The Underweight words follow the setting: with 0.5's words the system prompt is fm-v4's, byte for byte."""
+    now = "Underweight → 보유 중이면 " + agent.underweight_words(1.0)
+    assert agent.system_prompt().count(now) == 1
+    half = agent.system_prompt().replace(now, "Underweight → 보유 중이면 " + agent.underweight_words(0.5))
+    assert hashlib.sha256(half.encode()).hexdigest() == FM_V4_SHA
+
+
+# sha256 of SYSTEM_PROMPT fm-v6 (fix/uw-full, 2026-11-23: Underweight sells the whole holding, fraction 1.0). fm-v4
+# (fix/post-trial-core: the partial sells, Underweight 50%) was FM_V4_SHA; fm-v1, the 2026-11-16 trial's prompt
+# (develop fcfca78), was 1c9e39e9e901c2c0afdd21f2edac626a13ca99623f7f0914da6f046697979cb7
+FM_V6_SHA = "6c79341689fcf84beebc7fb0eef213086981a73f11e53c5b0d34a56d711d512b"
 FM_V4_SHA = "0418d9cb27675e7bd89916c5ef8b3c732a425b54de5b062b5c65704fcc884c02"
 
 
@@ -238,7 +249,7 @@ def test_the_flag_on_adds_the_dart_section_to_krx_under_fm_v5(tmp_path, monkeypa
     llm, market = Capture(), _market()
     market.today = "2026-08-04"
     r = dl.run_stage("KRX", "decide", "2026-08-04", tmp_path, market, at("2026-08-04", "15:40"), decider="llm", llm=llm)
-    assert r.status == "ok" and llm.requests and any("fm-v5" in n for n in r.notes)
+    assert r.status == "ok" and llm.requests and any("fm-v7" in n for n in r.notes)
     for q in llm.requests:
         text = q["messages"][0]["content"]
         assert q["system"][0]["text"] == agent.SYSTEM_PROMPT + agent.FUNDAMENTALS_PROMPT
@@ -246,7 +257,7 @@ def test_the_flag_on_adds_the_dart_section_to_krx_under_fm_v5(tmp_path, monkeypa
         assert "## 재무 스냅샷(DART)\n\n섹션 " in text and f"2026-08-04 종가 {float(close):g}" in text
         assert text.index("## 선별") < text.index("## 재무 스냅샷(DART)") < text.index("## 포트폴리오")
     d = market_audit_decisions(tmp_path)
-    assert all(x.settings["prompt_version"] == "fm-v5" for x in d)
+    assert all(x.settings["prompt_version"] == "fm-v7" for x in d)
     assert all(any(e.source == "fundamentals" and e.summary.startswith("요약 ") for e in x.evidence) for x in d)
     # the system prompt has no date or ticker: one cache prefix for every call
     assert not re.search(r"\d{4}-\d{2}-\d{2}|\d{6}\.K[SQ]", agent.FUNDAMENTALS_PROMPT)

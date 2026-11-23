@@ -87,8 +87,8 @@ class SimConfig:
     regime_filter: bool = False          # needs risk
     market: str = "KRX"                  # config.MARKETS key: sell tax, sell-side regulatory fees, benchmark name
     regime_release: str | None = None    # docs/12, needs regime_filter: risk.REGIME_RELEASES; None = the filter as is
-    # an Underweight's share of the position sold, the executor's (AUTO_EXECUTION). 1.0: the whole position, as every
-    # backtest before 2026-11-23 sold it (docs/09 · 11 · 12 numbers)
+    # an Underweight's share of the position sold, the executor's (AUTO_EXECUTION, 1.0 since 2026-11-23). 1.0: the
+    # whole position, as docs/09 · 11 · 12 measured it; 0.5 the executor's from 2026-11-16 to 11-23 (docs/13)
     underweight_sell_fraction: float = AUTO_EXECUTION["underweight_sell_fraction"]
     # docs/13, backtest only — when an Underweight sells the whole position instead of the fraction. None: never.
     # "twice_full": the name was held and rated Underweight at the previous rebalance too. "volatile_half": the

@@ -192,11 +192,13 @@ def test_a_memo_off_the_snapshot_close_and_a_hard_rule_reason_are_reviews():
 
 @pytest.mark.unit
 def test_the_system_prompt_tells_the_partial_sells_the_executor_makes():
-    """The share an Underweight sells comes from AUTO_EXECUTION (the executor's own value), never a number of its own;
-    no line says the executor sells everything on a Trim."""
+    """The share an Underweight sells comes from AUTO_EXECUTION (the executor's own value), never a number of its own:
+    at 1.0 (since 2026-11-23) the whole holding, no "100%"; at 0.5 the share (test_dart: fm-v4 word for word). No line
+    says the executor sells everything on a Trim."""
     from agent_trading_core.config import AUTO_EXECUTION
 
     line = next(x for x in agent.SYSTEM_PROMPT.splitlines() if "주문이 되는 방식" in x)
-    assert f"Underweight → 보유 중이면 보유 수량의 {AUTO_EXECUTION['underweight_sell_fraction']:.0%} 매도" in line
+    assert AUTO_EXECUTION["underweight_sell_fraction"] == 1.0
+    assert "Underweight → 보유 중이면 전량 매도. 매도 검토의" in line and "100%" not in line
     assert "Trim은 trim_to_pct 비중까지만 줄이는 부분 매도" in line and "Sell → 보유 중이면 전량 매도" in line
     assert "부분 매도를 하지 않" not in agent.system_prompt() and "Trim도 보유 전량" not in agent.system_prompt()
