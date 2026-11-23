@@ -11,7 +11,7 @@ import pytest
 
 from agent_trading_core.risk import RiskConfig
 from agent_trading_core.screening import ScreenConfig
-from agent_trading_core.simulate import SimConfig, metrics, run_simulation, window_metrics
+from agent_trading_core.simulate import SimConfig, metrics, run_simulation, volatile_days, window_metrics
 
 DATES = pd.bdate_range("2023-01-02", periods=700)
 START, END = "2025-01-02", DATES[-1].strftime("%Y-%m-%d")
@@ -251,3 +251,134 @@ def test_the_underweight_share_is_a_fraction_of_the_position():
     for bad in (0.0, -0.5, 1.5):
         with pytest.raises(ValueError, match="underweight_sell_fraction"):
             _cfg(underweight_sell_fraction=bad)
+    with pytest.raises(ValueError, match="underweight_rule"):
+        _cfg(underweight_rule="always")
+
+
+@pytest.mark.unit
+def test_no_underweight_rule_runs_as_before_the_option():
+    """underweight_rule None (the default) hashes to what develop 08a75e6 (before the option) gave at the default
+    fraction 0.5, rules off and on (measured 2026-11-23): docs/13's rules leave every other run as it was."""
+    for risk, n, digest in ((None, 12, "0407c3e270431eeb76789ea9081cf1ad6a70dd2547bfd49ba890280375fb09ef"),
+                            (RISK_TWO, 28, "9a490a9ad5f07879dd4e51f65e1b856f93448e62d02daef14427b2976231751e")):
+        r = run_simulation(_fading(), _index(), SimConfig(start="2025-01-02", end="2025-09-05", screen=SCREEN8,
+                                                          label="on" if risk else "off", risk=risk))
+        assert len(r.trades) == n and _digest(r) == digest
+
+
+@pytest.mark.unit
+def test_a_second_underweight_in_a_row_sells_the_rest():
+    """twice_full: FADE is Underweight at every rebalance — half at the first, the rest at the next one."""
+    r = run_simulation(_fading(), _index(), _cfg(screen=SCREEN8, label="u", underweight_rule="twice_full"))
+    fade = [t for t in r.trades if t.ticker == "FADE.KS"]
+    assert [t.full for t in fade] == [False, True]
+    held = fade[0].quantity + fade[1].quantity
+    assert fade[0].quantity == int(held * 0.5) and fade[1].quantity == held - fade[0].quantity
+    days = list(r.equity.index)
+    assert days.index(pd.Timestamp(fade[1].exit_date)) - days.index(pd.Timestamp(fade[0].exit_date)) == 5
+
+
+def _bumpy_index():
+    """The steady index with small daily noise and one stormy stretch (sessions 500-540: FADE's first
+    Underweights, 528 on, fall in it)."""
+    rng = np.random.default_rng(7)
+    noise = rng.normal(0, 0.002, len(DATES))
+    noise[500:540] = rng.normal(0, 0.03, 40)
+    f = _index()
+    f["Close"] = f["Open"] = f["Close"] * np.exp(np.cumsum(noise))
+    return f
+
+
+@pytest.mark.unit
+def test_volatile_days_read_only_the_index_up_to_the_day_before():
+    closes = _bumpy_index().set_index("Date")["Close"]
+    flags = volatile_days(closes)
+    assert not flags.iloc[:252 + 20].any()                        # a year of 20-day values first
+    assert flags.iloc[515:541].all()                              # the stormy stretch, once 15 days of it are seen
+    for k in (400, 510, 530, 650):
+        day = closes.index[k]
+        assert volatile_days(closes.iloc[:k + 1])[day] == flags[day]          # nothing after the day changes it
+        bent = closes.copy()
+        bent.iloc[k] *= 1.5                                       # the day's own close is not read either
+        assert volatile_days(bent)[day] == flags[day]
+
+
+@pytest.mark.unit
+def test_volatile_half_sells_the_fraction_on_volatile_days_only():
+    idx = _bumpy_index()
+    flags = volatile_days(idx.set_index("Date")["Close"])
+    r = run_simulation(_fading(), idx, _cfg(screen=SCREEN8, label="u", underweight_rule="volatile_half"))
+    fade = [t for t in r.trades if t.ticker == "FADE.KS"]
+    days = list(r.equity.index)
+    decided = [days[days.index(pd.Timestamp(t.exit_date)) - 1] for t in fade]      # the rebalance close before the fill
+    assert [not t.full for t in fade[:-1]] == [bool(flags[d]) for d in decided[:-1]]
+    assert not flags[decided[-1]] or fade[-1].quantity == 1       # the last sale: a calm day, or the last share
+    assert any(not t.full for t in fade) and fade[-1].full
+
+
+import uw_fraction_grid
+
+
+@pytest.mark.unit
+def test_the_regret_of_each_underweight_sale_is_the_close_n_sessions_after_the_open_it_sold_at():
+    """docs/13: every Underweight sale (the partial ones and the last share), against the open it filled at; the
+    decision day — the session before the fill — sets the volatile flag. A Sell rating's sale is not one."""
+    frames, idx = _fading(), _index()
+    r = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u"))
+    days = r.equity.index
+    flags = pd.Series([k % 2 == 0 for k in range(len(days))], index=days)
+    rows = uw_fraction_grid.regret(r, frames, 0.0005, flags)
+    fade = [t for t in r.trades if t.ticker == "FADE.KS"]
+    assert len(rows) == len(fade) == 12 and uw_fraction_grid.underweight_sales(r) == {(t.exit_date, "FADE.KS") for t in fade}
+    f = frames["FADE.KS"].set_index("Date")
+    for row in rows:
+        k = days.get_loc(pd.Timestamp(row["date"]))
+        assert row["sold"] == pytest.approx(f.at[days[k], "Open"])
+        assert row["after_5"] == pytest.approx(f.at[days[k + 5], "Close"]) and row["after_20"] == pytest.approx(f.at[days[k + 20], "Close"])
+        assert row["volatile"] == flags.iloc[k - 1]
+    late = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u", end="2025-03-31"))   # 2025-03-28: 1 session left
+    assert uw_fraction_grid.regret(late, frames, 0.0005, flags.loc[:"2025-03-31"])[-1]["after_5"] is None
+    sold = run_simulation(_paths(), idx, _cfg(label="off"))                                 # DOWN: rated Sell
+    assert all("등급 Underweight" in e["text"] for e in sold.events if e["kind"] == "exit"
+               if (e["date"], e["text"].split(" ", 1)[0]) in uw_fraction_grid.underweight_sales(sold))
+
+
+@pytest.mark.unit
+def test_the_regret_table_counts_rises_and_the_money_the_sold_shares_made_after():
+    rows = [{"quantity": 10, "sold": 100.0, "volatile": True, "after_5": 110.0, "after_20": 90.0},
+            {"quantity": 5, "sold": 200.0, "volatile": False, "after_5": 190.0, "after_20": None}]
+    t = uw_fraction_grid.regret_table(rows)
+    assert t["all"]["sales"] == 2 and t["all"]["5"]["rose"] == 0.5
+    assert t["all"]["5"]["mean_change"] == pytest.approx((0.10 - 0.05) / 2)
+    assert t["all"]["5"]["money"] == pytest.approx(10 * 10 - 5 * 10)
+    assert t["all"]["20"] == {"measured": 1, "rose": 0.0, "mean_change": pytest.approx(-0.1), "money": pytest.approx(-100)}
+    assert t["volatile"]["5"]["money"] == pytest.approx(100) and t["calm"]["20"]["rose"] is None
+
+
+@pytest.mark.unit
+def test_volatile_days_for_measuring_are_the_windows_top_third_and_sum_the_daily_returns():
+    idx = _bumpy_index()
+    days = idx.set_index("Date").loc[START:END].index
+    flags = uw_fraction_grid.eval_volatile(idx, days)
+    assert abs(flags.sum() - len(days) / 3) <= 1 and flags.loc[DATES[525]:DATES[555]].all()
+    calm = days[(~flags).to_numpy()][5]
+    bent = idx.copy()
+    bent.loc[bent["Date"] == calm, "Close"] *= 1.5                 # the day's own close is not read: known at its open
+    assert not uw_fraction_grid.eval_volatile(bent, days)[calm]
+    equity = pd.Series([100.0, 110.0, 99.0, 99.0], index=days[:4])
+    s = uw_fraction_grid.day_sums(equity, pd.Series([True, True, False, True], index=days[:4]))
+    assert s == {"volatile": pytest.approx(0.10 + 0.0), "calm": pytest.approx(-0.1), "volatile_days": 2, "calm_days": 1}
+
+
+@pytest.mark.unit
+def test_the_cause_table_follows_a_position_from_its_first_partial_sale_to_its_close():
+    frames, idx = _fading(), _index()
+    r = run_simulation(frames, idx, _cfg(screen=SCREEN8, label="u"))
+    fade = [t for t in r.trades if t.ticker == "FADE.KS"]
+    c = uw_fraction_grid.cause(r, frames, _cfg())
+    opens = [t.exit_price / (1 - 0.0005) for t in fade]
+    assert (c["underweight_sales"], c["partial_sales"], c["positions"], c["most_sales_of_one"], c["still_open_at_end"]) == (12, 11, 1, 12, 0)
+    assert c["mean_sessions_to_close"] == 55 and c["tail_exits"] == {"underweight": 1} and c["stoploss_guard_rebalances"] == 0
+    assert c["kept_shares_money"] == pytest.approx(sum(t.quantity * (o - opens[0]) for t, o in zip(fade[1:], opens[1:])))
+    assert c["sell_costs"] == pytest.approx(sum(t.quantity * o * (0.0005 + 0.00015 + 0.0020) for t, o in zip(fade, opens)),
+                                            rel=1e-3)
